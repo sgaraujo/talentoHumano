@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config:*)",
+      "Bash(git -C /mnt/c/Users/hp/nelyoda ls-files -- .env scripts/serviceAccount.json)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}
