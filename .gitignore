@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 scripts/serviceAccount.json
 scripts/*.json
+
+#Base de datos
+.env
