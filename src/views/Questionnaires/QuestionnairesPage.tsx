@@ -115,7 +115,7 @@ export const QuestionnairesPage = () => {
                     />
                 </div>
 
-                <Button variant="default" onClick={() => setCreateDialogOpen(true)}>
+                <Button className='bg-[#008C3C] hover:bg-[#006C2F] text-white' variant="default" onClick={() => setCreateDialogOpen(true)}>
                     <Plus className="w-4 h-4 mr-2" />
                     Nuevo Cuestionario
                 </Button>
