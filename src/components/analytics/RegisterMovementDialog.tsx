@@ -44,6 +44,7 @@ export const RegisterMovementDialog = ({
     date: new Date().toISOString().split('T')[0],
     reason: '',
     company: '',
+    project: '',
     sede: '',
     area: '',
     cost: '',
@@ -95,13 +96,14 @@ export const RegisterMovementDialog = ({
       userId: formData.userId,
       userName: selectedUser.fullName,
       userEmail: selectedUser.email,
-      date: new Date(formData.date),
+      date: (() => { const [y, m, d] = formData.date.split('-').map(Number); return new Date(y, m - 1, d); })(),
       createdBy: 'admin',
     };
 
     // Solo agregar campos opcionales si tienen valor
     if (formData.reason) movementData.reason = formData.reason;
     if (formData.company) movementData.company = formData.company;
+    if (formData.project) movementData.project = formData.project;
     if (formData.sede) movementData.sede = formData.sede;
     if (formData.area) movementData.area = formData.area;
     if (formData.cost) movementData.cost = parseFloat(formData.cost);
@@ -135,6 +137,7 @@ export const RegisterMovementDialog = ({
       date: new Date().toISOString().split('T')[0],
       reason: '',
       company: '',
+      project: '',
       sede: '',
       area: '',
       cost: '',
@@ -283,6 +286,17 @@ export const RegisterMovementDialog = ({
               value={formData.company}
               onChange={(e) => setFormData({ ...formData, company: e.target.value })}
               placeholder="Nombre de la empresa"
+            />
+          </div>
+
+          {/* Proyecto */}
+          <div className="space-y-2">
+            <Label htmlFor="project">Proyecto</Label>
+            <Input
+              id="project"
+              value={formData.project}
+              onChange={(e) => setFormData({ ...formData, project: e.target.value })}
+              placeholder="Nombre del proyecto"
             />
           </div>
 

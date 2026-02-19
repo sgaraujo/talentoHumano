@@ -51,6 +51,7 @@ export interface FilterOptions {
   mes?: number;
   año?: number;
   empresa?: string;
+  proyecto?: string;
   sede?: string;
   nivelJerarquico?: string;
   area?: string;
@@ -65,6 +66,7 @@ export interface MovementRecord {
   date: Date;
   reason?: string; // voluntario, involuntario
   company?: string;
+  project?: string;
   sede?: string;
   area?: string;
   cost?: number;

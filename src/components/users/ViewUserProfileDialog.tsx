@@ -34,10 +34,26 @@ interface ViewUserProfileDialogProps {
   userId: string | null;
 }
 
-export const ViewUserProfileDialog = ({ 
-  open, 
-  onOpenChange, 
-  userId 
+const formatDate = (date: any): string => {
+  if (!date) return 'No especificado';
+  let d: Date;
+  if (date.toDate && typeof date.toDate === 'function') {
+    d = date.toDate();
+  } else if (date instanceof Date) {
+    d = date;
+  } else if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date)) {
+    const [y, m, day] = date.split('-').map(Number);
+    d = new Date(y, m - 1, day);
+  } else {
+    d = new Date(date);
+  }
+  return isNaN(d.getTime()) ? 'No especificado' : d.toLocaleDateString();
+};
+
+export const ViewUserProfileDialog = ({
+  open,
+  onOpenChange,
+  userId
 }: ViewUserProfileDialogProps) => {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
@@ -145,7 +161,7 @@ export const ViewUserProfileDialog = ({
                         <p className="text-sm text-gray-500">Fecha de Registro</p>
                         <p className="font-medium flex items-center gap-2">
                           <Calendar className="w-4 h-4 text-gray-400" />
-                          {user.createdAt?.toDate?.().toLocaleDateString() || 'No disponible'}
+                          {formatDate(user.createdAt)}
                         </p>
                       </div>
                     </div>
@@ -197,9 +213,7 @@ export const ViewUserProfileDialog = ({
                         <div>
                           <p className="text-sm text-gray-500">Fecha de Nacimiento</p>
                           <p className="font-medium">
-                            {user.personalData.birthDate 
-                              ? new Date(user.personalData.birthDate).toLocaleDateString()
-                              : 'No especificado'}
+                            {formatDate(user.personalData.birthDate)}
                           </p>
                         </div>
                         <div>
@@ -503,16 +517,14 @@ export const ViewUserProfileDialog = ({
                               <div>
                                 <p className="text-sm text-gray-500">Fecha de Inicio</p>
                                 <p className="font-medium">
-                                  {user.contractInfo.contract.startDate 
-                                    ? new Date(user.contractInfo.contract.startDate).toLocaleDateString()
-                                    : 'No especificado'}
+                                  {formatDate(user.contractInfo.contract.startDate)}
                                 </p>
                               </div>
                               <div>
                                 <p className="text-sm text-gray-500">Fecha de Fin</p>
                                 <p className="font-medium">
-                                  {user.contractInfo.contract.endDate 
-                                    ? new Date(user.contractInfo.contract.endDate).toLocaleDateString()
+                                  {user.contractInfo.contract.endDate
+                                    ? formatDate(user.contractInfo.contract.endDate)
                                     : 'Indefinido'}
                                 </p>
                               </div>
@@ -570,6 +582,10 @@ export const ViewUserProfileDialog = ({
                                 <div>
                                   <p className="text-sm text-gray-500">Cargo</p>
                                   <p className="font-medium">{user.contractInfo.assignment.position || 'No especificado'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-500">Proyecto</p>
+                                  <p className="font-medium">{user.contractInfo.assignment.project || 'No especificado'}</p>
                                 </div>
                                 <div>
                                   <p className="text-sm text-gray-500">Jefe Directo</p>

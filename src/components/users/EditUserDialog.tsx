@@ -55,6 +55,8 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
     probationPeriod: '',
     baseSalary: '',
     position: '',
+    company: '',
+    project: '',
   });
 
   useEffect(() => {
@@ -88,6 +90,8 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
         probationPeriod: user.contractInfo?.contract?.probationPeriod || '',
         baseSalary: user.contractInfo?.workConditions?.baseSalary?.toString() || '',
         position: user.contractInfo?.assignment?.position || '',
+        company: user.contractInfo?.assignment?.company || '',
+        project: user.contractInfo?.assignment?.project || '',
       });
     }
   }, [user]);
@@ -119,6 +123,11 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
     return `${year}-${month}-${day}`;
   };
 
+  const parseLocalDate = (dateStr: string): Date => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
   const handleSubmit = async () => {
     if (!user) return;
 
@@ -147,7 +156,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
         updates['personalData.phone'] = formData.phone;
         
         if (formData.birthDate) {
-          updates['personalData.birthDate'] = new Date(formData.birthDate);
+          updates['personalData.birthDate'] = parseLocalDate(formData.birthDate);
         }
       }
 
@@ -161,10 +170,10 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
       // Contrato (solo para colaboradores)
       if (formData.role === 'colaborador') {
         if (formData.contractStartDate) {
-          updates['contractInfo.contract.startDate'] = new Date(formData.contractStartDate);
+          updates['contractInfo.contract.startDate'] = parseLocalDate(formData.contractStartDate);
         }
         if (formData.contractEndDate) {
-          updates['contractInfo.contract.endDate'] = new Date(formData.contractEndDate);
+          updates['contractInfo.contract.endDate'] = parseLocalDate(formData.contractEndDate);
         }
         if (formData.probationPeriod) {
           updates['contractInfo.contract.probationPeriod'] = formData.probationPeriod;
@@ -174,6 +183,12 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
         }
         if (formData.position) {
           updates['contractInfo.assignment.position'] = formData.position;
+        }
+        if (formData.company) {
+          updates['contractInfo.assignment.company'] = formData.company;
+        }
+        if (formData.project) {
+          updates['contractInfo.assignment.project'] = formData.project;
         }
       }
 
@@ -411,6 +426,26 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
                       value={formData.position}
                       onChange={(e) => setFormData({ ...formData, position: e.target.value })}
                       placeholder="Desarrollador Full Stack"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company">Empresa</Label>
+                    <Input
+                      id="company"
+                      value={formData.company}
+                      onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                      placeholder="Nombre de la empresa"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="project">Proyecto</Label>
+                    <Input
+                      id="project"
+                      value={formData.project}
+                      onChange={(e) => setFormData({ ...formData, project: e.target.value })}
+                      placeholder="Nombre del proyecto"
                     />
                   </div>
                 </>

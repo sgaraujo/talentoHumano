@@ -25,15 +25,19 @@ import {
 import { RegisterMovementDialog } from '@/components/analytics/RegisterMovementDialog';
 
 export const RotationPage = () => {
-  const { metrics, loading, refreshMetrics } = useAnalytics();
+  const { metrics, loading, refreshMetrics, filterOptions } = useAnalytics();
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
   const [selectedMonth, setSelectedMonth] = useState('all');
+  const [selectedEmpresa, setSelectedEmpresa] = useState('all');
+  const [selectedProyecto, setSelectedProyecto] = useState('all');
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 
   const handleFilterChange = () => {
     const filters = {
       año: parseInt(selectedYear),
       mes: selectedMonth === 'all' ? undefined : parseInt(selectedMonth),
+      empresa: selectedEmpresa === 'all' ? undefined : selectedEmpresa,
+      proyecto: selectedProyecto === 'all' ? undefined : selectedProyecto,
     };
     refreshMetrics(filters);
   };
@@ -114,7 +118,35 @@ export const RotationPage = () => {
             </SelectContent>
           </Select>
 
-          <Button 
+          <Select value={selectedEmpresa} onValueChange={setSelectedEmpresa}>
+            <SelectTrigger className="w-[160px] border-[#008C3C]/30 focus:ring-[#008C3C]">
+              <SelectValue placeholder="Empresa" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las empresas</SelectItem>
+              {filterOptions.empresas.map(empresa => (
+                <SelectItem key={empresa} value={empresa}>
+                  {empresa}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={selectedProyecto} onValueChange={setSelectedProyecto}>
+            <SelectTrigger className="w-[160px] border-[#008C3C]/30 focus:ring-[#008C3C]">
+              <SelectValue placeholder="Proyecto" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los proyectos</SelectItem>
+              {filterOptions.proyectos.map(proyecto => (
+                <SelectItem key={proyecto} value={proyecto}>
+                  {proyecto}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button
             onClick={handleFilterChange}
             variant="outline"
             className="border-[#008C3C] text-[#008C3C] hover:bg-[#008C3C] hover:text-white"

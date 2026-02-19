@@ -36,6 +36,7 @@ class AnalyticsService {
       // Solo agregar campos opcionales si tienen valor
       if (movement.reason) cleanMovement.reason = movement.reason;
       if (movement.company) cleanMovement.company = movement.company;
+      if (movement.project) cleanMovement.project = movement.project;
       if (movement.sede) cleanMovement.sede = movement.sede;
       if (movement.area) cleanMovement.area = movement.area;
       if (movement.cost !== undefined && movement.cost !== null) cleanMovement.cost = movement.cost;
@@ -88,6 +89,7 @@ class AnalyticsService {
 
         if (movement.reason) cleanMovement.reason = movement.reason;
         if (movement.company) cleanMovement.company = movement.company;
+        if (movement.project) cleanMovement.project = movement.project;
         if (movement.sede) cleanMovement.sede = movement.sede;
         if (movement.area) cleanMovement.area = movement.area;
         if (movement.cost !== undefined && movement.cost !== null) cleanMovement.cost = movement.cost;
@@ -130,15 +132,36 @@ class AnalyticsService {
       const { userService } = await import('./userService');
       const allUsers = await userService.getAll();
 
-      // Obtener movimientos
-      const movements = await this.getMovements();
+      // Obtener movimientos y aplicar filtros de empresa/proyecto
+      let movements = await this.getMovements();
+      if (filters?.empresa) {
+        const matchingUserIds = new Set(
+          allUsers.filter(u => u.contractInfo?.assignment?.company === filters.empresa).map(u => u.id)
+        );
+        movements = movements.filter(m =>
+          m.company === filters.empresa || matchingUserIds.has(m.userId)
+        );
+      }
+      if (filters?.proyecto) {
+        const matchingUserIds = new Set(
+          allUsers.filter(u => u.contractInfo?.assignment?.project === filters.proyecto).map(u => u.id)
+        );
+        movements = movements.filter(m =>
+          m.project === filters.proyecto || matchingUserIds.has(m.userId)
+        );
+      }
 
       const today = new Date();
       const currentYear = filters?.año || today.getFullYear();
       const currentMonth = filters?.mes !== undefined ? filters.mes : today.getMonth();
-
-      // Filtrar colaboradores actuales
-      const colaboradores = allUsers.filter(u => u.role === 'colaborador');
+      // Filtrar colaboradores actuales (también por empresa/proyecto si aplica)
+      let colaboradores = allUsers.filter(u => u.role === 'colaborador');
+      if (filters?.empresa) {
+        colaboradores = colaboradores.filter(u => u.contractInfo?.assignment?.company === filters.empresa);
+      }
+      if (filters?.proyecto) {
+        colaboradores = colaboradores.filter(u => u.contractInfo?.assignment?.project === filters.proyecto);
+      }
 
       // Calcular ingresos y retiros del periodo
       const ingresos = movements.filter(m => {
@@ -228,10 +251,14 @@ class AnalyticsService {
         ? Math.round((ingresos.length / retiros.length) * 100 * 100) / 100
         : 0;
 
-      // Calcular datos mensuales (últimos 12 meses)
+      // Calcular datos mensuales
+      // Si mes es "todos", mostrar ene-dic del año seleccionado
+      // Si hay mes específico, mostrar los últimos 12 meses hasta ese mes
       const monthlyData: MonthlyData[] = [];
+      const showFullYear = filters?.mes === undefined;
       for (let i = 11; i >= 0; i--) {
-        const date = new Date(currentYear, currentMonth - i, 1);
+        const refMonth = showFullYear ? 11 : currentMonth;
+        const date = new Date(currentYear, refMonth - i, 1);
         const month = date.getMonth();
         const year = date.getFullYear();
 
@@ -320,6 +347,34 @@ class AnalyticsService {
     } catch (error) {
       console.error('Error calculando métricas:', error);
       throw error;
+    }
+  }
+  // Obtener opciones únicas de empresa y proyecto desde usuarios y movements
+  async getFilterOptions(): Promise<{ empresas: string[]; proyectos: string[] }> {
+    try {
+      const { userService } = await import('./userService');
+      const allUsers = await userService.getAll();
+      const movements = await this.getMovements();
+
+      const empresasSet = new Set<string>();
+      const proyectosSet = new Set<string>();
+
+      allUsers.forEach(u => {
+        if (u.contractInfo?.assignment?.company) empresasSet.add(u.contractInfo.assignment.company);
+        if (u.contractInfo?.assignment?.project) proyectosSet.add(u.contractInfo.assignment.project);
+      });
+      movements.forEach(m => {
+        if (m.company) empresasSet.add(m.company);
+        if (m.project) proyectosSet.add(m.project);
+      });
+
+      return {
+        empresas: [...empresasSet].sort(),
+        proyectos: [...proyectosSet].sort(),
+      };
+    } catch (error) {
+      console.error('Error obteniendo opciones de filtro:', error);
+      return { empresas: [], proyectos: [] };
     }
   }
 }
