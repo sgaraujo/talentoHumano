@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "@/config/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +16,9 @@ export const LoginPage = () => {
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPasswordLogin, setShowPasswordLogin] = useState(false);
+  const [pwError, setPwError] = useState("");
 
   const { sendCode, verifyAndLogin, loading, error, isAuthenticated } = useAuth();
 
@@ -23,6 +28,16 @@ export const LoginPage = () => {
       navigate(redirectTo, { replace: true });
     }
   }, [isAuthenticated, navigate, redirectTo]);
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError("");
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (err: any) {
+      setPwError(err.message || "Credenciales incorrectas");
+    }
+  };
 
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +77,39 @@ export const LoginPage = () => {
             </div>
           )}
 
-          {step === "email" ? (
+          {showPasswordLogin ? (
+            <form onSubmit={handlePasswordLogin} className="space-y-4">
+              {pwError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-sm text-red-600">{pwError}</p>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="pw-email">Correo electrónico</Label>
+                <Input
+                  id="pw-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pw-password">Contraseña</Label>
+                <Input
+                  id="pw-password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full">Entrar</Button>
+              <Button type="button" variant="link" className="w-full" onClick={() => setShowPasswordLogin(false)}>
+                Volver al login con código
+              </Button>
+            </form>
+          ) : step === "email" ? (
             <form onSubmit={handleSendCode} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Correo electrónico</Label>
@@ -78,6 +125,9 @@ export const LoginPage = () => {
 
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Enviando..." : "Enviar código de verificación"}
+              </Button>
+              <Button type="button" variant="link" className="w-full text-xs text-muted-foreground" onClick={() => setShowPasswordLogin(true)}>
+                Iniciar sesión con contraseña
               </Button>
             </form>
           ) : (
