@@ -12,6 +12,7 @@ import { RotationPage } from './views/Analytics/RotationPage';
 import ChatWidget from './components/ia/ChatWidget';
 import UsersSearchPage from './views/Users/UsersSearchPage';
 import ExportQueueTable from './views/Exporter/ExporterPage';
+import { CompaniesPage } from './views/Companies/CompaniesPage';
 
 
 
@@ -138,6 +139,19 @@ function App() {
               <Navigate to="/login" />
             )
           } />
+
+        <Route
+          path="/empresas"
+          element={
+            isAuthenticated ? (
+              <MainLayout>
+                <CompaniesPage />
+              </MainLayout>
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
 
         <Route
           path="*"

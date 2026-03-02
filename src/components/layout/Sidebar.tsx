@@ -15,7 +15,8 @@ import {
   Search,
   Menu,
   X,
-  ChevronLeft
+  ChevronLeft,
+  Building2,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
@@ -42,6 +43,7 @@ export const Sidebar = () => {
 
   const menuItems = [
     { icon: Users, label: 'Usuarios', path: '/usuarios' },
+    { icon: Building2, label: 'Empresas', path: '/empresas' },
     { icon: FileText, label: 'Cuestionarios', path: '/questionarios' },
     { icon: Bell, label: 'Notificaciones', path: '/notificaciones' },
     { icon: TrendingUp, label: 'Rotacion y Talento', path: '/rotacion-talento' },
