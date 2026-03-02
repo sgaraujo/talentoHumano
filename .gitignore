@@ -27,3 +27,11 @@ scripts/*.json
 
 #Base de datos
 .env
+firebase-*.json
+
+# Archivos grandes
+*.xlsx
+*.csv
+
+# VS Code Local History (puede tener archivos sensibles)
+.history/

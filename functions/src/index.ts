@@ -55,7 +55,7 @@ function generateCode(): string {
  * Guarda el código en Firestore: email_verifications/{email}
  */
 export const sendVerificationCode = onCall(
-  { region: "us-central1", secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL] },
+  { region: "us-central1", cors: true, secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL] },
   async (request) => {
     const email = normalizeEmail(request.data?.email);
     if (!email) throw new HttpsError("invalid-argument", "email requerido");
@@ -120,7 +120,7 @@ export const sendVerificationCode = onCall(
  * - crea usuario Auth si no existe
  */
 export const verifyEmailCodeAndLogin = onCall(
-  { region: "us-central1" },
+  { region: "us-central1", cors: true },
   async (request) => {
     const email = normalizeEmail(request.data?.email);
     const code = String(request.data?.code || "").trim();
@@ -211,7 +211,7 @@ export const verifyEmailCodeAndLogin = onCall(
 export const sendAssignmentEmail = onCall(
   {
     region: "us-central1",
-    // ✅ aquí van los defineSecret, no strings
+    cors: true,
     secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
   },
   async (request) => {
@@ -269,7 +269,7 @@ export const sendAssignmentEmail = onCall(
  * Envía respuesta pública sin autenticación — el token identifica al usuario
  */
 export const submitPublicResponse = onCall(
-  { region: "us-central1" },
+  { region: "us-central1", cors: true },
   async (request) => {
     const token = String(request.data?.token || "").trim();
     const answers = request.data?.answers;
@@ -402,7 +402,7 @@ export const submitPublicResponse = onCall(
 );
 
 export const getPublicAssignment = onCall(
-  { region: "us-central1" },
+  { region: "us-central1", cors: true },
   async (request) => {
     const token = String(request.data?.token || "").trim();
     if (!token) throw new HttpsError("invalid-argument", "token requerido");
