@@ -13,6 +13,7 @@ import ChatWidget from './components/ia/ChatWidget';
 import UsersSearchPage from './views/Users/UsersSearchPage';
 import ExportQueueTable from './views/Exporter/ExporterPage';
 import { CompaniesPage } from './views/Companies/CompaniesPage';
+import { CompanyAnalyticsPage } from './views/Companies/CompanyAnalyticsPage';
 
 
 
@@ -146,6 +147,19 @@ function App() {
             isAuthenticated ? (
               <MainLayout>
                 <CompaniesPage />
+              </MainLayout>
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
+
+        <Route
+          path="/empresas/:companyId/analytics"
+          element={
+            isAuthenticated ? (
+              <MainLayout>
+                <CompanyAnalyticsPage />
               </MainLayout>
             ) : (
               <Navigate to="/login" />

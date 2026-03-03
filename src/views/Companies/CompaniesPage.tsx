@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { companyService } from '@/services/companyService';
+import { analyticsService } from '@/services/analyticsService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,38 +11,71 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import {
-  Building2, Plus, Pencil, Trash2, Users, Phone,
-  Mail, MapPin, Search, Loader2, X,
+  Building2, Plus, Pencil, Trash2, Phone,
+  Mail, MapPin, Search, Loader2, BarChart2,
+  Users, UserMinus, UserPlus, TrendingUp,
 } from 'lucide-react';
 import type { Company } from '@/models/types/Company';
+
+// ── Date helper (Firestore Timestamp safe) ──
+const toDate = (raw: any): Date | null => {
+  if (!raw) return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+  if (typeof raw.toDate === 'function') return raw.toDate();
+  if (typeof raw.seconds === 'number') return new Date(raw.seconds * 1000);
+  if (typeof raw === 'string' && raw.trim()) return new Date(raw);
+  return null;
+};
 
 const EMPTY: Omit<Company, 'id' | 'createdAt' | 'updatedAt'> = {
   name: '', nit: '', address: '', phone: '', email: '',
   logo: '', regional: '', baseDeOperacion: '', active: true,
 };
 
+const MONTH_NAMES = [
+  'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
+];
+
+interface CompanyStats {
+  activos: number;
+  retirados: number;          // excolaboradores totales
+  retiradosMes: number;       // retiros del mes actual (movements)
+  ingresosMes: number;        // ingresos del mes actual (movements)
+  rotacionMes: number;        // % rotación del mes
+}
+
 export const CompaniesPage = () => {
+  const navigate = useNavigate();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
+  // Stats data
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [allMovements, setAllMovements] = useState<any[]>([]);
+
   // Dialogs
   const [formOpen, setFormOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selected, setSelected] = useState<Company | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
 
-  // Profile employees
-  const [employees, setEmployees] = useState<any[]>([]);
-  const [loadingEmployees, setLoadingEmployees] = useState(false);
-
   const load = async () => {
     setLoading(true);
     try {
-      const data = await companyService.getAll();
+      const [data, movs] = await Promise.all([
+        companyService.getAll(),
+        analyticsService.getMovements(),
+      ]);
       setCompanies(data);
+      setAllMovements(movs);
+
+      // Load users via userService
+      const { userService } = await import('@/services/userService');
+      const users = await userService.getAll();
+      setAllUsers(users);
     } finally {
       setLoading(false);
     }
@@ -48,16 +83,44 @@ export const CompaniesPage = () => {
 
   useEffect(() => { load(); }, []);
 
+  // Pre-compute stats per company name
+  const statsMap = useMemo<Record<string, CompanyStats>>(() => {
+    const now = new Date();
+    const curMonth = now.getMonth();
+    const curYear = now.getFullYear();
+    const map: Record<string, CompanyStats> = {};
+
+    companies.forEach(c => {
+      const compUsers = allUsers.filter(u => u.contractInfo?.assignment?.company === c.name);
+      const activos = compUsers.filter(u => u.role === 'colaborador').length;
+      const retirados = compUsers.filter(u => u.role === 'excolaborador').length;
+
+      const compMovs = allMovements.filter(m => m.company === c.name);
+      const retiradosMes = compMovs.filter(m => {
+        const d = toDate(m.date);
+        return m.type === 'retiro' && d && d.getMonth() === curMonth && d.getFullYear() === curYear;
+      }).length;
+      const ingresosMes = compMovs.filter(m => {
+        const d = toDate(m.date);
+        return m.type === 'ingreso' && d && d.getMonth() === curMonth && d.getFullYear() === curYear;
+      }).length;
+
+      const rotacionMes = activos > 0
+        ? Math.round((retiradosMes / activos) * 1000) / 10
+        : 0;
+
+      map[c.name] = { activos, retirados, retiradosMes, ingresosMes, rotacionMes };
+    });
+
+    return map;
+  }, [companies, allUsers, allMovements]);
+
   const filtered = companies.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.nit?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const openCreate = () => {
-    setSelected(null);
-    setForm(EMPTY);
-    setFormOpen(true);
-  };
+  const openCreate = () => { setSelected(null); setForm(EMPTY); setFormOpen(true); };
 
   const openEdit = (c: Company) => {
     setSelected(c);
@@ -70,37 +133,17 @@ export const CompaniesPage = () => {
     setFormOpen(true);
   };
 
-  const openProfile = async (c: Company) => {
-    setSelected(c);
-    setProfileOpen(true);
-    setLoadingEmployees(true);
-    try {
-      const emps = await companyService.getUsersByCompany(c.name);
-      setEmployees(emps);
-    } finally {
-      setLoadingEmployees(false);
-    }
-  };
-
-  const openDelete = (c: Company) => {
-    setSelected(c);
-    setDeleteOpen(true);
-  };
+  const openDelete = (c: Company) => { setSelected(c); setDeleteOpen(true); };
 
   const handleSave = async () => {
     if (!form.name || !form.nit) return;
     setSaving(true);
     try {
-      if (selected) {
-        await companyService.update(selected.id, form);
-      } else {
-        await companyService.create(form);
-      }
+      if (selected) { await companyService.update(selected.id, form); }
+      else { await companyService.create(form); }
       setFormOpen(false);
       load();
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handleDelete = async () => {
@@ -110,11 +153,11 @@ export const CompaniesPage = () => {
     load();
   };
 
-  const activeEmployees = employees.filter((e: any) => e.role === 'colaborador');
-  const retiredEmployees = employees.filter((e: any) => e.role === 'excolaborador');
+  const mesActual = MONTH_NAMES[new Date().getMonth()];
 
   return (
     <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -137,7 +180,7 @@ export const CompaniesPage = () => {
         />
       </div>
 
-      {/* Stats */}
+      {/* Stats globales */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
         <Card className="border-l-4 border-l-[#008C3C]">
           <CardContent className="pt-4 pb-3">
@@ -174,75 +217,140 @@ export const CompaniesPage = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(c => (
-            <Card key={c.id} className="hover:shadow-md transition-shadow cursor-pointer group">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
-                      {c.logo ? (
-                        <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain rounded" />
-                      ) : (
-                        <Building2 className="w-5 h-5 text-[#008C3C]" />
-                      )}
+          {filtered.map(c => {
+            const s = statsMap[c.name] ?? { activos: 0, retirados: 0, retiradosMes: 0, ingresosMes: 0, rotacionMes: 0 };
+            return (
+              <Card key={c.id} className="hover:shadow-md transition-shadow group flex flex-col">
+                {/* ── Cabecera ── */}
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
+                        {c.logo
+                          ? <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain rounded" />
+                          : <Building2 className="w-5 h-5 text-[#008C3C]" />
+                        }
+                      </div>
+                      <div>
+                        <CardTitle className="text-sm font-semibold text-[#4A4A4A] leading-tight">
+                          {c.name}
+                        </CardTitle>
+                        <p className="text-xs text-gray-500">NIT: {c.nit}</p>
+                      </div>
                     </div>
-                    <div>
-                      <CardTitle className="text-sm font-semibold text-[#4A4A4A] leading-tight">
-                        {c.name}
-                      </CardTitle>
-                      <p className="text-xs text-gray-500">NIT: {c.nit}</p>
+                    <Badge
+                      variant={c.active ? 'default' : 'secondary'}
+                      className={c.active ? 'bg-green-100 text-green-700 text-xs' : 'text-xs'}
+                    >
+                      {c.active ? 'Activa' : 'Inactiva'}
+                    </Badge>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="flex-1 flex flex-col gap-3">
+                  {/* Info de contacto */}
+                  <div className="space-y-1">
+                    {c.address && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                        <span className="truncate text-xs text-gray-600">{c.address}</span>
+                      </div>
+                    )}
+                    {c.phone && (
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                        <span className="text-xs text-gray-600">{c.phone}</span>
+                      </div>
+                    )}
+                    {c.email && (
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                        <span className="truncate text-xs text-gray-600">{c.email}</span>
+                      </div>
+                    )}
+                    {c.regional && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-[#008C3C] flex-shrink-0" />
+                        <span className="text-xs text-[#008C3C]">{c.regional}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Mini analytics del mes ── */}
+                  <div className="rounded-lg border border-gray-100 bg-gray-50 p-2.5 space-y-2">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                      Rotación · {mesActual}
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Headcount */}
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-6 h-6 rounded-md bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
+                          <Users className="w-3.5 h-3.5 text-[#008C3C]" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-[#008C3C] leading-none">{s.activos}</p>
+                          <p className="text-[10px] text-gray-400">Activos</p>
+                        </div>
+                      </div>
+
+                      {/* % Rotación mes */}
+                      <div className="flex items-center gap-1.5">
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${s.rotacionMes > 5 ? 'bg-red-100' : 'bg-blue-50'}`}>
+                          <TrendingUp className={`w-3.5 h-3.5 ${s.rotacionMes > 5 ? 'text-red-500' : 'text-[#1F8FBF]'}`} />
+                        </div>
+                        <div>
+                          <p className={`text-sm font-bold leading-none ${s.rotacionMes > 5 ? 'text-red-500' : 'text-[#1F8FBF]'}`}>
+                            {s.rotacionMes}%
+                          </p>
+                          <p className="text-[10px] text-gray-400">Rotación</p>
+                        </div>
+                      </div>
+
+                      {/* Retiros del mes */}
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-6 h-6 rounded-md bg-red-50 flex items-center justify-center flex-shrink-0">
+                          <UserMinus className="w-3.5 h-3.5 text-red-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-red-500 leading-none">{s.retiradosMes}</p>
+                          <p className="text-[10px] text-gray-400">Retiros mes</p>
+                        </div>
+                      </div>
+
+                      {/* Ingresos del mes */}
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-6 h-6 rounded-md bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                          <UserPlus className="w-3.5 h-3.5 text-emerald-600" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-emerald-600 leading-none">{s.ingresosMes}</p>
+                          <p className="text-[10px] text-gray-400">Ingresos mes</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <Badge variant={c.active ? 'default' : 'secondary'}
-                    className={c.active ? 'bg-green-100 text-green-700 text-xs' : 'text-xs'}>
-                    {c.active ? 'Activa' : 'Inactiva'}
-                  </Badge>
-                </div>
-              </CardHeader>
 
-              <CardContent className="space-y-1.5 text-sm text-gray-600">
-                {c.address && (
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                    <span className="truncate text-xs">{c.address}</span>
+                  {/* Botones */}
+                  <div className="flex gap-2 pt-1 mt-auto">
+                    <Button
+                      size="sm"
+                      className="flex-1 text-xs bg-[#008C3C] hover:bg-[#006C2F] text-white"
+                      onClick={() => navigate(`/empresas/${c.id}/analytics`)}
+                    >
+                      <BarChart2 className="w-3.5 h-3.5 mr-1" /> Ver Analytics
+                    </Button>
+                    <Button size="sm" variant="outline" className="text-xs" onClick={() => openEdit(c)}>
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button size="sm" variant="outline" className="text-xs text-red-500 hover:bg-red-50 border-red-200" onClick={() => openDelete(c)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
-                )}
-                {c.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                    <span className="text-xs">{c.phone}</span>
-                  </div>
-                )}
-                {c.email && (
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                    <span className="truncate text-xs">{c.email}</span>
-                  </div>
-                )}
-                {c.regional && (
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-[#008C3C] flex-shrink-0" />
-                    <span className="text-xs text-[#008C3C]">{c.regional}</span>
-                  </div>
-                )}
-
-                <div className="flex gap-2 pt-3">
-                  <Button size="sm" variant="outline" className="flex-1 text-xs border-[#008C3C] text-[#008C3C] hover:bg-[#008C3C] hover:text-white"
-                    onClick={() => openProfile(c)}>
-                    <Users className="w-3.5 h-3.5 mr-1" /> Ver perfil
-                  </Button>
-                  <Button size="sm" variant="outline" className="text-xs"
-                    onClick={() => openEdit(c)}>
-                    <Pencil className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button size="sm" variant="outline" className="text-xs text-red-500 hover:bg-red-50 border-red-200"
-                    onClick={() => openDelete(c)}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -293,125 +401,6 @@ export const CompaniesPage = () => {
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (selected ? 'Guardar cambios' : 'Crear empresa')}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Dialog: Perfil de empresa ── */}
-      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          {selected && (
-            <>
-              <DialogHeader>
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-xl bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
-                    {selected.logo ? (
-                      <img src={selected.logo} alt={selected.name} className="w-10 h-10 object-contain rounded-lg" />
-                    ) : (
-                      <Building2 className="w-7 h-7 text-[#008C3C]" />
-                    )}
-                  </div>
-                  <div>
-                    <DialogTitle className="text-xl">{selected.name}</DialogTitle>
-                    <p className="text-sm text-gray-500">NIT: {selected.nit}</p>
-                    <Badge className={selected.active ? 'bg-green-100 text-green-700 mt-1' : 'mt-1'}>
-                      {selected.active ? 'Activa' : 'Inactiva'}
-                    </Badge>
-                  </div>
-                </div>
-              </DialogHeader>
-
-              {/* Info de la empresa */}
-              <div className="grid grid-cols-2 gap-3 my-2">
-                {selected.address && (
-                  <div className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg">
-                    <MapPin className="w-4 h-4 text-[#008C3C] mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500">Dirección</p>
-                      <p className="text-sm font-medium">{selected.address}</p>
-                    </div>
-                  </div>
-                )}
-                {selected.phone && (
-                  <div className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg">
-                    <Phone className="w-4 h-4 text-[#008C3C] mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500">Teléfono</p>
-                      <p className="text-sm font-medium">{selected.phone}</p>
-                    </div>
-                  </div>
-                )}
-                {selected.email && (
-                  <div className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg">
-                    <Mail className="w-4 h-4 text-[#008C3C] mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500">Email</p>
-                      <p className="text-sm font-medium">{selected.email}</p>
-                    </div>
-                  </div>
-                )}
-                {selected.regional && (
-                  <div className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg">
-                    <MapPin className="w-4 h-4 text-[#1F8FBF] mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500">Regional</p>
-                      <p className="text-sm font-medium">{selected.regional}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Stats de empleados */}
-              <div className="grid grid-cols-3 gap-3 my-2">
-                <div className="text-center p-3 bg-[#008C3C]/5 rounded-lg border border-[#008C3C]/20">
-                  <p className="text-2xl font-bold text-[#008C3C]">
-                    {loadingEmployees ? '...' : employees.length}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">Total colaboradores</p>
-                </div>
-                <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-2xl font-bold text-blue-600">
-                    {loadingEmployees ? '...' : activeEmployees.length}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">Activos</p>
-                </div>
-                <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
-                  <p className="text-2xl font-bold text-red-600">
-                    {loadingEmployees ? '...' : retiredEmployees.length}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">Retirados</p>
-                </div>
-              </div>
-
-              {/* Lista de empleados activos */}
-              <div>
-                <h3 className="text-sm font-semibold text-[#4A4A4A] mb-2 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-[#008C3C]" />
-                  Colaboradores activos ({activeEmployees.length})
-                </h3>
-                {loadingEmployees ? (
-                  <div className="flex justify-center py-6">
-                    <Loader2 className="w-6 h-6 animate-spin text-[#008C3C]" />
-                  </div>
-                ) : activeEmployees.length === 0 ? (
-                  <p className="text-sm text-gray-400 py-4 text-center">Sin colaboradores activos registrados</p>
-                ) : (
-                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                    {activeEmployees.map((emp: any) => (
-                      <div key={emp.id} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                        <div>
-                          <p className="text-sm font-medium text-[#4A4A4A]">{emp.fullName || emp.email}</p>
-                          <p className="text-xs text-gray-500">{emp.contractInfo?.assignment?.position || emp.personalData?.position || '—'}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs text-gray-500">{emp.contractInfo?.assignment?.project || '—'}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
         </DialogContent>
       </Dialog>
 

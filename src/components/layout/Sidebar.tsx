@@ -17,6 +17,7 @@ import {
   X,
   ChevronLeft,
   Building2,
+  LayoutDashboard,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
@@ -42,6 +43,7 @@ export const Sidebar = () => {
   }, []);
 
   const menuItems = [
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     { icon: Users, label: 'Usuarios', path: '/usuarios' },
     { icon: Building2, label: 'Empresas', path: '/empresas' },
     { icon: FileText, label: 'Cuestionarios', path: '/questionarios' },
