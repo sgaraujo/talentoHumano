@@ -17,7 +17,8 @@ import {
     Trash2,
     ToggleLeft,
     ToggleRight,
-    Send
+    Send,
+    Download,
 } from 'lucide-react';
 import { CreateQuestionnaireDialog } from '@/components/questionnaires/CreateQuestionnaireDialog';
 import { ViewQuestionnaireDialog } from '@/components/questionnaires/ViewQuestionnaireDialog';
@@ -29,6 +30,7 @@ import type { Questionnaire } from '@/models/types/Questionnaire';
 
 export const QuestionnairesPage = () => {
     const [searchTerm, setSearchTerm] = useState('');
+    const [seedingTemplates, setSeedingTemplates] = useState(false);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [viewDialogOpen, setViewDialogOpen] = useState(false);
     const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -92,6 +94,43 @@ export const QuestionnairesPage = () => {
         }
     };
 
+    const handleSeedTemplates = async () => {
+        setSeedingTemplates(true);
+        try {
+            const { ONBOARDING_TEMPLATES } = await import('@/data/onboardingTemplates');
+            const { questionnaireService } = await import('@/services/questionnaireService');
+            const { auth } = await import('@/config/firebase');
+
+            const existingTitles = new Set(questionnaires.map((q: any) => q.title));
+            const toCreate = ONBOARDING_TEMPLATES.filter(t => !existingTitles.has(t.title));
+
+            if (toCreate.length === 0) {
+                toast.info('Las plantillas ya existen', {
+                    description: 'Todos los cuestionarios de onboarding ya están creados.',
+                });
+                return;
+            }
+
+            for (const template of toCreate) {
+                await questionnaireService.create({
+                    ...template,
+                    createdBy: auth.currentUser?.uid || '',
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                });
+            }
+
+            toast.success(`${toCreate.length} cuestionarios creados`, {
+                description: toCreate.map(t => t.title).join(', '),
+            });
+            refreshQuestionnaires();
+        } catch (error: any) {
+            toast.error('Error al cargar plantillas', { description: error.message });
+        } finally {
+            setSeedingTemplates(false);
+        }
+    };
+
     const filteredQuestionnaires = questionnaires.filter((q: any) =>
         q.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         q.description?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -114,6 +153,19 @@ export const QuestionnairesPage = () => {
                         className="pl-10"
                     />
                 </div>
+
+                <Button
+                    variant="outline"
+                    onClick={handleSeedTemplates}
+                    disabled={seedingTemplates}
+                    title="Carga los 9 cuestionarios de onboarding predeterminados"
+                >
+                    {seedingTemplates
+                        ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        : <Download className="w-4 h-4 mr-2" />
+                    }
+                    Cargar plantillas
+                </Button>
 
                 <Button className='bg-[#008C3C] hover:bg-[#006C2F] text-white' variant="default" onClick={() => setCreateDialogOpen(true)}>
                     <Plus className="w-4 h-4 mr-2" />

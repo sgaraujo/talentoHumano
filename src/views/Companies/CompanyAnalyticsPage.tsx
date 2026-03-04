@@ -138,6 +138,7 @@ export const CompanyAnalyticsPage = () => {
   const [activosProject, setActivosProject] = useState('todos');
   const [activosGender, setActivosGender] = useState('todos');
   const [activosArea, setActivosArea] = useState('todos');
+  const [activosSort, setActivosSort] = useState<'ninguno' | 'mas-antiguo' | 'mas-nuevo'>('ninguno');
   const [activosPage, setActivosPage] = useState(1);
 
   useEffect(() => {
@@ -167,7 +168,7 @@ export const CompanyAnalyticsPage = () => {
 
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [filterYears, filterGender, filterTipo, retiradosSearch]);
-  useEffect(() => { setActivosPage(1); }, [activosSearch, activosProject, activosGender, activosArea]);
+  useEffect(() => { setActivosPage(1); }, [activosSearch, activosProject, activosGender, activosArea, activosSort]);
 
   // KPI cards: retirados del año actual (independiente de los filtros)
   const retiradosEsteAnio = useMemo(() =>
@@ -261,17 +262,25 @@ export const CompanyAnalyticsPage = () => {
     return [...set].sort();
   }, [activos]);
 
-  // Filtered activos
+  // Filtered + sorted activos
   const filteredActivos = useMemo(() => {
     const q = activosSearch.toLowerCase().trim();
-    return activos.filter(e => {
+    const filtered = activos.filter(e => {
       if (q && !(e.fullName || e.email || '').toLowerCase().includes(q)) return false;
       if (activosProject !== 'todos' && e.contractInfo?.assignment?.project !== activosProject) return false;
       if (activosGender !== 'todos' && normalizeGender(e.personalData?.gender) !== activosGender) return false;
       if (activosArea !== 'todos' && e.contractInfo?.assignment?.area !== activosArea) return false;
       return true;
     });
-  }, [activos, activosSearch, activosProject, activosGender, activosArea]);
+
+    if (activosSort === 'ninguno') return filtered;
+
+    return [...filtered].sort((a, b) => {
+      const dateA = toDate(a.contractInfo?.contract?.startDate)?.getTime() ?? 0;
+      const dateB = toDate(b.contractInfo?.contract?.startDate)?.getTime() ?? 0;
+      return activosSort === 'mas-antiguo' ? dateA - dateB : dateB - dateA;
+    });
+  }, [activos, activosSearch, activosProject, activosGender, activosArea, activosSort]);
 
   // Retirados after applying name search (on top of existing filters)
   const retiradosFiltrados = useMemo(() => {
@@ -878,13 +887,25 @@ export const CompanyAnalyticsPage = () => {
                 </SelectContent>
               </Select>
 
+              {/* Ordenar por antigüedad */}
+              <Select value={activosSort} onValueChange={v => setActivosSort(v as typeof activosSort)}>
+                <SelectTrigger className="w-[160px] h-8 text-xs border-[#008C3C]/30">
+                  <SelectValue placeholder="Ordenar por" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ninguno">Sin ordenar</SelectItem>
+                  <SelectItem value="mas-antiguo">Más antiguo primero</SelectItem>
+                  <SelectItem value="mas-nuevo">Más nuevo primero</SelectItem>
+                </SelectContent>
+              </Select>
+
               {/* Limpiar filtros */}
-              {(activosSearch || activosProject !== 'todos' || activosGender !== 'todos' || activosArea !== 'todos') && (
+              {(activosSearch || activosProject !== 'todos' || activosGender !== 'todos' || activosArea !== 'todos' || activosSort !== 'ninguno') && (
                 <Button
                   size="sm"
                   variant="ghost"
                   className="h-8 text-xs text-gray-500"
-                  onClick={() => { setActivosSearch(''); setActivosProject('todos'); setActivosGender('todos'); setActivosArea('todos'); }}
+                  onClick={() => { setActivosSearch(''); setActivosProject('todos'); setActivosGender('todos'); setActivosArea('todos'); setActivosSort('ninguno'); }}
                 >
                   Limpiar
                 </Button>

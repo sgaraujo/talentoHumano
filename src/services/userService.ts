@@ -147,6 +147,24 @@ class UserService {
     }
   }
 
+  async createUser(userData: Pick<User, 'email' | 'fullName' | 'role'>): Promise<string> {
+    try {
+      const docRef = await addDoc(collection(db, this.collectionName), {
+        email: userData.email,
+        fullName: userData.fullName,
+        role: userData.role,
+        profileCompleted: false,
+        completedOnboardings: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return docRef.id;
+    } catch (error) {
+      console.error("Error creating user:", error);
+      throw error;
+    }
+  }
+
   async getStats() {
     try {
       const users = await this.getAll();
