@@ -162,7 +162,7 @@ const perfilProfesional: Template = {
 // ─────────────────────────────────────────────
 const SE = 'se';
 const datosSocioeconomicos: Template = {
-  title: 'Datos Socioeconómicos',
+  title: 'Datos Sociodemográficos',
   description: 'Estrato, tiempo de desplazamiento y características sociodemográficas.',
   targetRole: 'all',
   active: true,

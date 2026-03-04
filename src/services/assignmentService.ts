@@ -107,7 +107,7 @@ const token = this.generateToken();
           emailStatus: "sent", // asumimos sent y si falla actualizamos
         });
 
-        // Enviar correo vía callable
+        // Enviar correo
         try {
           await sendAssignmentEmail({
             to: user.email,
@@ -135,34 +135,6 @@ const token = this.generateToken();
           });
         }
 
-
-        // Enviar correo vía Outlook (Cloud Function)
-        try {
-          await sendAssignmentEmail({
-            to: user.email,
-            userName: user.fullName,
-            questionnaireTitle,
-            link,
-          });
-
-          await updateDoc(doc(db, this.collectionName, docRef.id), {
-            emailStatus: "sent",
-            lastEmailSentAt: new Date(),
-          });
-
-          results.success.push(user.email);
-        } catch (e: any) {
-          await updateDoc(doc(db, this.collectionName, docRef.id), {
-            emailStatus: "failed",
-            emailError: e?.message || String(e),
-          });
-
-          results.errors.push({
-            email: user.email,
-            error: e?.message || String(e),
-          });
-        }
-
       } catch (error) {
         console.error("Error asignando cuestionario a usuario:", error);
         throw error;
@@ -170,6 +142,62 @@ const token = this.generateToken();
     }
 
     return results;
+  }
+
+  /**
+   * Crea asignaciones para múltiples cuestionarios y envía UN solo correo con todos los links.
+   */
+  async assignBatchToUser(
+    questionnaires: Array<{ id: string; title: string }>,
+    user: { id: string; email: string; fullName: string },
+    allowMultipleCompletions: boolean = false
+  ): Promise<{ created: number; skipped: number; emailSent: boolean }> {
+    const baseUrl = import.meta.env.VITE_APP_URL ?? window.location.origin;
+    const sendBatchEmail = httpsCallable(functions, "sendBatchAssignmentEmail");
+
+    const toSend: Array<{ title: string; link: string }> = [];
+    let created = 0;
+    let skipped = 0;
+
+    for (const q of questionnaires) {
+      const existing = await this.getAssignmentByEmailAndQuestionnaire(
+        user.email.toLowerCase(), q.id
+      );
+
+      if (existing) {
+        if (existing.status === "completed" && !allowMultipleCompletions) { skipped++; continue; }
+        if (existing.status === "pending") { skipped++; continue; }
+      }
+
+      const token = this.generateToken();
+      const link  = `${baseUrl}/responder/${token}`;
+
+      await addDoc(collection(db, this.collectionName), {
+        questionnaireId: q.id,
+        userId:    user.id,
+        userEmail: user.email,
+        userName:  user.fullName,
+        status:    "pending",
+        assignedAt: new Date(),
+        token,
+        emailStatus: "pending",
+      });
+
+      toSend.push({ title: q.title, link });
+      created++;
+    }
+
+    let emailSent = false;
+    if (toSend.length > 0) {
+      try {
+        await sendBatchEmail({ to: user.email, userName: user.fullName, questionnaires: toSend });
+        emailSent = true;
+      } catch (err) {
+        console.warn("Batch assignment email failed:", err);
+      }
+    }
+
+    return { created, skipped, emailSent };
   }
 
   async getAssignmentByToken(token: string): Promise<Assignment | null> {

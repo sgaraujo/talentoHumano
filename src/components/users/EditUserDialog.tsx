@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -6,7 +6,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,192 +17,234 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '@/services/userService';
+import { companyService } from '@/services/companyService';
 import type { User, UserRole } from '@/models/types/User';
 
-interface EditUserDialogProps {
+// ─── helpers ─────────────────────────────────────────────────────────────────
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1.5">
+      <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function ComboInput({
+  value, onChange, options, placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!value) return options;
+    const q = value.toLowerCase();
+    return options.filter(o => o.toLowerCase().includes(q) && o !== value);
+  }, [options, value]);
+
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto">
+          {filtered.map(opt => (
+            <button
+              key={opt}
+              type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(opt); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+            >
+              {opt}
+            </button>
+          ))}
+          {value && !options.includes(value) && (
+            <div className="px-3 py-2 text-xs text-[#008C3C] border-t border-gray-100 flex items-center gap-1">
+              <Plus className="w-3 h-3" />
+              Crear: <span className="font-semibold ml-1">"{value}"</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatDateForInput(date: any): string {
+  if (!date) return '';
+  let d: Date;
+  if (date?.toDate) d = date.toDate();
+  else if (typeof date === 'string' && date.includes('/')) {
+    const [dd, mm, yyyy] = date.split('/');
+    d = new Date(+yyyy, +mm - 1, +dd);
+  } else {
+    d = new Date(date);
+  }
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function parseLocalDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// ─── props ────────────────────────────────────────────────────────────────────
+interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   user: User | null;
   onUserUpdated: () => void;
 }
 
-export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: EditUserDialogProps) => {
+export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Props) => {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    fullName: '',
-    role: 'colaborador' as UserRole,
-    
-    // Datos personales
-    documentType: '',
-    documentNumber: '',
-    gender: '',
-    birthDate: '',
-    phone: '',
-    
-    // Ubicación
-    country: '',
-    city: '',
-    address: '',
-    
-    // Contrato (solo colaboradores)
-    contractStartDate: '',
-    contractEndDate: '',
-    probationPeriod: '',
-    baseSalary: '',
-    position: '',
-    company: '',
-    project: '',
+
+  // ── form state ────────────────────────────────────────────────────────────
+  const [basic, setBasic] = useState({
+    fullName: '', email: '', role: 'colaborador' as UserRole, corporateEmail: '',
   });
 
+  const [contract, setContract] = useState({
+    company: '', area: '', position: '', project: '', sede: '',
+    contractType: '', startDate: '', endDate: '',
+  });
+
+  const [ss, setSs] = useState({
+    baseSalary: '', salaryType: '', transportAllowance: '', workModality: '',
+    eps: '', afp: '', ccf: '', arlRiskLevel: '',
+  });
+
+  const [banking, setBanking] = useState({
+    bankName: '', accountType: '', accountNumber: '',
+  });
+
+  // ── external data ─────────────────────────────────────────────────────────
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [allUsers, setAllUsers]   = useState<any[]>([]);
+
+  // ── load companies + all users once on open ───────────────────────────────
   useEffect(() => {
-    if (user) {
-      setFormData({
-        email: user.email || '',
-        fullName: user.fullName || '',
-        role: user.role || 'colaborador',
-        
-        // Datos personales
-        documentType: user.personalData?.documentType || '',
-        documentNumber: user.personalData?.documentNumber || '',
-        gender: user.personalData?.gender || '',
-        birthDate: user.personalData?.birthDate 
-          ? formatDateForInput(user.personalData.birthDate)
-          : '',
-        phone: user.personalData?.phone || '',
-        
-        // Ubicación
-        country: user.location?.country || '',
-        city: user.location?.city || '',
-        address: user.location?.address || '',
-        
-        // Contrato
-        contractStartDate: user.contractInfo?.contract?.startDate
-          ? formatDateForInput(user.contractInfo.contract.startDate)
-          : '',
-        contractEndDate: user.contractInfo?.contract?.endDate
-          ? formatDateForInput(user.contractInfo.contract.endDate)
-          : '',
-        probationPeriod: user.contractInfo?.contract?.probationPeriod || '',
-        baseSalary: user.contractInfo?.workConditions?.baseSalary?.toString() || '',
-        position: user.contractInfo?.assignment?.position || '',
-        company: user.contractInfo?.assignment?.company || '',
-        project: user.contractInfo?.assignment?.project || '',
-      });
-    }
+    if (!open) return;
+    companyService.getAll()
+      .then((all: any[]) => setCompanies(all.map(c => ({ id: c.id, name: c.name }))))
+      .catch(() => {});
+    userService.getAll().then(setAllUsers).catch(() => {});
+  }, [open]);
+
+  // ── populate form when user changes ──────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    setBasic({
+      fullName:       user.fullName || '',
+      email:          user.email    || '',
+      role:           user.role     || 'colaborador',
+      corporateEmail: user.location?.corporateEmail || '',
+    });
+    setContract({
+      company:      user.contractInfo?.assignment?.company      || '',
+      area:         user.contractInfo?.assignment?.area         || '',
+      position:     user.contractInfo?.assignment?.position     || '',
+      project:      user.contractInfo?.assignment?.project      || '',
+      sede:         user.contractInfo?.assignment?.location     || '',
+      contractType: user.contractInfo?.contract?.contractType   || '',
+      startDate:    formatDateForInput(user.contractInfo?.contract?.startDate),
+      endDate:      formatDateForInput(user.contractInfo?.contract?.endDate),
+    });
+    setSs({
+      baseSalary:          user.salaryInfo?.baseSalary?.toString()                 || '',
+      salaryType:          user.salaryInfo?.salaryType                             || '',
+      transportAllowance:  user.salaryInfo?.transportAllowance?.toString()         || '',
+      workModality:        user.contractInfo?.workConditions?.workModality         || '',
+      eps:                 user.socialSecurity?.eps                                || '',
+      afp:                 user.socialSecurity?.afp                                || '',
+      ccf:                 user.socialSecurity?.ccf                                || '',
+      arlRiskLevel:        user.socialSecurity?.arlRiskLevel                       || '',
+    });
+    setBanking({
+      bankName:      user.bankingInfo?.bankName      || '',
+      accountType:   user.bankingInfo?.accountType   || '',
+      accountNumber: user.bankingInfo?.accountNumber || '',
+    });
   }, [user]);
 
-  const formatDateForInput = (date: any): string => {
-    if (!date) return '';
-    
-    let dateObj: Date;
-    
-    if (date.toDate && typeof date.toDate === 'function') {
-      dateObj = date.toDate();
-    } else if (typeof date === 'string') {
-      // Si es string en formato DD/MM/YYYY
-      const parts = date.split('/');
-      if (parts.length === 3) {
-        dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-      } else {
-        dateObj = new Date(date);
-      }
-    } else {
-      dateObj = new Date(date);
-    }
-    
-    // Formato YYYY-MM-DD para input type="date"
-    const year = dateObj.getFullYear();
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    
-    return `${year}-${month}-${day}`;
-  };
+  // ── derive autocomplete options from company users ────────────────────────
+  const companyUsers = useMemo(
+    () => allUsers.filter(u => u.id !== user?.id && u.contractInfo?.assignment?.company === contract.company),
+    [allUsers, contract.company, user?.id],
+  );
 
-  const parseLocalDate = (dateStr: string): Date => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    return new Date(y, m - 1, d);
-  };
+  const uniq = (arr: (string | undefined)[]) =>
+    [...new Set(arr.filter((v): v is string => !!v))].sort();
 
+  const areaOptions     = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.area)),     [companyUsers]);
+  const positionOptions = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.position)), [companyUsers]);
+  const projectOptions  = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.project)),  [companyUsers]);
+  const sedeOptions     = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.location)), [companyUsers]);
+
+  // ── submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!user) return;
-
-    if (!formData.email.trim() || !formData.fullName.trim()) {
-      toast.error('Error', {
-        description: 'El email y nombre completo son obligatorios',
-      });
+    if (!basic.email.trim() || !basic.fullName.trim()) {
+      toast.error('Error', { description: 'Nombre y correo son obligatorios.' });
       return;
     }
 
     setLoading(true);
-
     try {
-      const updates: any = {
-        email: formData.email,
-        fullName: formData.fullName,
-        role: formData.role,
-        updatedAt: new Date(),
+      const upd: Record<string, any> = {
+        email:    basic.email,
+        fullName: basic.fullName,
+        role:     basic.role,
       };
+      const set = (k: string, v: any) => { if (v !== '' && v != null) upd[k] = v; };
 
-      // Datos personales
-      if (formData.documentType || formData.documentNumber || formData.gender || formData.birthDate || formData.phone) {
-        updates['personalData.documentType'] = formData.documentType;
-        updates['personalData.documentNumber'] = formData.documentNumber;
-        updates['personalData.gender'] = formData.gender;
-        updates['personalData.phone'] = formData.phone;
-        
-        if (formData.birthDate) {
-          updates['personalData.birthDate'] = parseLocalDate(formData.birthDate);
-        }
-      }
+      set('location.corporateEmail',                  basic.corporateEmail);
 
-      // Ubicación
-      if (formData.country || formData.city || formData.address) {
-        updates['location.country'] = formData.country;
-        updates['location.city'] = formData.city;
-        updates['location.address'] = formData.address;
-      }
+      set('contractInfo.assignment.company',          contract.company);
+      set('contractInfo.assignment.area',             contract.area);
+      set('contractInfo.assignment.position',         contract.position);
+      set('contractInfo.assignment.project',          contract.project);
+      set('contractInfo.assignment.location',         contract.sede);
+      set('contractInfo.contract.contractType',       contract.contractType);
+      if (contract.startDate) upd['contractInfo.contract.startDate'] = parseLocalDate(contract.startDate);
+      if (contract.endDate)   upd['contractInfo.contract.endDate']   = parseLocalDate(contract.endDate);
 
-      // Contrato (solo para colaboradores)
-      if (formData.role === 'colaborador') {
-        if (formData.contractStartDate) {
-          updates['contractInfo.contract.startDate'] = parseLocalDate(formData.contractStartDate);
-        }
-        if (formData.contractEndDate) {
-          updates['contractInfo.contract.endDate'] = parseLocalDate(formData.contractEndDate);
-        }
-        if (formData.probationPeriod) {
-          updates['contractInfo.contract.probationPeriod'] = formData.probationPeriod;
-        }
-        if (formData.baseSalary) {
-          updates['contractInfo.workConditions.baseSalary'] = parseFloat(formData.baseSalary);
-        }
-        if (formData.position) {
-          updates['contractInfo.assignment.position'] = formData.position;
-        }
-        if (formData.company) {
-          updates['contractInfo.assignment.company'] = formData.company;
-        }
-        if (formData.project) {
-          updates['contractInfo.assignment.project'] = formData.project;
-        }
-      }
+      set('salaryInfo.baseSalary',                    ss.baseSalary ? Number(ss.baseSalary) : undefined);
+      set('salaryInfo.salaryType',                    ss.salaryType);
+      set('salaryInfo.transportAllowance',            ss.transportAllowance ? Number(ss.transportAllowance) : undefined);
+      set('contractInfo.workConditions.workModality', ss.workModality);
+      set('socialSecurity.eps',                       ss.eps);
+      set('socialSecurity.afp',                       ss.afp);
+      set('socialSecurity.ccf',                       ss.ccf);
+      set('socialSecurity.arlRiskLevel',              ss.arlRiskLevel);
 
-      await userService.update(user.id, updates);
+      set('bankingInfo.bankName',                     banking.bankName);
+      set('bankingInfo.accountType',                  banking.accountType);
+      set('bankingInfo.accountNumber',                banking.accountNumber);
+
+      await userService.update(user.id, upd);
 
       toast.success('Usuario actualizado', {
-        description: 'Los cambios se han guardado correctamente.',
+        description: 'Los cambios se guardaron correctamente.',
       });
-
       onUserUpdated();
       onOpenChange(false);
-    } catch (error: any) {
-      toast.error('Error al actualizar usuario', {
-        description: error.message,
-      });
+    } catch (err: any) {
+      toast.error('Error al actualizar', { description: err.message });
     } finally {
       setLoading(false);
     }
@@ -211,56 +252,49 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
 
   if (!user) return null;
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Editar Usuario</DialogTitle>
-          <DialogDescription>
-            Actualiza la información del usuario
-          </DialogDescription>
+          <DialogDescription>Actualiza la información de {user.fullName}</DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="basic" className="flex-1 overflow-hidden">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs defaultValue="basic" className="flex-1 overflow-hidden flex flex-col">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="basic">Básico</TabsTrigger>
-            <TabsTrigger value="personal">Personal</TabsTrigger>
             <TabsTrigger value="contract">Contrato</TabsTrigger>
+            <TabsTrigger value="salary">Salario</TabsTrigger>
+            <TabsTrigger value="banking">Bancario</TabsTrigger>
           </TabsList>
 
-          <div className="overflow-y-auto max-h-[500px] mt-4">
-            {/* TAB: BÁSICO */}
-            <TabsContent value="basic" className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email *</Label>
+          <div className="overflow-y-auto flex-1 mt-4 pr-1">
+
+            {/* ── TAB: BÁSICO ───────────────────────────────────────────── */}
+            <TabsContent value="basic" className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-0">
+              <div className="sm:col-span-2">
+                <Field label="Nombre completo *">
+                  <Input
+                    value={basic.fullName}
+                    onChange={e => setBasic(p => ({ ...p, fullName: e.target.value }))}
+                    placeholder="Juan Pérez"
+                  />
+                </Field>
+              </div>
+
+              <Field label="Correo personal *">
                 <Input
-                  id="email"
                   type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="usuario@ejemplo.com"
+                  value={basic.email}
+                  onChange={e => setBasic(p => ({ ...p, email: e.target.value }))}
+                  placeholder="juan@gmail.com"
                 />
-              </div>
+              </Field>
 
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Nombre Completo *</Label>
-                <Input
-                  id="fullName"
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  placeholder="Juan Pérez"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="role">Rol</Label>
-                <Select
-                  value={formData.role}
-                  onValueChange={(value: UserRole) => setFormData({ ...formData, role: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+              <Field label="Tipo de usuario">
+                <Select value={basic.role} onValueChange={v => setBasic(p => ({ ...p, role: v as UserRole }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="colaborador">Colaborador</SelectItem>
                     <SelectItem value="aspirante">Aspirante</SelectItem>
@@ -268,205 +302,226 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Edit
                     <SelectItem value="descartado">Descartado</SelectItem>
                   </SelectContent>
                 </Select>
+              </Field>
+
+              <div className="sm:col-span-2">
+                <Field label="Correo corporativo">
+                  <Input
+                    type="email"
+                    value={basic.corporateEmail}
+                    onChange={e => setBasic(p => ({ ...p, corporateEmail: e.target.value }))}
+                    placeholder="nombre.apellido@inteegra.net.co"
+                  />
+                </Field>
               </div>
             </TabsContent>
 
-            {/* TAB: PERSONAL */}
-            <TabsContent value="personal" className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="documentType">Tipo de Documento</Label>
-                  <Select
-                    value={formData.documentType}
-                    onValueChange={(value) => setFormData({ ...formData, documentType: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Cédula de Ciudadanía">Cédula de Ciudadanía</SelectItem>
-                      <SelectItem value="Cédula de Extranjería">Cédula de Extranjería</SelectItem>
-                      <SelectItem value="Pasaporte">Pasaporte</SelectItem>
-                      <SelectItem value="Tarjeta de Identidad">Tarjeta de Identidad</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="documentNumber">Número de Documento</Label>
-                  <Input
-                    id="documentNumber"
-                    value={formData.documentNumber}
-                    onChange={(e) => setFormData({ ...formData, documentNumber: e.target.value })}
-                    placeholder="1234567890"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="gender">Género</Label>
-                  <Select
-                    value={formData.gender}
-                    onValueChange={(value) => setFormData({ ...formData, gender: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Masculino">Masculino</SelectItem>
-                      <SelectItem value="Femenino">Femenino</SelectItem>
-                      <SelectItem value="Otro">Otro</SelectItem>
-                      <SelectItem value="Prefiero no decir">Prefiero no decir</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="birthDate">Fecha de Nacimiento</Label>
-                  <Input
-                    id="birthDate"
-                    type="date"
-                    value={formData.birthDate}
-                    onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Teléfono</Label>
-                  <Input
-                    id="phone"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="3001234567"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="country">País</Label>
-                <Input
-                  id="country"
-                  value={formData.country}
-                  onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                  placeholder="Colombia"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="city">Ciudad</Label>
-                <Input
-                  id="city"
-                  value={formData.city}
-                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                  placeholder="Bogotá"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="address">Dirección</Label>
-                <Input
-                  id="address"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Calle 123 #45-67"
-                />
-              </div>
-            </TabsContent>
-
-            {/* TAB: CONTRATO */}
-            <TabsContent value="contract" className="space-y-4">
-              {formData.role === 'colaborador' ? (
-                <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="contractStartDate">Fecha de Inicio</Label>
-                      <Input
-                        id="contractStartDate"
-                        type="date"
-                        value={formData.contractStartDate}
-                        onChange={(e) => setFormData({ ...formData, contractStartDate: e.target.value })}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="contractEndDate">Fecha de Fin (Opcional)</Label>
-                      <Input
-                        id="contractEndDate"
-                        type="date"
-                        value={formData.contractEndDate}
-                        onChange={(e) => setFormData({ ...formData, contractEndDate: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="probationPeriod">Periodo de Prueba</Label>
+            {/* ── TAB: CONTRATO ─────────────────────────────────────────── */}
+            <TabsContent value="contract" className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-0">
+              <div className="sm:col-span-2">
+                <Field label="Empresa">
+                  {companies.length > 0 ? (
+                    <Select value={contract.company}
+                      onValueChange={v => setContract(p => ({ ...p, company: v, area: '', position: '', project: '', sede: '' }))}>
+                      <SelectTrigger><SelectValue placeholder="Seleccionar empresa" /></SelectTrigger>
+                      <SelectContent>
+                        {companies.map(c => (
+                          <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
                     <Input
-                      id="probationPeriod"
-                      value={formData.probationPeriod}
-                      onChange={(e) => setFormData({ ...formData, probationPeriod: e.target.value })}
-                      placeholder="3 meses"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="baseSalary">Salario Básico</Label>
-                    <Input
-                      id="baseSalary"
-                      type="number"
-                      value={formData.baseSalary}
-                      onChange={(e) => setFormData({ ...formData, baseSalary: e.target.value })}
-                      placeholder="4500000"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="position">Cargo</Label>
-                    <Input
-                      id="position"
-                      value={formData.position}
-                      onChange={(e) => setFormData({ ...formData, position: e.target.value })}
-                      placeholder="Desarrollador Full Stack"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="company">Empresa</Label>
-                    <Input
-                      id="company"
-                      value={formData.company}
-                      onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                      value={contract.company}
+                      onChange={e => setContract(p => ({ ...p, company: e.target.value }))}
                       placeholder="Nombre de la empresa"
                     />
-                  </div>
+                  )}
+                </Field>
+              </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="project">Proyecto</Label>
-                    <Input
-                      id="project"
-                      value={formData.project}
-                      onChange={(e) => setFormData({ ...formData, project: e.target.value })}
-                      placeholder="Nombre del proyecto"
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p>La información de contrato solo aplica para colaboradores</p>
-                </div>
-              )}
+              <Field label="Área / Departamento">
+                <ComboInput
+                  key={`area-${contract.company}`}
+                  value={contract.area}
+                  onChange={v => setContract(p => ({ ...p, area: v }))}
+                  options={areaOptions}
+                  placeholder={areaOptions.length ? `${areaOptions.length} disponibles…` : 'Ej: Recursos Humanos'}
+                />
+              </Field>
+
+              <Field label="Cargo / Posición">
+                <ComboInput
+                  key={`pos-${contract.company}`}
+                  value={contract.position}
+                  onChange={v => setContract(p => ({ ...p, position: v }))}
+                  options={positionOptions}
+                  placeholder={positionOptions.length ? `${positionOptions.length} disponibles…` : 'Ej: Analista'}
+                />
+              </Field>
+
+              <Field label="Proyecto">
+                <ComboInput
+                  key={`proj-${contract.company}`}
+                  value={contract.project}
+                  onChange={v => setContract(p => ({ ...p, project: v }))}
+                  options={projectOptions}
+                  placeholder={projectOptions.length ? `${projectOptions.length} disponibles…` : 'Ej: Proyecto Alpha'}
+                />
+              </Field>
+
+              <Field label="Sede">
+                <ComboInput
+                  key={`sede-${contract.company}`}
+                  value={contract.sede}
+                  onChange={v => setContract(p => ({ ...p, sede: v }))}
+                  options={sedeOptions}
+                  placeholder={sedeOptions.length ? `${sedeOptions.length} disponibles…` : 'Ej: Bogotá'}
+                />
+              </Field>
+
+              <Field label="Tipo de contrato">
+                <Select value={contract.contractType}
+                  onValueChange={v => setContract(p => ({ ...p, contractType: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Término fijo">Término fijo</SelectItem>
+                    <SelectItem value="Término indefinido">Término indefinido</SelectItem>
+                    <SelectItem value="Prestación de servicios">Prestación de servicios</SelectItem>
+                    <SelectItem value="Contrato de aprendizaje">Contrato de aprendizaje</SelectItem>
+                    <SelectItem value="Obra o labor">Obra o labor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field label="Fecha de inicio">
+                <Input type="date" value={contract.startDate}
+                  onChange={e => setContract(p => ({ ...p, startDate: e.target.value }))} />
+              </Field>
+
+              <div className="sm:col-span-2">
+                <Field label="Fecha de fin (opcional)">
+                  <Input type="date" value={contract.endDate}
+                    onChange={e => setContract(p => ({ ...p, endDate: e.target.value }))} />
+                </Field>
+              </div>
             </TabsContent>
+
+            {/* ── TAB: SALARIO + SEG. SOCIAL ────────────────────────────── */}
+            <TabsContent value="salary" className="space-y-5 mt-0">
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Salario</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Salario base (COP)">
+                    <Input type="number" placeholder="0" value={ss.baseSalary}
+                      onChange={e => setSs(p => ({ ...p, baseSalary: e.target.value }))} />
+                  </Field>
+                  <Field label="Tipo de salario">
+                    <Select value={ss.salaryType} onValueChange={v => setSs(p => ({ ...p, salaryType: v }))}>
+                      <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Salario ordinario">Salario ordinario</SelectItem>
+                        <SelectItem value="Salario integral">Salario integral</SelectItem>
+                        <SelectItem value="Honorarios">Honorarios</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Auxilio de transporte (COP)">
+                    <Input type="number" placeholder="0" value={ss.transportAllowance}
+                      onChange={e => setSs(p => ({ ...p, transportAllowance: e.target.value }))} />
+                  </Field>
+                  <Field label="Modalidad de trabajo">
+                    <Select value={ss.workModality} onValueChange={v => setSs(p => ({ ...p, workModality: v }))}>
+                      <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="presencial">Presencial</SelectItem>
+                        <SelectItem value="remoto">Remoto</SelectItem>
+                        <SelectItem value="híbrido">Híbrido</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+
+              <div className="h-px bg-gray-100" />
+
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Seguridad Social</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="EPS">
+                    <Input placeholder="Ej: Sura, Compensar…" value={ss.eps}
+                      onChange={e => setSs(p => ({ ...p, eps: e.target.value }))} />
+                  </Field>
+                  <Field label="Fondo de pensiones (AFP)">
+                    <Input placeholder="Ej: Protección, Porvenir…" value={ss.afp}
+                      onChange={e => setSs(p => ({ ...p, afp: e.target.value }))} />
+                  </Field>
+                  <Field label="Caja de compensación (CCF)">
+                    <Input placeholder="Ej: Compensar, Cafam…" value={ss.ccf}
+                      onChange={e => setSs(p => ({ ...p, ccf: e.target.value }))} />
+                  </Field>
+                  <Field label="Nivel de riesgo ARL">
+                    <Select value={ss.arlRiskLevel} onValueChange={v => setSs(p => ({ ...p, arlRiskLevel: v }))}>
+                      <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="I">Nivel I – Riesgo mínimo</SelectItem>
+                        <SelectItem value="II">Nivel II – Riesgo bajo</SelectItem>
+                        <SelectItem value="III">Nivel III – Riesgo medio</SelectItem>
+                        <SelectItem value="IV">Nivel IV – Riesgo alto</SelectItem>
+                        <SelectItem value="V">Nivel V – Riesgo máximo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ── TAB: BANCARIO ─────────────────────────────────────────── */}
+            <TabsContent value="banking" className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-0">
+              <div className="sm:col-span-2">
+                <Field label="Banco">
+                  <Select value={banking.bankName}
+                    onValueChange={v => setBanking(p => ({ ...p, bankName: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Seleccionar banco" /></SelectTrigger>
+                    <SelectContent>
+                      {['Bancolombia','Davivienda','BBVA','Banco de Bogotá','Banco Popular',
+                        'Banco de Occidente','AV Villas','Nequi','Daviplata','Otro'].map(b => (
+                        <SelectItem key={b} value={b}>{b}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+              <Field label="Tipo de cuenta">
+                <Select value={banking.accountType}
+                  onValueChange={v => setBanking(p => ({ ...p, accountType: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Cuenta de ahorros">Cuenta de ahorros</SelectItem>
+                    <SelectItem value="Cuenta corriente">Cuenta corriente</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Número de cuenta">
+                <Input placeholder="000000000000" value={banking.accountNumber}
+                  onChange={e => setBanking(p => ({ ...p, accountNumber: e.target.value }))} />
+              </Field>
+            </TabsContent>
+
           </div>
         </Tabs>
 
-        <DialogFooter>
+        {/* ── FOOTER ──────────────────────────────────────────────────────── */}
+        <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
             Cancelar
           </Button>
-          <Button onClick={handleSubmit} disabled={loading}>
+          <Button onClick={handleSubmit} disabled={loading}
+            className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
             {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Guardar Cambios
+            Guardar cambios
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
