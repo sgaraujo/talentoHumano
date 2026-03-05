@@ -153,7 +153,7 @@ const token = this.generateToken();
     allowMultipleCompletions: boolean = false
   ): Promise<{ created: number; skipped: number; emailSent: boolean }> {
     const baseUrl = import.meta.env.VITE_APP_URL ?? window.location.origin;
-    const sendBatchEmail = httpsCallable(functions, "sendBatchAssignmentEmail");
+    const sendBatchEmail = httpsCallable(functions, "sendAssignmentEmail");
 
     const toSend: Array<{ title: string; link: string }> = [];
     let created = 0;

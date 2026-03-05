@@ -1,354 +1,368 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-
-import { Loader2, CheckCircle } from "lucide-react";
+import { Loader2, CheckCircle2, ClipboardList, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-
 import type { Questionnaire, Question } from "@/models/types/Questionnaire";
-
 import { functions } from "@/config/firebase";
 import { httpsCallable } from "firebase/functions";
 
+// ─── brand header ─────────────────────────────────────────────────────────────
+function Header() {
+  return (
+    <div className="bg-gradient-to-r from-[#005528] to-[#008C3C] py-5 px-6 text-center">
+      <h1 className="text-white text-2xl font-black tracking-[4px]">
+        INTE<span className="text-[#7BCB6A]">E</span>GRADOS
+      </h1>
+      <p className="text-[#7BCB6A] text-[11px] tracking-widest mt-0.5 uppercase">
+        Gestión de Talento Humano
+      </p>
+    </div>
+  );
+}
+
+// ─── progress bar ─────────────────────────────────────────────────────────────
+function ProgressBar({ current, total }: { current: number; total: number }) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  return (
+    <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+      <div
+        className="h-2 rounded-full bg-[#008C3C] transition-all duration-500"
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+// ─── main ─────────────────────────────────────────────────────────────────────
 export const AnswerQuestionnairePage = () => {
-  
   const { token } = useParams<{ token: string }>();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]     = useState(true);
   const [submitting, setSubmitting] = useState(false);
-
   const [assignment, setAssignment] = useState<any>(null);
   const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(null);
-
-  const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [answers, setAnswers]     = useState<Record<string, any>>({});
   const [completed, setCompleted] = useState(false);
 
-  // ✅ Cargar asignación pública + cuestionario por token
   useEffect(() => {
-    const run = async () => {
-      if (!token) {
-        setLoading(false);
-        setAssignment(null);
-        setQuestionnaire(null);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        const getPublicAssignment = httpsCallable(functions, "getPublicAssignment");
-        const res: any = await getPublicAssignment({ token });
+    if (!token) { setLoading(false); return; }
+    setLoading(true);
+    (httpsCallable(functions, "getPublicAssignment") as any)({ token })
+      .then((res: any) => {
         const data = res?.data;
-
-        if (!data?.assignment || !data?.questionnaire) {
-          setAssignment(null);
-          setQuestionnaire(null);
+        if (!data?.assignment || (!data?.questionnaire && data?.assignment?.status !== "completed")) {
           toast.error("Link inválido o expirado");
           return;
         }
-
-        if (data.assignment.status === "completed") {
-          setCompleted(true);
-          return;
-        }
-
+        if (data.assignment.status === "completed") { setCompleted(true); return; }
         if (data.questionnaire?.active === false) {
           toast.error("Este cuestionario ya no está activo");
-          setAssignment(null);
-          setQuestionnaire(null);
           return;
         }
-
         setAssignment(data.assignment);
         setQuestionnaire(data.questionnaire);
-      } catch (e: any) {
-        console.error("getPublicAssignment error:", e);
-        toast.error("Cuestionario no disponible", {
-          description: e?.message || "No se pudo cargar el cuestionario.",
-        });
-        setAssignment(null);
-        setQuestionnaire(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    run();
+      })
+      .catch((e: any) => {
+        toast.error("Cuestionario no disponible", { description: e?.message });
+      })
+      .finally(() => setLoading(false));
   }, [token]);
 
-  const handleAnswerChange = (questionId: string, value: any) => {
-    setAnswers((prev) => ({ ...prev, [questionId]: value }));
-  };
-
-  const handleMultipleChoice = (
-    questionId: string,
-    optionValue: string,
-    checked: boolean
-  ) => {
-    setAnswers((prev) => {
-      const current = prev[questionId] || [];
-      if (checked) return { ...prev, [questionId]: [...current, optionValue] };
-      return { ...prev, [questionId]: current.filter((v: string) => v !== optionValue) };
-    });
-  };
-
-  const validateAnswers = () => {
-    if (!questionnaire) return false;
-
-    const requiredQuestions = questionnaire.questions.filter((q) => q.required);
-    for (const question of requiredQuestions) {
-      const answer = answers[question.id];
-      if (!answer || (Array.isArray(answer) && answer.length === 0)) {
-        toast.error("Campos requeridos", {
-          description: `Por favor responde: ${question.text}`,
-        });
-        return false;
-      }
-    }
-    return true;
-  };
+  const answeredCount = questionnaire
+    ? questionnaire.questions.filter(q => {
+        const a = answers[q.id];
+        return a !== undefined && a !== "" && !(Array.isArray(a) && a.length === 0);
+      }).length
+    : 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateAnswers()) return;
+    if (!questionnaire) return;
+
+    const missing = questionnaire.questions.filter(q => {
+      if (!q.required) return false;
+      const a = answers[q.id];
+      return !a || (Array.isArray(a) && a.length === 0);
+    });
+    if (missing.length > 0) {
+      toast.error("Campos requeridos", { description: `Responde: ${missing[0].text}` });
+      return;
+    }
 
     setSubmitting(true);
-
     try {
-      const submitPublicResponse = httpsCallable(functions, "submitPublicResponse");
-      await submitPublicResponse({ token, answers });
-
-      toast.success("¡Respuesta enviada!", {
-        description: questionnaire!.isOnboarding
-          ? "Tu perfil ha sido actualizado exitosamente."
-          : "Gracias por completar el cuestionario.",
-      });
-
+      await (httpsCallable(functions, "submitPublicResponse") as any)({ token, answers });
+      toast.success("¡Respuesta enviada correctamente!");
       setCompleted(true);
-    } catch (error: any) {
-      console.error("Error guardando respuesta:", error);
-      toast.error("Error al enviar respuesta", {
-        description: error?.message || String(error),
-      });
+    } catch (err: any) {
+      toast.error("Error al enviar", { description: err?.message });
     } finally {
       setSubmitting(false);
     }
   };
 
-
-
   const renderQuestion = (question: Question) => {
+    const base = "mt-1";
     switch (question.type) {
       case "text":
         return (
           <Input
+            className={`${base} border-gray-200 focus-visible:ring-[#008C3C]`}
             value={answers[question.id] || ""}
-            onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+            onChange={e => setAnswers(p => ({ ...p, [question.id]: e.target.value }))}
             placeholder="Tu respuesta"
-            required={question.required}
           />
         );
-
       case "textarea":
         return (
           <Textarea
+            className={`${base} border-gray-200 focus-visible:ring-[#008C3C]`}
             value={answers[question.id] || ""}
-            onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+            onChange={e => setAnswers(p => ({ ...p, [question.id]: e.target.value }))}
             placeholder="Tu respuesta"
             rows={4}
-            required={question.required}
           />
         );
-
       case "select":
         return (
           <RadioGroup
             value={answers[question.id] || ""}
-            onValueChange={(value) => handleAnswerChange(question.id, value)}
+            onValueChange={v => setAnswers(p => ({ ...p, [question.id]: v }))}
+            className="mt-2 space-y-2"
           >
-            {question.options?.map((option) => (
-              <div key={option.id} className="flex items-center space-x-2">
-                <RadioGroupItem value={option.value} id={option.id} />
-                <Label htmlFor={option.id} className="cursor-pointer">
-                  {option.label}
+            {question.options?.map(opt => (
+              <div key={opt.id}
+                className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors
+                  ${answers[question.id] === opt.value
+                    ? 'border-[#008C3C] bg-[#008C3C]/5'
+                    : 'border-gray-200 hover:border-[#008C3C]/40'}`}
+                onClick={() => setAnswers(p => ({ ...p, [question.id]: opt.value }))}
+              >
+                <RadioGroupItem value={opt.value} id={opt.id} className="text-[#008C3C]" />
+                <Label htmlFor={opt.id} className="cursor-pointer font-normal text-gray-700">
+                  {opt.label}
                 </Label>
               </div>
             ))}
           </RadioGroup>
         );
-
       case "multiple":
         return (
-          <div className="space-y-2">
-            {question.options?.map((option) => (
-              <div key={option.id} className="flex items-center space-x-2">
-                <Checkbox
-                  id={option.id}
-                  checked={(answers[question.id] || []).includes(option.value)}
-                  onCheckedChange={(checked) =>
-                    handleMultipleChoice(question.id, option.value, checked as boolean)
-                  }
-                />
-                <Label htmlFor={option.id} className="cursor-pointer">
-                  {option.label}
-                </Label>
-              </div>
+          <div className="mt-2 space-y-2">
+            {question.options?.map(opt => {
+              const checked = (answers[question.id] || []).includes(opt.value);
+              return (
+                <div key={opt.id}
+                  className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors
+                    ${checked ? 'border-[#008C3C] bg-[#008C3C]/5' : 'border-gray-200 hover:border-[#008C3C]/40'}`}
+                  onClick={() => {
+                    const cur = answers[question.id] || [];
+                    setAnswers(p => ({
+                      ...p,
+                      [question.id]: checked
+                        ? cur.filter((v: string) => v !== opt.value)
+                        : [...cur, opt.value],
+                    }));
+                  }}
+                >
+                  <Checkbox id={opt.id} checked={checked}
+                    className="data-[state=checked]:bg-[#008C3C] data-[state=checked]:border-[#008C3C]"
+                    onCheckedChange={() => {}} />
+                  <Label htmlFor={opt.id} className="cursor-pointer font-normal text-gray-700">
+                    {opt.label}
+                  </Label>
+                </div>
+              );
+            })}
+          </div>
+        );
+      case "rating":
+        return (
+          <div className="flex gap-2 mt-2 flex-wrap">
+            {[1, 2, 3, 4, 5].map(r => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setAnswers(p => ({ ...p, [question.id]: r.toString() }))}
+                className={`w-12 h-12 rounded-full font-bold text-base transition-colors
+                  ${answers[question.id] === r.toString()
+                    ? 'bg-[#008C3C] text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-[#008C3C]/10'}`}
+              >
+                {r}
+              </button>
             ))}
           </div>
         );
-
-      case "rating":
-        return (
-          <RadioGroup
-            value={answers[question.id] || ""}
-            onValueChange={(value) => handleAnswerChange(question.id, value)}
-            className="flex gap-2"
-          >
-            {[1, 2, 3, 4, 5].map((rating) => (
-              <div key={rating} className="flex flex-col items-center">
-                <RadioGroupItem value={rating.toString()} id={`${question.id}-${rating}`} />
-                <Label htmlFor={`${question.id}-${rating}`} className="cursor-pointer text-sm">
-                  {rating}
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
-        );
-
       case "date":
         return (
           <Input
             type="date"
+            className={`${base} border-gray-200 focus-visible:ring-[#008C3C]`}
             value={answers[question.id] || ""}
-            onChange={(e) => handleAnswerChange(question.id, e.target.value)}
-            required={question.required}
+            onChange={e => setAnswers(p => ({ ...p, [question.id]: e.target.value }))}
           />
         );
-
       case "number":
         return (
           <Input
             type="number"
+            className={`${base} border-gray-200 focus-visible:ring-[#008C3C]`}
             value={answers[question.id] || ""}
-            onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+            onChange={e => setAnswers(p => ({ ...p, [question.id]: e.target.value }))}
             placeholder="0"
-            required={question.required}
           />
         );
-
       default:
         return null;
     }
   };
 
-  // =========================
-  // UI STATES
-  // =========================
-
+  // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center space-y-3">
+            <Loader2 className="w-10 h-10 animate-spin text-[#008C3C] mx-auto" />
+            <p className="text-gray-500 text-sm">Cargando cuestionario…</p>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // ── Completed ────────────────────────────────────────────────────────────
   if (completed) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-              <CheckCircle className="w-8 h-8 text-green-600" />
+      <div className="min-h-screen flex flex-col bg-gray-50">
+        <Header />
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-10 max-w-md w-full text-center">
+            <div className="w-20 h-20 rounded-full bg-[#008C3C]/10 flex items-center justify-center mx-auto mb-5">
+              <CheckCircle2 className="w-10 h-10 text-[#008C3C]" />
             </div>
-            <CardTitle className="text-2xl">¡Completado!</CardTitle>
-            <CardDescription>
-              Ya respondiste este cuestionario. Gracias por tu participación.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+            <h2 className="text-2xl font-bold text-[#4A4A4A] mb-2">¡Gracias!</h2>
+            <p className="text-gray-500">
+              Tu cuestionario ha sido enviado correctamente.<br />
+              Puedes cerrar esta ventana.
+            </p>
+          </div>
+        </div>
+        <footer className="py-4 text-center text-xs text-gray-400">
+          © {new Date().getFullYear()} Inteegrados
+        </footer>
       </div>
     );
   }
 
-  // ✅ Token inválido / sin datos
+  // ── Invalid / not found ───────────────────────────────────────────────────
   if (!questionnaire || !assignment) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <CardTitle>Cuestionario no disponible</CardTitle>
-            <CardDescription>
-              Este link no es válido o el cuestionario ya no está activo.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <div className="min-h-screen flex flex-col bg-gray-50">
+        <Header />
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-10 max-w-md w-full text-center">
+            <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
+              <ClipboardList className="w-8 h-8 text-red-400" />
+            </div>
+            <h2 className="text-xl font-bold text-[#4A4A4A] mb-2">Cuestionario no disponible</h2>
+            <p className="text-gray-400 text-sm">
+              Este enlace no es válido o el cuestionario ya no está activo.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
 
-  // ✅ Render del cuestionario
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 py-12">
-      <div className="max-w-3xl mx-auto">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-3xl">{questionnaire.title}</CardTitle>
-            <CardDescription className="text-base mt-2">
-              {questionnaire.description}
-            </CardDescription>
-            <div className="mt-4 text-sm text-gray-600">
-              Respondiendo como: <strong>{assignment.userName}</strong>
-            </div>
-          </CardHeader>
+  const questions = [...questionnaire.questions].sort((a, b) => a.order - b.order);
+  const total = questions.length;
 
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-8">
-              {questionnaire.questions
-                .sort((a, b) => a.order - b.order)
-                .map((question, index) => (
-                  <div key={question.id} className="space-y-3">
-                    <Label className="text-lg font-medium">
-                      {index + 1}. {question.text}
-                      {question.required && <span className="text-red-500 ml-1">*</span>}
+  // ── Questionnaire form ────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      <Header />
+
+      {/* Sticky info bar */}
+      <div className="bg-white border-b border-gray-100 px-4 py-3 sticky top-0 z-10 shadow-sm">
+        <div className="max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="font-semibold text-[#4A4A4A] text-sm leading-tight">{questionnaire.title}</p>
+              <p className="text-xs text-gray-400">Respondiendo como: <span className="font-medium text-gray-600">{assignment.userName}</span></p>
+            </div>
+            <span className="text-xs font-semibold text-[#008C3C] bg-[#008C3C]/10 px-2.5 py-1 rounded-full">
+              {answeredCount}/{total}
+            </span>
+          </div>
+          <ProgressBar current={answeredCount} total={total} />
+        </div>
+      </div>
+
+      {/* Form */}
+      <div className="flex-1 py-8 px-4">
+        <div className="max-w-2xl mx-auto">
+          {questionnaire.description && (
+            <p className="text-gray-500 text-sm mb-6 bg-white rounded-xl border border-gray-100 px-4 py-3">
+              {questionnaire.description}
+            </p>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {questions.map((question, idx) => {
+              const answered = (() => {
+                const a = answers[question.id];
+                return a !== undefined && a !== "" && !(Array.isArray(a) && a.length === 0);
+              })();
+
+              return (
+                <div key={question.id}
+                  className={`bg-white rounded-xl border transition-colors p-5
+                    ${answered ? 'border-[#008C3C]/30' : 'border-gray-100'}`}>
+                  <div className="flex items-start gap-3 mb-3">
+                    <span className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0 mt-0.5
+                      ${answered ? 'bg-[#008C3C] text-white' : 'bg-gray-100 text-gray-500'}`}>
+                      {idx + 1}
+                    </span>
+                    <Label className="text-sm font-medium text-[#4A4A4A] leading-snug">
+                      {question.text}
+                      {question.required && <span className="text-red-400 ml-1">*</span>}
                     </Label>
+                  </div>
+                  <div className="pl-9">
                     {renderQuestion(question)}
                   </div>
-                ))}
+                </div>
+              );
+            })}
 
-              <div className="flex justify-end gap-4 pt-6">
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={submitting}
-                  className="min-w-[200px]"
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Enviando...
-                    </>
-                  ) : (
-                    "Enviar Respuestas"
-                  )}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+            <div className="pt-4 pb-8">
+              <Button
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-[#008C3C] hover:bg-[#006C2F] text-white h-12 text-base font-semibold rounded-xl gap-2"
+              >
+                {submitting
+                  ? <><Loader2 className="w-4 h-4 animate-spin" />Enviando…</>
+                  : <><ChevronRight className="w-4 h-4" />Enviar respuestas</>
+                }
+              </Button>
+            </div>
+          </form>
+        </div>
       </div>
+
+      <footer className="py-4 text-center text-xs text-gray-400 border-t border-gray-100 bg-white">
+        © {new Date().getFullYear()} Inteegrados · Todos los derechos reservados
+      </footer>
     </div>
   );
 };

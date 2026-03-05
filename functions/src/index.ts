@@ -208,6 +208,11 @@ export const verifyEmailCodeAndLogin = onCall(
 );
 
 
+/**
+ * Envía correo de cuestionario(s).
+ * - Modo single (compatibilidad): { to, userName, questionnaireTitle, link }
+ * - Modo batch (creación de usuario): { to, userName, questionnaires: [{title, link}] }
+ */
 export const sendAssignmentEmail = onCall(
   {
     region: "us-central1",
@@ -215,103 +220,44 @@ export const sendAssignmentEmail = onCall(
     secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
   },
   async (request) => {
-    const to    = normalizeEmail(request.data?.to);
-    const userName          = String(request.data?.userName          || "").trim();
-    const questionnaireTitle = String(request.data?.questionnaireTitle || "").trim();
-    const link  = String(request.data?.link || "").trim();
+    const to       = normalizeEmail(request.data?.to);
+    const userName = String(request.data?.userName || "").trim();
 
-    if (!to || !link) throw new HttpsError("invalid-argument", "Faltan campos: to/link");
+    // Batch mode
+    const batch: Array<{ title: string; link: string }> = request.data?.questionnaires || [];
 
-    const token  = await getGraphToken();
-    const sender = SENDER_EMAIL.value();
-    const year   = new Date().getFullYear();
+    // Single mode (legacy)
+    const singleTitle = String(request.data?.questionnaireTitle || "").trim();
+    const singleLink  = String(request.data?.link || "").trim();
 
-    const subject = `Tienes un cuestionario pendiente en Inteegrados`;
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6">
-        <div style="background:linear-gradient(135deg,#005528,#008C3C);padding:32px 24px;border-radius:12px 12px 0 0;text-align:center">
-          <h1 style="color:#fff;margin:0;font-size:26px;letter-spacing:3px;font-weight:800">
-            INTE<span style="color:#7BCB6A">E</span>GRADOS
-          </h1>
-          <p style="color:#7BCB6A;margin:6px 0 0;font-size:12px;letter-spacing:1px">GESTIÓN DE TALENTO HUMANO</p>
-        </div>
-        <div style="background:#fff;padding:32px 24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-          <p style="font-size:16px;color:#374151;margin-top:0">Hola <b>${userName}</b>,</p>
-          <p style="color:#6b7280">
-            Tienes un nuevo cuestionario pendiente por completar.<br>
-            Tu información nos ayuda a brindarte una mejor experiencia.
-          </p>
-          <div style="border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;margin:20px 0;display:flex;align-items:center;justify-content:space-between">
-            <p style="margin:0;font-weight:600;color:#1f2937;font-size:15px">${questionnaireTitle}</p>
-            <a href="${link}"
-               style="background:#008C3C;color:#fff;text-decoration:none;padding:10px 22px;
-                      border-radius:6px;font-weight:700;font-size:13px;white-space:nowrap;margin-left:16px">
-              Responder →
-            </a>
-          </div>
-          <p style="color:#9ca3af;font-size:13px">
-            Este enlace es personal e intransferible. Si tienes alguna duda, responde este correo.
-          </p>
-          <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:24px;border-top:1px solid #f3f4f6;padding-top:16px">
-            © ${year} Inteegrados · Todos los derechos reservados
-          </p>
-        </div>
-      </div>
-    `;
+    const items = batch.length > 0
+      ? batch
+      : singleLink ? [{ title: singleTitle, link: singleLink }] : [];
 
-    const sendUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`;
-    const graphRes = await fetch(sendUrl, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: {
-          subject,
-          body: { contentType: "HTML", content: html },
-          toRecipients: [{ emailAddress: { address: to } }],
-        },
-        saveToSentItems: true,
-      }),
-    });
-
-    if (!graphRes.ok) {
-      const errText = await graphRes.text();
-      throw new HttpsError("internal", `Graph sendMail error: ${errText}`);
-    }
-
-    return { ok: true };
-  }
-);
-
-export const sendBatchAssignmentEmail = onCall(
-  {
-    region: "us-central1",
-    cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
-  },
-  async (request) => {
-    const to    = normalizeEmail(request.data?.to);
-    const userName      = String(request.data?.userName || "").trim();
-    const questionnaires: Array<{ title: string; link: string }> = request.data?.questionnaires || [];
-
-    if (!to || questionnaires.length === 0) {
+    if (!to || items.length === 0) {
       throw new HttpsError("invalid-argument", "Faltan campos requeridos");
     }
 
-    const token  = await getGraphToken();
-    const sender = SENDER_EMAIL.value();
-    const year   = new Date().getFullYear();
-    const count  = questionnaires.length;
+    const graphToken = await getGraphToken();
+    const sender     = SENDER_EMAIL.value();
+    const year       = new Date().getFullYear();
+    const count      = items.length;
 
-    const cards = questionnaires.map(q => `
-      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px 18px;margin:10px 0;
-                  display:flex;align-items:center;justify-content:space-between;gap:12px">
-        <p style="margin:0;font-weight:600;color:#1f2937;font-size:14px;flex:1">${q.title}</p>
-        <a href="${q.link}"
-           style="background:#008C3C;color:#fff;text-decoration:none;padding:9px 20px;
-                  border-radius:6px;font-weight:700;font-size:13px;white-space:nowrap">
-          Responder →
-        </a>
-      </div>
+    const cards = items.map(q => `
+      <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;margin:10px 0;overflow:hidden">
+        <tr>
+          <td style="padding:14px 18px;font-weight:600;color:#1f2937;font-size:14px">
+            ${q.title}
+          </td>
+          <td style="padding:14px 18px;text-align:right;white-space:nowrap">
+            <a href="${q.link}"
+               style="background:#008C3C;color:#ffffff;text-decoration:none;padding:9px 20px;
+                      border-radius:6px;font-weight:700;font-size:13px;display:inline-block">
+              Responder &rarr;
+            </a>
+          </td>
+        </tr>
+      </table>
     `).join("");
 
     const subject = count === 1
@@ -319,30 +265,36 @@ export const sendBatchAssignmentEmail = onCall(
       : `Tienes ${count} cuestionarios pendientes en Inteegrados`;
 
     const html = `
-      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6">
-        <div style="background:linear-gradient(135deg,#005528,#008C3C);padding:32px 24px;border-radius:12px 12px 0 0;text-align:center">
-          <h1 style="color:#fff;margin:0;font-size:26px;letter-spacing:3px;font-weight:800">
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6;color:#374151">
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#005528,#008C3C);padding:32px 24px;
+                    border-radius:12px 12px 0 0;text-align:center">
+          <h1 style="color:#ffffff;margin:0;font-size:26px;letter-spacing:3px;font-weight:800">
             INTE<span style="color:#7BCB6A">E</span>GRADOS
           </h1>
-          <p style="color:#7BCB6A;margin:6px 0 0;font-size:12px;letter-spacing:1px">GESTIÓN DE TALENTO HUMANO</p>
+          <p style="color:#7BCB6A;margin:6px 0 0;font-size:12px;letter-spacing:1px">
+            GESTIÓN DE TALENTO HUMANO
+          </p>
         </div>
 
-        <div style="background:#fff;padding:32px 24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-          <p style="font-size:16px;color:#374151;margin-top:0">Hola <b>${userName}</b>,</p>
+        <!-- Body -->
+        <div style="background:#ffffff;padding:32px 24px;border:1px solid #e5e7eb;
+                    border-top:none;border-radius:0 0 12px 12px">
+          <p style="font-size:16px;margin-top:0">Hola <b>${userName}</b>,</p>
           <p style="color:#6b7280;margin-bottom:4px">
             ${count === 1
               ? "Tienes <b>1 cuestionario</b> pendiente por completar."
               : `Tienes <b>${count} cuestionarios</b> pendientes por completar.`}
           </p>
           <p style="color:#6b7280;margin-top:4px">
-            Tu información es muy importante para nosotros y nos ayuda a brindarte
+            Tu información es importante para nosotros y nos ayuda a brindarte
             una experiencia personalizada. ¡Tómate tu tiempo!
           </p>
 
           <div style="background:#f9fafb;border-radius:10px;padding:16px 18px;margin:20px 0">
             <p style="margin:0 0 10px;font-size:11px;color:#6b7280;text-transform:uppercase;
                       font-weight:700;letter-spacing:1px">
-              📋 Cuestionarios asignados
+              Cuestionarios asignados
             </p>
             ${cards}
           </div>
@@ -354,7 +306,7 @@ export const sendBatchAssignmentEmail = onCall(
 
           <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:24px;
                     border-top:1px solid #f3f4f6;padding-top:16px">
-            © ${year} Inteegrados · Todos los derechos reservados
+            &copy; ${year} Inteegrados &middot; Todos los derechos reservados
           </p>
         </div>
       </div>
@@ -363,7 +315,7 @@ export const sendBatchAssignmentEmail = onCall(
     const sendUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`;
     const graphRes = await fetch(sendUrl, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         message: {
           subject,
