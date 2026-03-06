@@ -1,6 +1,6 @@
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
-  doc, query, where, serverTimestamp, orderBy,
+  doc, query, where, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { Project } from '../models/types/Project';
@@ -9,15 +9,17 @@ class ProjectService {
   private col = 'projects';
 
   async getAll(): Promise<Project[]> {
-    const snap = await getDocs(query(collection(db, this.col), orderBy('name')));
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
+    const snap = await getDocs(collection(db, this.col));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getByCompany(companyId: string): Promise<Project[]> {
     const snap = await getDocs(
-      query(collection(db, this.col), where('companyId', '==', companyId), orderBy('name'))
+      query(collection(db, this.col), where('companyId', '==', companyId))
     );
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async create(data: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {

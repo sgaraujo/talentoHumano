@@ -223,7 +223,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
   // ── load projects when company changes ────────────────────────────────────
   useEffect(() => {
     if (!contract.companyId) { setProjects([]); return; }
-    projectService.getByCompany(contract.companyId).then(setProjects).catch(() => {});
+    projectService.getByCompany(contract.companyId).then(setProjects).catch(e => console.error('Error loading projects:', e));
   }, [contract.companyId]);
 
   // ── populate form when user changes ──────────────────────────────────────

@@ -308,7 +308,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
   // ── cargar proyectos cuando cambia la empresa ────────────────────────────
   useEffect(() => {
     if (!contract.companyId) { setProjects([]); return; }
-    projectService.getByCompany(contract.companyId).then(setProjects).catch(() => {});
+    projectService.getByCompany(contract.companyId).then(setProjects).catch(e => console.error('Error loading projects:', e));
     // resetear campos dependientes de empresa
     setContract(p => ({ ...p, projectId: '', project: '', leaderId: '', leaderName: '', area: '', position: '', sede: '' }));
   }, [contract.companyId]);

@@ -13,9 +13,10 @@ import {
 import {
   Building2, Plus, Pencil, Trash2, Phone,
   Mail, MapPin, Search, Loader2, BarChart2,
-  Users, UserMinus, UserPlus, TrendingUp,
+  Users, UserMinus, UserPlus, TrendingUp, FolderKanban,
 } from 'lucide-react';
 import type { Company } from '@/models/types/Company';
+import { ManageProjectsDialog } from '@/components/companies/ManageProjectsDialog';
 
 // ── Date helper (Firestore Timestamp safe) ──
 const toDate = (raw: any): Date | null => {
@@ -59,6 +60,8 @@ export const CompaniesPage = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selected, setSelected] = useState<Company | null>(null);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectsCompany, setProjectsCompany] = useState<Company | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
 
@@ -332,13 +335,21 @@ export const CompaniesPage = () => {
                   </div>
 
                   {/* Botones */}
-                  <div className="flex gap-2 pt-1 mt-auto">
+                  <div className="flex gap-2 pt-1 mt-auto flex-wrap">
                     <Button
                       size="sm"
                       className="flex-1 text-xs bg-[#008C3C] hover:bg-[#006C2F] text-white"
                       onClick={() => navigate(`/empresas/${c.id}/analytics`)}
                     >
-                      <BarChart2 className="w-3.5 h-3.5 mr-1" /> Ver Analytics
+                      <BarChart2 className="w-3.5 h-3.5 mr-1" /> Analytics
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 text-xs text-[#1F8FBF] border-[#1F8FBF]/30 hover:bg-[#1F8FBF]/10"
+                      onClick={() => { setProjectsCompany(c); setProjectsOpen(true); }}
+                    >
+                      <FolderKanban className="w-3.5 h-3.5 mr-1" /> Proyectos
                     </Button>
                     <Button size="sm" variant="outline" className="text-xs" onClick={() => openEdit(c)}>
                       <Pencil className="w-3.5 h-3.5" />
@@ -403,6 +414,16 @@ export const CompaniesPage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Dialog: Gestionar Proyectos ── */}
+      {projectsCompany && (
+        <ManageProjectsDialog
+          open={projectsOpen}
+          onOpenChange={setProjectsOpen}
+          companyId={projectsCompany.id}
+          companyName={projectsCompany.name}
+        />
+      )}
 
       {/* ── Dialog: Eliminar ── */}
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
