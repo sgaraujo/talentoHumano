@@ -55,7 +55,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
     setLoading(true);
     try {
       const [projs, users] = await Promise.all([
-        projectService.getByCompany(companyId),
+        projectService.getByCompanyFull(companyId, companyName),
         userService.getAll(),
       ]);
       setProjects(projs);

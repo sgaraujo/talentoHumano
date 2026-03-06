@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companyService } from '@/services/companyService';
-import { analyticsService } from '@/services/analyticsService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,110 +12,37 @@ import {
 import {
   Building2, Plus, Pencil, Trash2, Phone,
   Mail, MapPin, Search, Loader2, BarChart2,
-  Users, UserMinus, UserPlus, TrendingUp, FolderKanban,
 } from 'lucide-react';
 import type { Company } from '@/models/types/Company';
-import { ManageProjectsDialog } from '@/components/companies/ManageProjectsDialog';
-
-// ── Date helper (Firestore Timestamp safe) ──
-const toDate = (raw: any): Date | null => {
-  if (!raw) return null;
-  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
-  if (typeof raw.toDate === 'function') return raw.toDate();
-  if (typeof raw.seconds === 'number') return new Date(raw.seconds * 1000);
-  if (typeof raw === 'string' && raw.trim()) return new Date(raw);
-  return null;
-};
 
 const EMPTY: Omit<Company, 'id' | 'createdAt' | 'updatedAt'> = {
   name: '', nit: '', address: '', phone: '', email: '',
   logo: '', regional: '', baseDeOperacion: '', active: true,
 };
 
-const MONTH_NAMES = [
-  'Enero','Febrero','Marzo','Abril','Mayo','Junio',
-  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
-];
-
-interface CompanyStats {
-  activos: number;
-  retirados: number;          // excolaboradores totales
-  retiradosMes: number;       // retiros del mes actual (movements)
-  ingresosMes: number;        // ingresos del mes actual (movements)
-  rotacionMes: number;        // % rotación del mes
-}
-
 export const CompaniesPage = () => {
   const navigate = useNavigate();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [search, setSearch]       = useState('');
 
-  // Stats data
-  const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [allMovements, setAllMovements] = useState<any[]>([]);
-
-  // Dialogs
-  const [formOpen, setFormOpen] = useState(false);
+  const [formOpen, setFormOpen]   = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [selected, setSelected] = useState<Company | null>(null);
-  const [projectsOpen, setProjectsOpen] = useState(false);
-  const [projectsCompany, setProjectsCompany] = useState<Company | null>(null);
-  const [form, setForm] = useState(EMPTY);
-  const [saving, setSaving] = useState(false);
+  const [selected, setSelected]   = useState<Company | null>(null);
+  const [form, setForm]           = useState(EMPTY);
+  const [saving, setSaving]       = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [data, movs] = await Promise.all([
-        companyService.getAll(),
-        analyticsService.getMovements(),
-      ]);
+      const data = await companyService.getAll();
       setCompanies(data);
-      setAllMovements(movs);
-
-      // Load users via userService
-      const { userService } = await import('@/services/userService');
-      const users = await userService.getAll();
-      setAllUsers(users);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { load(); }, []);
-
-  // Pre-compute stats per company name
-  const statsMap = useMemo<Record<string, CompanyStats>>(() => {
-    const now = new Date();
-    const curMonth = now.getMonth();
-    const curYear = now.getFullYear();
-    const map: Record<string, CompanyStats> = {};
-
-    companies.forEach(c => {
-      const compUsers = allUsers.filter(u => u.contractInfo?.assignment?.company === c.name);
-      const activos = compUsers.filter(u => u.role === 'colaborador').length;
-      const retirados = compUsers.filter(u => u.role === 'excolaborador').length;
-
-      const compMovs = allMovements.filter(m => m.company === c.name);
-      const retiradosMes = compMovs.filter(m => {
-        const d = toDate(m.date);
-        return m.type === 'retiro' && d && d.getMonth() === curMonth && d.getFullYear() === curYear;
-      }).length;
-      const ingresosMes = compMovs.filter(m => {
-        const d = toDate(m.date);
-        return m.type === 'ingreso' && d && d.getMonth() === curMonth && d.getFullYear() === curYear;
-      }).length;
-
-      const rotacionMes = activos > 0
-        ? Math.round((retiradosMes / activos) * 1000) / 10
-        : 0;
-
-      map[c.name] = { activos, retirados, retiradosMes, ingresosMes, rotacionMes };
-    });
-
-    return map;
-  }, [companies, allUsers, allMovements]);
 
   const filtered = companies.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -156,8 +82,6 @@ export const CompaniesPage = () => {
     load();
   };
 
-  const mesActual = MONTH_NAMES[new Date().getMonth()];
-
   return (
     <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
 
@@ -172,22 +96,11 @@ export const CompaniesPage = () => {
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-6">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-        <Input
-          placeholder="Buscar por nombre o NIT..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-10 border-[#008C3C]/30 focus:ring-[#008C3C]"
-        />
-      </div>
-
-      {/* Stats globales */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <Card className="border-l-4 border-l-[#008C3C]">
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-gray-500">Total empresas</p>
+            <p className="text-xs text-gray-500">Total</p>
             <p className="text-2xl font-bold text-[#008C3C]">{companies.length}</p>
           </CardContent>
         </Card>
@@ -205,7 +118,18 @@ export const CompaniesPage = () => {
         </Card>
       </div>
 
-      {/* Grid de empresas */}
+      {/* Search */}
+      <div className="relative mb-6">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+        <Input
+          placeholder="Buscar por nombre o NIT..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pl-10 border-[#008C3C]/30 focus:ring-[#008C3C]"
+        />
+      </div>
+
+      {/* Grid */}
       {loading ? (
         <div className="flex justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-[#008C3C]" />
@@ -220,152 +144,95 @@ export const CompaniesPage = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(c => {
-            const s = statsMap[c.name] ?? { activos: 0, retirados: 0, retiradosMes: 0, ingresosMes: 0, rotacionMes: 0 };
-            return (
-              <Card key={c.id} className="hover:shadow-md transition-shadow group flex flex-col">
-                {/* ── Cabecera ── */}
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
-                        {c.logo
-                          ? <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain rounded" />
-                          : <Building2 className="w-5 h-5 text-[#008C3C]" />
-                        }
-                      </div>
-                      <div>
-                        <CardTitle className="text-sm font-semibold text-[#4A4A4A] leading-tight">
-                          {c.name}
-                        </CardTitle>
-                        <p className="text-xs text-gray-500">NIT: {c.nit}</p>
-                      </div>
+          {filtered.map(c => (
+            <Card key={c.id} className="hover:shadow-md transition-shadow flex flex-col">
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
+                      {c.logo
+                        ? <img src={c.logo} alt={c.name} className="w-8 h-8 object-contain rounded" />
+                        : <Building2 className="w-5 h-5 text-[#008C3C]" />
+                      }
                     </div>
-                    <Badge
-                      variant={c.active ? 'default' : 'secondary'}
-                      className={c.active ? 'bg-green-100 text-green-700 text-xs' : 'text-xs'}
-                    >
-                      {c.active ? 'Activa' : 'Inactiva'}
-                    </Badge>
-                  </div>
-                </CardHeader>
-
-                <CardContent className="flex-1 flex flex-col gap-3">
-                  {/* Info de contacto */}
-                  <div className="space-y-1">
-                    {c.address && (
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                        <span className="truncate text-xs text-gray-600">{c.address}</span>
-                      </div>
-                    )}
-                    {c.phone && (
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                        <span className="text-xs text-gray-600">{c.phone}</span>
-                      </div>
-                    )}
-                    {c.email && (
-                      <div className="flex items-center gap-2">
-                        <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                        <span className="truncate text-xs text-gray-600">{c.email}</span>
-                      </div>
-                    )}
-                    {c.regional && (
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-3.5 h-3.5 text-[#008C3C] flex-shrink-0" />
-                        <span className="text-xs text-[#008C3C]">{c.regional}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ── Mini analytics del mes ── */}
-                  <div className="rounded-lg border border-gray-100 bg-gray-50 p-2.5 space-y-2">
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
-                      Rotación · {mesActual}
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      {/* Headcount */}
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-6 h-6 rounded-md bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
-                          <Users className="w-3.5 h-3.5 text-[#008C3C]" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-[#008C3C] leading-none">{s.activos}</p>
-                          <p className="text-[10px] text-gray-400">Activos</p>
-                        </div>
-                      </div>
-
-                      {/* % Rotación mes */}
-                      <div className="flex items-center gap-1.5">
-                        <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${s.rotacionMes > 5 ? 'bg-red-100' : 'bg-blue-50'}`}>
-                          <TrendingUp className={`w-3.5 h-3.5 ${s.rotacionMes > 5 ? 'text-red-500' : 'text-[#1F8FBF]'}`} />
-                        </div>
-                        <div>
-                          <p className={`text-sm font-bold leading-none ${s.rotacionMes > 5 ? 'text-red-500' : 'text-[#1F8FBF]'}`}>
-                            {s.rotacionMes}%
-                          </p>
-                          <p className="text-[10px] text-gray-400">Rotación</p>
-                        </div>
-                      </div>
-
-                      {/* Retiros del mes */}
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-6 h-6 rounded-md bg-red-50 flex items-center justify-center flex-shrink-0">
-                          <UserMinus className="w-3.5 h-3.5 text-red-500" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-red-500 leading-none">{s.retiradosMes}</p>
-                          <p className="text-[10px] text-gray-400">Retiros mes</p>
-                        </div>
-                      </div>
-
-                      {/* Ingresos del mes */}
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-6 h-6 rounded-md bg-emerald-50 flex items-center justify-center flex-shrink-0">
-                          <UserPlus className="w-3.5 h-3.5 text-emerald-600" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-emerald-600 leading-none">{s.ingresosMes}</p>
-                          <p className="text-[10px] text-gray-400">Ingresos mes</p>
-                        </div>
-                      </div>
+                    <div>
+                      <CardTitle className="text-sm font-semibold text-[#4A4A4A] leading-tight">
+                        {c.name}
+                      </CardTitle>
+                      <p className="text-xs text-gray-500">NIT: {c.nit}</p>
                     </div>
                   </div>
+                  <Badge
+                    variant={c.active ? 'default' : 'secondary'}
+                    className={c.active ? 'bg-green-100 text-green-700 text-xs' : 'text-xs'}
+                  >
+                    {c.active ? 'Activa' : 'Inactiva'}
+                  </Badge>
+                </div>
+              </CardHeader>
 
-                  {/* Botones */}
-                  <div className="flex gap-2 pt-1 mt-auto flex-wrap">
-                    <Button
-                      size="sm"
-                      className="flex-1 text-xs bg-[#008C3C] hover:bg-[#006C2F] text-white"
-                      onClick={() => navigate(`/empresas/${c.id}/analytics`)}
-                    >
-                      <BarChart2 className="w-3.5 h-3.5 mr-1" /> Analytics
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1 text-xs text-[#1F8FBF] border-[#1F8FBF]/30 hover:bg-[#1F8FBF]/10"
-                      onClick={() => { setProjectsCompany(c); setProjectsOpen(true); }}
-                    >
-                      <FolderKanban className="w-3.5 h-3.5 mr-1" /> Proyectos
-                    </Button>
-                    <Button size="sm" variant="outline" className="text-xs" onClick={() => openEdit(c)}>
-                      <Pencil className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button size="sm" variant="outline" className="text-xs text-red-500 hover:bg-red-50 border-red-200" onClick={() => openDelete(c)}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+              <CardContent className="flex-1 flex flex-col gap-3">
+                {/* Contact info */}
+                <div className="space-y-1">
+                  {c.address && (
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                      <span className="truncate text-xs text-gray-600">{c.address}</span>
+                    </div>
+                  )}
+                  {c.phone && (
+                    <div className="flex items-center gap-2">
+                      <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                      <span className="text-xs text-gray-600">{c.phone}</span>
+                    </div>
+                  )}
+                  {c.email && (
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                      <span className="truncate text-xs text-gray-600">{c.email}</span>
+                    </div>
+                  )}
+                  {c.regional && (
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-[#008C3C] flex-shrink-0" />
+                      <span className="text-xs text-[#008C3C]">{c.regional}</span>
+                    </div>
+                  )}
+                  {c.baseDeOperacion && (
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                      <span className="text-xs text-gray-600">{c.baseDeOperacion}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-1 mt-auto">
+                  <Button
+                    size="sm"
+                    className="flex-1 text-xs bg-[#008C3C] hover:bg-[#006C2F] text-white"
+                    onClick={() => navigate(`/empresas/${c.id}/analytics`)}
+                  >
+                    <BarChart2 className="w-3.5 h-3.5 mr-1" /> Analytics
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-xs" onClick={() => openEdit(c)}>
+                    <Pencil className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    size="sm" variant="outline"
+                    className="text-xs text-red-500 hover:bg-red-50 border-red-200"
+                    onClick={() => openDelete(c)}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
-      {/* ── Dialog: Crear / Editar ── */}
+      {/* Dialog: Crear / Editar */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -415,17 +282,7 @@ export const CompaniesPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── Dialog: Gestionar Proyectos ── */}
-      {projectsCompany && (
-        <ManageProjectsDialog
-          open={projectsOpen}
-          onOpenChange={setProjectsOpen}
-          companyId={projectsCompany.id}
-          companyName={projectsCompany.name}
-        />
-      )}
-
-      {/* ── Dialog: Eliminar ── */}
+      {/* Dialog: Eliminar */}
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>

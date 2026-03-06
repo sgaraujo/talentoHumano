@@ -150,10 +150,13 @@ export const CompanyAnalyticsPage = () => {
         if (!found) return;
         setCompany(found);
 
-        const [emps, allMovs] = await Promise.all([
-          companyService.getUsersByCompany(found.name),
+        const [byId, byName, allMovs] = await Promise.all([
+          companyService.getUsersByCompany(companyId!),
+          companyService.getUsersByCompanyName(found.name),
           analyticsService.getMovements(),
         ]);
+        const seenIds = new Set(byId.map((u: any) => u.id));
+        const emps = [...byId, ...byName.filter((u: any) => !seenIds.has(u.id))];
         setEmployees(emps);
         setMovements(allMovs.filter(m => m.company === found.name));
       } finally {

@@ -22,6 +22,23 @@ class ProjectService {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  /** Busca por companyId Y por companyName para cubrir datos legacy */
+  async getByCompanyFull(companyId: string, companyName: string): Promise<Project[]> {
+    const [snapId, snapName] = await Promise.all([
+      getDocs(query(collection(db, this.col), where('companyId', '==', companyId))),
+      getDocs(query(collection(db, this.col), where('companyName', '==', companyName))),
+    ]);
+    const seen = new Set<string>();
+    const all: Project[] = [];
+    for (const d of [...snapId.docs, ...snapName.docs]) {
+      if (!seen.has(d.id)) {
+        seen.add(d.id);
+        all.push({ id: d.id, ...d.data() } as Project);
+      }
+    }
+    return all.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   async create(data: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     const ref = await addDoc(collection(db, this.col), {
       ...data,

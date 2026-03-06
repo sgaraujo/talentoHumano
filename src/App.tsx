@@ -14,6 +14,7 @@ import UsersSearchPage from './views/Users/UsersSearchPage';
 import ExportQueueTable from './views/Exporter/ExporterPage';
 import { CompaniesPage } from './views/Companies/CompaniesPage';
 import { CompanyAnalyticsPage } from './views/Companies/CompanyAnalyticsPage';
+import { ProjectsPage } from './views/Projects/ProjectsPage';
 
 
 
@@ -135,6 +136,19 @@ function App() {
               <Navigate to="/login" />
             )
           } />
+
+        <Route
+          path="/proyectos"
+          element={
+            !loading && isAuthenticated ? (
+              <MainLayout>
+                <ProjectsPage />
+              </MainLayout>
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
 
         <Route
           path="/empresas"
