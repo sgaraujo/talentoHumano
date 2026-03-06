@@ -18,6 +18,17 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, Plus } from 'lucide-react';
+
+const CORPORATE_DOMAIN = 'inteegra.net.co';
+
+const COLOMBIAN_BANKS = [
+  'Bancolombia','Banco de Bogotá','Banco Popular','Banco Davivienda',
+  'BBVA Colombia','Scotiabank Colpatria','Banco de Occidente','Banco Caja Social',
+  'AV Villas','Banco Agrario de Colombia','Banco GNB Sudameris','Banco Itaú',
+  'Banco Pichincha','Banco Falabella','Banco Mundo Mujer','Banco W',
+  'Banco Finandina','Bancamía','Banco Cooperativo Coopcentral',
+  'Nequi','Daviplata','Lulo Bank','Rappipay','Nu Colombia','Dale!','Movii','Uala','Otro',
+];
 import { toast } from 'sonner';
 import { userService } from '@/services/userService';
 import { companyService } from '@/services/companyService';
@@ -105,6 +116,66 @@ function parseLocalDate(s: string): Date {
   return new Date(y, m - 1, d);
 }
 
+// ─── ProjectComboInput ────────────────────────────────────────────────────────
+function ProjectComboInput({
+  value, projects, disabled, placeholder, onChange,
+}: {
+  value: string;
+  projects: Project[];
+  disabled?: boolean;
+  placeholder?: string;
+  onChange: (name: string, id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!value) return projects;
+    const q = value.toLowerCase();
+    return projects.filter(p => p.name.toLowerCase().includes(q));
+  }, [projects, value]);
+
+  const isNew = value.trim() !== '' && !projects.some(p => p.name === value);
+
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value, '')}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+      />
+      {open && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {filtered.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(p.name, p.id); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+            >
+              {p.name}
+            </button>
+          ))}
+          {filtered.length === 0 && !isNew && (
+            <div className="px-3 py-2 text-xs text-gray-400">
+              No hay proyectos — escribe para crear uno nuevo
+            </div>
+          )}
+          {isNew && (
+            <div className="px-3 py-2 text-xs text-[#008C3C] border-t border-gray-100 flex items-center gap-1">
+              <Plus className="w-3 h-3" />
+              Crear proyecto: <span className="font-semibold ml-1">"{value}"</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── props ────────────────────────────────────────────────────────────────────
 interface Props {
   open: boolean;
@@ -127,7 +198,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
   });
 
   const [ss, setSs] = useState({
-    baseSalary: '', salaryType: '', transportAllowance: '', workModality: '',
+    baseSalary: '', salaryType: '', transportAllowance: '', mealAllowance: '', workModality: '',
     eps: '', afp: '', ccf: '', arlRiskLevel: '',
   });
 
@@ -182,6 +253,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
       baseSalary:          user.salaryInfo?.baseSalary?.toString()                 || '',
       salaryType:          user.salaryInfo?.salaryType                             || '',
       transportAllowance:  user.salaryInfo?.transportAllowance?.toString()         || '',
+      mealAllowance:       (user.salaryInfo as any)?.mealAllowance?.toString()     || '',
       workModality:        user.contractInfo?.workConditions?.workModality         || '',
       eps:                 user.socialSecurity?.eps                                || '',
       afp:                 user.socialSecurity?.afp                                || '',
@@ -253,6 +325,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
       set('salaryInfo.baseSalary',                    ss.baseSalary ? Number(ss.baseSalary) : undefined);
       set('salaryInfo.salaryType',                    ss.salaryType);
       set('salaryInfo.transportAllowance',            ss.transportAllowance ? Number(ss.transportAllowance) : undefined);
+      set('salaryInfo.mealAllowance',                 ss.mealAllowance ? Number(ss.mealAllowance) : undefined);
       set('contractInfo.workConditions.workModality', ss.workModality);
       set('socialSecurity.eps',                       ss.eps);
       set('socialSecurity.afp',                       ss.afp);
@@ -263,14 +336,29 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
       set('bankingInfo.accountType',                  banking.accountType);
       set('bankingInfo.accountNumber',                banking.accountNumber);
 
+      // Si el proyecto es nuevo (nombre escrito manualmente, sin ID), crearlo
+      let resolvedProjectId = contract.projectId;
+      if (contract.project.trim() && !contract.projectId && contract.companyId) {
+        try {
+          resolvedProjectId = await projectService.create({
+            name: contract.project.trim(),
+            companyId: contract.companyId,
+            companyName: contract.company,
+            status: 'activo',
+            priority: 'media',
+          });
+          upd['contractInfo.assignment.projectId'] = resolvedProjectId;
+        } catch (e) { console.warn('Project auto-create failed:', e); }
+      }
+
       await userService.update(user.id, upd);
 
       // Sync memberships
       if (contract.companyId) {
         await membershipService.addToCompany(user.id, contract.companyId, basic.role === 'lider' ? 'lider' : 'miembro');
       }
-      if (contract.projectId && contract.companyId) {
-        await membershipService.addToProject(user.id, contract.projectId, contract.companyId, basic.role === 'lider' ? 'lider' : 'miembro');
+      if (resolvedProjectId && contract.companyId) {
+        await membershipService.addToProject(user.id, resolvedProjectId, contract.companyId, basic.role === 'lider' ? 'lider' : 'miembro');
       }
 
       toast.success('Usuario actualizado', {
@@ -325,6 +413,11 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
                   onChange={e => setBasic(p => ({ ...p, email: e.target.value }))}
                   placeholder="juan@gmail.com"
                 />
+                {basic.email.includes(CORPORATE_DOMAIN) && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    ⚠️ Parece un correo corporativo. Los cuestionarios deben enviarse al correo personal.
+                  </p>
+                )}
               </Field>
 
               <Field label="Tipo de usuario">
@@ -381,23 +474,16 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
               </div>
 
               <Field label="Proyecto">
-                <Select
-                  value={contract.projectId}
-                  onValueChange={v => {
-                    const p = projects.find(p => p.id === v);
-                    setContract(prev => ({ ...prev, projectId: v, project: p?.name || '' }));
-                  }}
+                <ProjectComboInput
+                  key={`proj-${contract.companyId}`}
+                  value={contract.project}
+                  projects={projects}
                   disabled={!contract.companyId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={contract.companyId ? 'Seleccionar proyecto' : 'Primero selecciona empresa'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder={contract.companyId ? 'Seleccionar o crear proyecto…' : 'Primero selecciona empresa'}
+                  onChange={(name, id) =>
+                    setContract(p => ({ ...p, project: name, projectId: id }))
+                  }
+                />
               </Field>
 
               <Field label="Líder">
@@ -500,6 +586,10 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
                     <Input type="number" placeholder="0" value={ss.transportAllowance}
                       onChange={e => setSs(p => ({ ...p, transportAllowance: e.target.value }))} />
                   </Field>
+                  <Field label="Auxilio de alimentación (COP)">
+                    <Input type="number" placeholder="0" value={ss.mealAllowance}
+                      onChange={e => setSs(p => ({ ...p, mealAllowance: e.target.value }))} />
+                  </Field>
                   <Field label="Modalidad de trabajo">
                     <Select value={ss.workModality} onValueChange={v => setSs(p => ({ ...p, workModality: v }))}>
                       <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
@@ -554,8 +644,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
                     onValueChange={v => setBanking(p => ({ ...p, bankName: v }))}>
                     <SelectTrigger><SelectValue placeholder="Seleccionar banco" /></SelectTrigger>
                     <SelectContent>
-                      {['Bancolombia','Davivienda','BBVA','Banco de Bogotá','Banco Popular',
-                        'Banco de Occidente','AV Villas','Nequi','Daviplata','Otro'].map(b => (
+                      {COLOMBIAN_BANKS.map(b => (
                         <SelectItem key={b} value={b}>{b}</SelectItem>
                       ))}
                     </SelectContent>

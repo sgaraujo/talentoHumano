@@ -35,6 +35,15 @@ import { membershipService } from '@/services/membershipService';
 import type { Project } from '@/models/types/Project';
 
 const CORPORATE_DOMAIN = 'inteegra.net.co';
+
+const COLOMBIAN_BANKS = [
+  'Bancolombia','Banco de Bogotá','Banco Popular','Banco Davivienda',
+  'BBVA Colombia','Scotiabank Colpatria','Banco de Occidente','Banco Caja Social',
+  'AV Villas','Banco Agrario de Colombia','Banco GNB Sudameris','Banco Itaú',
+  'Banco Pichincha','Banco Falabella','Banco Mundo Mujer','Banco W',
+  'Banco Finandina','Bancamía','Banco Cooperativo Coopcentral',
+  'Nequi','Daviplata','Lulo Bank','Rappipay','Nu Colombia','Dale!','Movii','Uala','Otro',
+];;
 const DEFAULT_Q_TITLES = [
   'Datos Personales',
   'Datos Sociodemográficos',
@@ -96,6 +105,66 @@ function ComboInput({
             <div className="px-3 py-2 text-xs text-[#008C3C] border-t border-gray-100 flex items-center gap-1">
               <Plus className="w-3 h-3" />
               Crear: <span className="font-semibold ml-1">"{value}"</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ProjectComboInput: muestra proyectos existentes y permite crear nuevos ──
+function ProjectComboInput({
+  value, projects, disabled, placeholder, onChange,
+}: {
+  value: string;
+  projects: Project[];
+  disabled?: boolean;
+  placeholder?: string;
+  onChange: (name: string, id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!value) return projects;
+    const q = value.toLowerCase();
+    return projects.filter(p => p.name.toLowerCase().includes(q));
+  }, [projects, value]);
+
+  const isNew = value.trim() !== '' && !projects.some(p => p.name === value);
+
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value, '')}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+      />
+      {open && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {filtered.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(p.name, p.id); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors"
+            >
+              {p.name}
+            </button>
+          ))}
+          {filtered.length === 0 && !isNew && (
+            <div className="px-3 py-2 text-xs text-gray-400">
+              No hay proyectos — escribe para crear uno nuevo
+            </div>
+          )}
+          {isNew && (
+            <div className="px-3 py-2 text-xs text-[#008C3C] border-t border-gray-100 flex items-center gap-1">
+              <Plus className="w-3 h-3" />
+              Crear proyecto: <span className="font-semibold ml-1">"{value}"</span>
             </div>
           )}
         </div>
@@ -197,7 +266,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
 
   // Step 2
   const [ss, setSs] = useState({
-    baseSalary: '', salaryType: '', transportAllowance: '', workModality: '',
+    baseSalary: '', salaryType: '', transportAllowance: '', mealAllowance: '', workModality: '',
     eps: '', afp: '', ccf: '', arlRiskLevel: '',
   });
 
@@ -251,7 +320,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
       setBasic({ fullName: '', email: '', role: 'colaborador', corporateEmail: '' });
       setCorpEdited(false);
       setContract({ companyId: '', company: '', projectId: '', project: '', leaderId: '', leaderName: '', area: '', position: '', sede: '', contractType: '', startDate: '' });
-      setSs({ baseSalary: '', salaryType: '', transportAllowance: '', workModality: '', eps: '', afp: '', ccf: '', arlRiskLevel: '' });
+      setSs({ baseSalary: '', salaryType: '', transportAllowance: '', mealAllowance: '', workModality: '', eps: '', afp: '', ccf: '', arlRiskLevel: '' });
       setBanking({ bankName: '', accountType: '', accountNumber: '' });
       setSendWelcome(true);
       setSelectedQs([]);
@@ -307,6 +376,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
       set('salaryInfo.baseSalary',                    ss.baseSalary ? Number(ss.baseSalary) : '');
       set('salaryInfo.salaryType',                    ss.salaryType);
       set('salaryInfo.transportAllowance',            ss.transportAllowance ? Number(ss.transportAllowance) : '');
+      set('salaryInfo.mealAllowance',                 ss.mealAllowance ? Number(ss.mealAllowance) : '');
       set('contractInfo.workConditions.workModality', ss.workModality);
       set('socialSecurity.eps',                       ss.eps);
       set('socialSecurity.afp',                       ss.afp);
@@ -318,6 +388,25 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
 
       if (Object.keys(upd).length > 0) await userService.update(newUserId, upd);
 
+      // Si el proyecto es nuevo (nombre escrito manualmente, sin ID), crearlo primero
+      let resolvedProjectId = contract.projectId;
+      if (contract.project.trim() && !contract.projectId && contract.companyId) {
+        try {
+          resolvedProjectId = await projectService.create({
+            name: contract.project.trim(),
+            companyId: contract.companyId,
+            companyName: contract.company,
+            status: 'activo',
+            priority: 'media',
+          });
+        } catch (e) { console.warn('Project auto-create failed:', e); }
+      }
+      if (resolvedProjectId && resolvedProjectId !== contract.projectId) {
+        await userService.update(newUserId, {
+          'contractInfo.assignment.projectId': resolvedProjectId,
+        });
+      }
+
       // Crear membresías (empresa + proyecto)
       if (contract.companyId) {
         try {
@@ -325,9 +414,9 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
             basic.role === 'lider' ? 'lider' : 'miembro');
         } catch (e) { console.warn('Company membership failed:', e); }
       }
-      if (contract.projectId && contract.companyId) {
+      if (resolvedProjectId && contract.companyId) {
         try {
-          await membershipService.addToProject(newUserId, contract.projectId, contract.companyId,
+          await membershipService.addToProject(newUserId, resolvedProjectId, contract.companyId,
             basic.role === 'lider' ? 'lider' : 'miembro');
         } catch (e) { console.warn('Project membership failed:', e); }
       }
@@ -416,9 +505,14 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
               </Field>
             </div>
 
-            <Field label="Correo personal" required hint="Para login y notificaciones">
+            <Field label="Correo personal" required hint="Gmail, Hotmail u otro correo NO corporativo — aquí llegarán los cuestionarios">
               <Input type="email" placeholder="juan@gmail.com" value={basic.email}
                 onChange={e => setBasic(p => ({ ...p, email: e.target.value }))} />
+              {basic.email.includes(CORPORATE_DOMAIN) && (
+                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                  ⚠️ Parece un correo corporativo. Los cuestionarios deben enviarse al correo personal.
+                </p>
+              )}
             </Field>
 
             <Field label="Tipo de usuario" required>
@@ -472,32 +566,29 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
               </Field>
             </div>
 
-            {/* Proyecto — desde colección real */}
+            {/* Proyecto */}
             <div className="sm:col-span-2">
-              <Field label="Proyecto" hint={!contract.companyId ? 'Selecciona una empresa primero' : ''}>
-                <Select
-                  value={contract.projectId}
+              <Field
+                label="Proyecto"
+                hint={!contract.companyId ? 'Selecciona una empresa primero' : 'Escoge uno existente o escribe para crear uno nuevo'}
+              >
+                <ProjectComboInput
+                  key={`proj-${contract.companyId}`}
+                  value={contract.project}
+                  projects={projects}
                   disabled={!contract.companyId}
-                  onValueChange={v => {
-                    const p = projects.find(x => x.id === v);
+                  placeholder={contract.companyId ? 'Seleccionar o crear proyecto…' : 'Primero selecciona empresa'}
+                  onChange={(name, id) => {
+                    const p = projects.find(x => x.id === id);
                     setContract(prev => ({
                       ...prev,
-                      projectId: v,
-                      project: p?.name ?? '',
-                      area:  prev.area  || p?.area  || '',
-                      sede:  prev.sede  || p?.sede  || '',
+                      project: name,
+                      projectId: id,
+                      area: prev.area || p?.area || '',
+                      sede: prev.sede || p?.sede || '',
                     }));
-                  }}>
-                  <SelectTrigger><SelectValue placeholder={projects.length ? 'Seleccionar proyecto' : 'Sin proyectos'} /></SelectTrigger>
-                  <SelectContent>
-                    {projects.map(p => (
-                      <SelectItem key={p.id} value={p.id}>
-                        <span>{p.name}</span>
-                        {p.status !== 'activo' && <span className="ml-2 text-xs text-gray-400">({p.status})</span>}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  }}
+                />
               </Field>
             </div>
 
@@ -604,6 +695,10 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
                   <Input type="number" placeholder="0" value={ss.transportAllowance}
                     onChange={e => setSs(p => ({ ...p, transportAllowance: e.target.value }))} />
                 </Field>
+                <Field label="Auxilio de alimentación (COP)">
+                  <Input type="number" placeholder="0" value={ss.mealAllowance}
+                    onChange={e => setSs(p => ({ ...p, mealAllowance: e.target.value }))} />
+                </Field>
                 <Field label="Modalidad de trabajo">
                   <Select value={ss.workModality} onValueChange={v => setSs(p => ({ ...p, workModality: v }))}>
                     <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
@@ -660,8 +755,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
                   onValueChange={v => setBanking(p => ({ ...p, bankName: v }))}>
                   <SelectTrigger><SelectValue placeholder="Seleccionar banco" /></SelectTrigger>
                   <SelectContent>
-                    {['Bancolombia','Davivienda','BBVA','Banco de Bogotá','Banco Popular',
-                      'Banco de Occidente','AV Villas','Nequi','Daviplata','Otro'].map(b => (
+                    {COLOMBIAN_BANKS.map(b => (
                       <SelectItem key={b} value={b}>{b}</SelectItem>
                     ))}
                   </SelectContent>

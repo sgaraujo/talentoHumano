@@ -189,12 +189,15 @@ export interface ContractInfo {
   
   assignment?: {
     company?: string;
+    companyId?: string;
     location?: string;
     area?: string;
     costCenter?: string;
     directSupervisor?: string;
     position?: string;
     project?: string;
+    projectId?: string;
+    leaderName?: string;
     analyticalAccount?: string;
     accountingProfile?: string;
     profile?: string;
