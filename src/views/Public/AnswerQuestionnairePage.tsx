@@ -250,9 +250,12 @@ export const AnswerQuestionnairePage = () => {
               <CheckCircle2 className="w-10 h-10 text-[#008C3C]" />
             </div>
             <h2 className="text-2xl font-bold text-[#4A4A4A] mb-2">¡Gracias!</h2>
-            <p className="text-gray-500">
-              Tu cuestionario ha sido enviado correctamente.<br />
-              Puedes cerrar esta ventana.
+            <p className="text-gray-600 font-medium mb-1">
+              Tus respuestas fueron guardadas correctamente.
+            </p>
+            <p className="text-gray-400 text-sm">
+              Nos alegra tenerte en el equipo. Seguiremos en contacto
+              para acompañarte en tu proceso. ¡Bienvenido/a a Inteegrados!
             </p>
           </div>
         </div>
@@ -283,7 +286,7 @@ export const AnswerQuestionnairePage = () => {
     );
   }
 
-  const questions = [...questionnaire.questions].sort((a, b) => a.order - b.order);
+  const questions = [...(questionnaire.questions ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const total = questions.length;
 
   // ── Questionnaire form ────────────────────────────────────────────────────
@@ -310,11 +313,35 @@ export const AnswerQuestionnairePage = () => {
       {/* Form */}
       <div className="flex-1 py-8 px-4">
         <div className="max-w-2xl mx-auto">
-          {questionnaire.description && (
-            <p className="text-gray-500 text-sm mb-6 bg-white rounded-xl border border-gray-100 px-4 py-3">
-              {questionnaire.description}
-            </p>
-          )}
+
+          {/* Mensaje de bienvenida */}
+          <div className="mb-6 rounded-2xl overflow-hidden border border-[#008C3C]/20 shadow-sm">
+            <div className="bg-gradient-to-r from-[#005528] to-[#008C3C] px-5 py-4">
+              <p className="text-white font-bold text-base leading-snug">
+                ¡Hola, {assignment.userName}! 👋
+              </p>
+              <p className="text-[#c6f0d4] text-sm mt-0.5">
+                Nos alegra tenerte en el equipo de Inteegrados
+              </p>
+            </div>
+            <div className="bg-white px-5 py-4 space-y-2 text-sm text-gray-600 leading-relaxed">
+              <p>
+                Este formulario nos ayuda a conocerte mejor y a brindarte una experiencia
+                de trabajo personalizada desde el primer día.
+                <strong className="text-[#008C3C]"> Tu información es confidencial</strong> y
+                solo será utilizada para mejorar tu bienestar y desarrollo profesional.
+              </p>
+              <p className="text-gray-500">
+                Tómate el tiempo que necesites — no hay respuestas correctas o incorrectas.
+                ¡Queremos conocer tu historia!
+              </p>
+              {questionnaire.description && (
+                <p className="mt-2 pt-2 border-t border-gray-100 text-gray-500 italic">
+                  {questionnaire.description}
+                </p>
+              )}
+            </div>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {questions.map((question, idx) => {

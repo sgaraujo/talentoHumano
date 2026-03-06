@@ -34,12 +34,19 @@ class CompanyService {
     await deleteDoc(doc(db, this.col, id));
   }
 
-  async getUsersByCompany(companyName: string) {
-    const q = query(
-      collection(db, 'users'),
-      where('contractInfo.assignment.company', '==', companyName)
+  /** Busca por companyId (array-contains) — forma correcta */
+  async getUsersByCompany(companyId: string) {
+    const snap = await getDocs(
+      query(collection(db, 'users'), where('companyIds', 'array-contains', companyId))
     );
-    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+
+  /** Compatibilidad: busca por nombre (string) — para datos legacy */
+  async getUsersByCompanyName(companyName: string) {
+    const snap = await getDocs(
+      query(collection(db, 'users'), where('contractInfo.assignment.company', '==', companyName))
+    );
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
 }

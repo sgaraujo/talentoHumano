@@ -21,7 +21,10 @@ import { Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '@/services/userService';
 import { companyService } from '@/services/companyService';
+import { projectService } from '@/services/projectService';
+import { membershipService } from '@/services/membershipService';
 import type { User, UserRole } from '@/models/types/User';
+import type { Project } from '@/models/types/Project';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -119,8 +122,8 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
   });
 
   const [contract, setContract] = useState({
-    company: '', area: '', position: '', project: '', sede: '',
-    contractType: '', startDate: '', endDate: '',
+    companyId: '', company: '', projectId: '', project: '', leaderId: '', leaderName: '',
+    area: '', position: '', sede: '', contractType: '', startDate: '', endDate: '',
   });
 
   const [ss, setSs] = useState({
@@ -134,6 +137,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
 
   // ── external data ─────────────────────────────────────────────────────────
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [projects, setProjects]   = useState<Project[]>([]);
   const [allUsers, setAllUsers]   = useState<any[]>([]);
 
   // ── load companies + all users once on open ───────────────────────────────
@@ -145,6 +149,12 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
     userService.getAll().then(setAllUsers).catch(() => {});
   }, [open]);
 
+  // ── load projects when company changes ────────────────────────────────────
+  useEffect(() => {
+    if (!contract.companyId) { setProjects([]); return; }
+    projectService.getByCompany(contract.companyId).then(setProjects).catch(() => {});
+  }, [contract.companyId]);
+
   // ── populate form when user changes ──────────────────────────────────────
   useEffect(() => {
     if (!user) return;
@@ -155,10 +165,14 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
       corporateEmail: user.location?.corporateEmail || '',
     });
     setContract({
+      companyId:    user.contractInfo?.assignment?.companyId    || '',
       company:      user.contractInfo?.assignment?.company      || '',
+      projectId:    user.contractInfo?.assignment?.projectId    || '',
+      project:      user.contractInfo?.assignment?.project      || '',
+      leaderId:     user.leaderId                               || '',
+      leaderName:   user.contractInfo?.assignment?.leaderName   || '',
       area:         user.contractInfo?.assignment?.area         || '',
       position:     user.contractInfo?.assignment?.position     || '',
-      project:      user.contractInfo?.assignment?.project      || '',
       sede:         user.contractInfo?.assignment?.location     || '',
       contractType: user.contractInfo?.contract?.contractType   || '',
       startDate:    formatDateForInput(user.contractInfo?.contract?.startDate),
@@ -183,8 +197,18 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
 
   // ── derive autocomplete options from company users ────────────────────────
   const companyUsers = useMemo(
-    () => allUsers.filter(u => u.id !== user?.id && u.contractInfo?.assignment?.company === contract.company),
-    [allUsers, contract.company, user?.id],
+    () => allUsers.filter(u =>
+      u.id !== user?.id && (
+        (u.companyIds && u.companyIds.includes(contract.companyId)) ||
+        u.contractInfo?.assignment?.company === contract.company
+      )
+    ),
+    [allUsers, contract.companyId, contract.company, user?.id],
+  );
+
+  const leaderOptions = useMemo(
+    () => companyUsers.filter(u => u.role === 'lider' || u.role === 'colaborador'),
+    [companyUsers],
   );
 
   const uniq = (arr: (string | undefined)[]) =>
@@ -192,7 +216,6 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
 
   const areaOptions     = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.area)),     [companyUsers]);
   const positionOptions = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.position)), [companyUsers]);
-  const projectOptions  = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.project)),  [companyUsers]);
   const sedeOptions     = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.location)), [companyUsers]);
 
   // ── submit ────────────────────────────────────────────────────────────────
@@ -214,12 +237,16 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
 
       set('location.corporateEmail',                  basic.corporateEmail);
 
+      set('contractInfo.assignment.companyId',        contract.companyId);
       set('contractInfo.assignment.company',          contract.company);
+      set('contractInfo.assignment.projectId',        contract.projectId);
+      set('contractInfo.assignment.project',          contract.project);
+      set('contractInfo.assignment.leaderName',       contract.leaderName);
       set('contractInfo.assignment.area',             contract.area);
       set('contractInfo.assignment.position',         contract.position);
-      set('contractInfo.assignment.project',          contract.project);
       set('contractInfo.assignment.location',         contract.sede);
       set('contractInfo.contract.contractType',       contract.contractType);
+      if (contract.leaderId) upd['leaderId'] = contract.leaderId;
       if (contract.startDate) upd['contractInfo.contract.startDate'] = parseLocalDate(contract.startDate);
       if (contract.endDate)   upd['contractInfo.contract.endDate']   = parseLocalDate(contract.endDate);
 
@@ -237,6 +264,14 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
       set('bankingInfo.accountNumber',                banking.accountNumber);
 
       await userService.update(user.id, upd);
+
+      // Sync memberships
+      if (contract.companyId) {
+        await membershipService.addToCompany(user.id, contract.companyId, basic.role === 'lider' ? 'lider' : 'miembro');
+      }
+      if (contract.projectId && contract.companyId) {
+        await membershipService.addToProject(user.id, contract.projectId, contract.companyId, basic.role === 'lider' ? 'lider' : 'miembro');
+      }
 
       toast.success('Usuario actualizado', {
         description: 'Los cambios se guardaron correctamente.',
@@ -297,6 +332,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="colaborador">Colaborador</SelectItem>
+                    <SelectItem value="lider">Líder</SelectItem>
                     <SelectItem value="aspirante">Aspirante</SelectItem>
                     <SelectItem value="excolaborador">Ex-colaborador</SelectItem>
                     <SelectItem value="descartado">Descartado</SelectItem>
@@ -320,29 +356,73 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
             <TabsContent value="contract" className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-0">
               <div className="sm:col-span-2">
                 <Field label="Empresa">
-                  {companies.length > 0 ? (
-                    <Select value={contract.company}
-                      onValueChange={v => setContract(p => ({ ...p, company: v, area: '', position: '', project: '', sede: '' }))}>
-                      <SelectTrigger><SelectValue placeholder="Seleccionar empresa" /></SelectTrigger>
-                      <SelectContent>
-                        {companies.map(c => (
-                          <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      value={contract.company}
-                      onChange={e => setContract(p => ({ ...p, company: e.target.value }))}
-                      placeholder="Nombre de la empresa"
-                    />
-                  )}
+                  <Select
+                    value={contract.companyId}
+                    onValueChange={v => {
+                      const c = companies.find(c => c.id === v);
+                      setContract(p => ({
+                        ...p,
+                        companyId: v,
+                        company: c?.name || '',
+                        projectId: '', project: '',
+                        leaderId: '', leaderName: '',
+                        area: '', position: '', sede: '',
+                      }));
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Seleccionar empresa" /></SelectTrigger>
+                    <SelectContent>
+                      {companies.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
               </div>
 
+              <Field label="Proyecto">
+                <Select
+                  value={contract.projectId}
+                  onValueChange={v => {
+                    const p = projects.find(p => p.id === v);
+                    setContract(prev => ({ ...prev, projectId: v, project: p?.name || '' }));
+                  }}
+                  disabled={!contract.companyId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={contract.companyId ? 'Seleccionar proyecto' : 'Primero selecciona empresa'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field label="Líder">
+                <Select
+                  value={contract.leaderId}
+                  onValueChange={v => {
+                    const l = leaderOptions.find(u => u.id === v);
+                    setContract(p => ({ ...p, leaderId: v, leaderName: l?.fullName || '' }));
+                  }}
+                  disabled={!contract.companyId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar líder (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {leaderOptions.map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
               <Field label="Área / Departamento">
                 <ComboInput
-                  key={`area-${contract.company}`}
+                  key={`area-${contract.companyId}`}
                   value={contract.area}
                   onChange={v => setContract(p => ({ ...p, area: v }))}
                   options={areaOptions}
@@ -352,7 +432,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
 
               <Field label="Cargo / Posición">
                 <ComboInput
-                  key={`pos-${contract.company}`}
+                  key={`pos-${contract.companyId}`}
                   value={contract.position}
                   onChange={v => setContract(p => ({ ...p, position: v }))}
                   options={positionOptions}
@@ -360,19 +440,9 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
                 />
               </Field>
 
-              <Field label="Proyecto">
-                <ComboInput
-                  key={`proj-${contract.company}`}
-                  value={contract.project}
-                  onChange={v => setContract(p => ({ ...p, project: v }))}
-                  options={projectOptions}
-                  placeholder={projectOptions.length ? `${projectOptions.length} disponibles…` : 'Ej: Proyecto Alpha'}
-                />
-              </Field>
-
               <Field label="Sede">
                 <ComboInput
-                  key={`sede-${contract.company}`}
+                  key={`sede-${contract.companyId}`}
                   value={contract.sede}
                   onChange={v => setContract(p => ({ ...p, sede: v }))}
                   options={sedeOptions}

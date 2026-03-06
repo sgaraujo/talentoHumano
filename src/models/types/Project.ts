@@ -1,19 +1,35 @@
-export type ProjectStatus = 'activo' | 'inactivo' | 'completado';
+export type ProjectStatus   = 'activo' | 'inactivo' | 'completado';
 export type ProjectPriority = 'baja' | 'media' | 'alta' | 'critica';
 
 export interface Project {
   id: string;
-  companyId: string;         // FK a Company
   name: string;
   description?: string;
+
+  // Referencias
+  companyId: string;       // FK a Company
+  companyName?: string;    // desnormalizado para display sin join
+
+  leaderId?: string;       // userId del líder del proyecto
+  leaderName?: string;     // desnormalizado
+
+  // Clasificación
+  area?: string;
+  sede?: string;
+  client?: string;
+
+  // Estado
+  status: ProjectStatus;
+  priority: ProjectPriority;
+
+  // Fechas
   startDate?: Date;
   endDate?: Date;
-  status: ProjectStatus;
+
+  // Contadores desnormalizados
+  headcount?: number;
   budget?: number;
-  leaderId?: string;         // userId del líder
-  area?: string;
-  client?: string;
-  priority: ProjectPriority;
+
   createdAt: Date;
   updatedAt: Date;
 }

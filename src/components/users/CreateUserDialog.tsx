@@ -28,7 +28,11 @@ import type { Questionnaire } from '@/models/types/Questionnaire';
 import { userService } from '@/services/userService';
 import { questionnaireService } from '@/services/questionnaireService';
 import { assignmentService } from '@/services/assignmentService';
+import { analyticsService } from '@/services/analyticsService';
 import { companyService } from '@/services/companyService';
+import { projectService } from '@/services/projectService';
+import { membershipService } from '@/services/membershipService';
+import type { Project } from '@/models/types/Project';
 
 const CORPORATE_DOMAIN = 'inteegra.net.co';
 const DEFAULT_Q_TITLES = [
@@ -181,11 +185,15 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
 
   // Step 1
   const [contract, setContract] = useState({
-    company: '', area: '', position: '', project: '', sede: '',
+    companyId: '', company: '',
+    projectId: '', project: '',
+    leaderId: '',  leaderName: '',
+    area: '', position: '', sede: '',
     contractType: '', startDate: '',
   });
-  const [companies, setCompanies]   = useState<{ id: string; name: string }[]>([]);
-  const [allUsers,  setAllUsers]    = useState<any[]>([]);
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [projects,  setProjects]  = useState<Project[]>([]);
+  const [allUsers,  setAllUsers]  = useState<any[]>([]);
 
   // Step 2
   const [ss, setSs] = useState({
@@ -228,10 +236,13 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
     }).catch(() => {});
   }, [step]);
 
-  // ── reset dependent fields when company changes ──────────────────────────
+  // ── cargar proyectos cuando cambia la empresa ────────────────────────────
   useEffect(() => {
-    setContract(p => ({ ...p, area: '', position: '', project: '', sede: '' }));
-  }, [contract.company]);
+    if (!contract.companyId) { setProjects([]); return; }
+    projectService.getByCompany(contract.companyId).then(setProjects).catch(() => {});
+    // resetear campos dependientes de empresa
+    setContract(p => ({ ...p, projectId: '', project: '', leaderId: '', leaderName: '', area: '', position: '', sede: '' }));
+  }, [contract.companyId]);
 
   // ── reset on close ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -239,7 +250,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
       setStep(0);
       setBasic({ fullName: '', email: '', role: 'colaborador', corporateEmail: '' });
       setCorpEdited(false);
-      setContract({ company: '', area: '', position: '', project: '', sede: '', contractType: '', startDate: '' });
+      setContract({ companyId: '', company: '', projectId: '', project: '', leaderId: '', leaderName: '', area: '', position: '', sede: '', contractType: '', startDate: '' });
       setSs({ baseSalary: '', salaryType: '', transportAllowance: '', workModality: '', eps: '', afp: '', ccf: '', arlRiskLevel: '' });
       setBanking({ bankName: '', accountType: '', accountNumber: '' });
       setSendWelcome(true);
@@ -248,10 +259,13 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
     }
   }, [open]);
 
-  // ── derive options from users of selected company ────────────────────────
+  // ── opciones derivadas de usuarios de la empresa ─────────────────────────
   const companyUsers = useMemo(() =>
-    allUsers.filter(u => u.contractInfo?.assignment?.company === contract.company),
-    [allUsers, contract.company]
+    allUsers.filter(u =>
+      u.companyIds?.includes(contract.companyId) ||
+      u.contractInfo?.assignment?.company === contract.company
+    ),
+    [allUsers, contract.companyId, contract.company]
   );
 
   const uniq = (arr: (string | undefined)[]) =>
@@ -259,8 +273,13 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
 
   const areaOptions     = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.area)),     [companyUsers]);
   const positionOptions = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.position)), [companyUsers]);
-  const projectOptions  = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.project)),  [companyUsers]);
   const sedeOptions     = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.location)), [companyUsers]);
+
+  // Líderes disponibles en esta empresa
+  const leaderOptions = useMemo(() =>
+    companyUsers.filter(u => u.role === 'lider' || u.role === 'colaborador'),
+    [companyUsers]
+  );
 
   // ── submit ───────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -284,6 +303,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
       set('contractInfo.assignment.location',         contract.sede);
       set('contractInfo.contract.contractType',       contract.contractType);
       set('contractInfo.contract.startDate',          contract.startDate);
+      set('leaderId',                                 contract.leaderId);
       set('salaryInfo.baseSalary',                    ss.baseSalary ? Number(ss.baseSalary) : '');
       set('salaryInfo.salaryType',                    ss.salaryType);
       set('salaryInfo.transportAllowance',            ss.transportAllowance ? Number(ss.transportAllowance) : '');
@@ -297,6 +317,41 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
       set('bankingInfo.accountNumber',                banking.accountNumber);
 
       if (Object.keys(upd).length > 0) await userService.update(newUserId, upd);
+
+      // Crear membresías (empresa + proyecto)
+      if (contract.companyId) {
+        try {
+          await membershipService.addToCompany(newUserId, contract.companyId,
+            basic.role === 'lider' ? 'lider' : 'miembro');
+        } catch (e) { console.warn('Company membership failed:', e); }
+      }
+      if (contract.projectId && contract.companyId) {
+        try {
+          await membershipService.addToProject(newUserId, contract.projectId, contract.companyId,
+            basic.role === 'lider' ? 'lider' : 'miembro');
+        } catch (e) { console.warn('Project membership failed:', e); }
+      }
+
+      // Registrar movimiento de ingreso automáticamente para colaboradores y líderes
+      if (basic.role === 'colaborador' || basic.role === 'lider') {
+        try {
+          const movDate = contract.startDate
+            ? (() => { const [y, m, d] = contract.startDate.split('-').map(Number); return new Date(y, m - 1, d); })()
+            : new Date();
+          await analyticsService.registerMovement({
+            type: 'ingreso',
+            userId: newUserId,
+            userName: basic.fullName,
+            userEmail: basic.email,
+            date: movDate,
+            createdBy: 'sistema',
+            ...(contract.company  && { company: contract.company }),
+            ...(contract.project  && { project: contract.project }),
+            ...(contract.area     && { area:    contract.area }),
+            ...(contract.sede     && { sede:    contract.sede }),
+          });
+        } catch (e) { console.warn('Auto-ingreso movement failed:', e); }
+      }
 
       if (sendWelcome) {
         try {
@@ -372,6 +427,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="colaborador">Colaborador</SelectItem>
+                  <SelectItem value="lider">Líder de proyecto</SelectItem>
                   <SelectItem value="aspirante">Aspirante</SelectItem>
                   <SelectItem value="excolaborador">Ex-colaborador</SelectItem>
                   <SelectItem value="descartado">Descartado</SelectItem>
@@ -399,30 +455,79 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
         {/* ── STEP 1: CONTRATO ────────────────────────────────────────── */}
         {step === 1 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Company — plain select from Firestore */}
+
+            {/* Empresa */}
             <div className="sm:col-span-2">
               <Field label="Empresa">
-                {companies.length > 0 ? (
-                  <Select value={contract.company}
-                    onValueChange={v => setContract(p => ({ ...p, company: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Seleccionar empresa" /></SelectTrigger>
-                    <SelectContent>
-                      {companies.map(c => (
-                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input placeholder="Nombre de la empresa" value={contract.company}
-                    onChange={e => setContract(p => ({ ...p, company: e.target.value }))} />
-                )}
+                <Select value={contract.companyId}
+                  onValueChange={v => {
+                    const c = companies.find(x => x.id === v);
+                    setContract(p => ({ ...p, companyId: v, company: c?.name ?? '' }));
+                  }}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar empresa" /></SelectTrigger>
+                  <SelectContent>
+                    {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
 
-            {/* Area */}
+            {/* Proyecto — desde colección real */}
+            <div className="sm:col-span-2">
+              <Field label="Proyecto" hint={!contract.companyId ? 'Selecciona una empresa primero' : ''}>
+                <Select
+                  value={contract.projectId}
+                  disabled={!contract.companyId}
+                  onValueChange={v => {
+                    const p = projects.find(x => x.id === v);
+                    setContract(prev => ({
+                      ...prev,
+                      projectId: v,
+                      project: p?.name ?? '',
+                      area:  prev.area  || p?.area  || '',
+                      sede:  prev.sede  || p?.sede  || '',
+                    }));
+                  }}>
+                  <SelectTrigger><SelectValue placeholder={projects.length ? 'Seleccionar proyecto' : 'Sin proyectos'} /></SelectTrigger>
+                  <SelectContent>
+                    {projects.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        <span>{p.name}</span>
+                        {p.status !== 'activo' && <span className="ml-2 text-xs text-gray-400">({p.status})</span>}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+
+            {/* Líder directo */}
+            <div className="sm:col-span-2">
+              <Field label="Líder / Jefe directo">
+                <Select
+                  value={contract.leaderId}
+                  disabled={!contract.companyId}
+                  onValueChange={v => {
+                    const u = leaderOptions.find(x => x.id === v);
+                    setContract(p => ({ ...p, leaderId: v, leaderName: u?.fullName ?? '' }));
+                  }}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar líder" /></SelectTrigger>
+                  <SelectContent>
+                    {leaderOptions.map(u => (
+                      <SelectItem key={u.id} value={u.id}>
+                        <span>{u.fullName}</span>
+                        <span className="ml-2 text-xs text-gray-400 capitalize">({u.role})</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+
+            {/* Área */}
             <Field label="Área / Departamento">
               <ComboInput
-                key={`area-${contract.company}`}
+                key={`area-${contract.companyId}`}
                 value={contract.area}
                 onChange={v => setContract(p => ({ ...p, area: v }))}
                 options={areaOptions}
@@ -430,32 +535,21 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
               />
             </Field>
 
-            {/* Position */}
+            {/* Cargo */}
             <Field label="Cargo / Posición">
               <ComboInput
-                key={`pos-${contract.company}`}
+                key={`pos-${contract.companyId}`}
                 value={contract.position}
                 onChange={v => setContract(p => ({ ...p, position: v }))}
                 options={positionOptions}
-                placeholder={positionOptions.length ? `${positionOptions.length} disponibles…` : 'Ej: Analista de datos'}
-              />
-            </Field>
-
-            {/* Project */}
-            <Field label="Proyecto">
-              <ComboInput
-                key={`proj-${contract.company}`}
-                value={contract.project}
-                onChange={v => setContract(p => ({ ...p, project: v }))}
-                options={projectOptions}
-                placeholder={projectOptions.length ? `${projectOptions.length} disponibles…` : 'Ej: Proyecto Alpha'}
+                placeholder={positionOptions.length ? `${positionOptions.length} disponibles…` : 'Ej: Analista'}
               />
             </Field>
 
             {/* Sede */}
             <Field label="Sede">
               <ComboInput
-                key={`sede-${contract.company}`}
+                key={`sede-${contract.companyId}`}
                 value={contract.sede}
                 onChange={v => setContract(p => ({ ...p, sede: v }))}
                 options={sedeOptions}
@@ -463,7 +557,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
               />
             </Field>
 
-            {/* Contract type */}
+            {/* Tipo de contrato */}
             <Field label="Tipo de contrato">
               <Select value={contract.contractType}
                 onValueChange={v => setContract(p => ({ ...p, contractType: v }))}>
@@ -478,7 +572,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
               </Select>
             </Field>
 
-            {/* Start date */}
+            {/* Fecha inicio */}
             <Field label="Fecha de inicio">
               <Input type="date" value={contract.startDate}
                 onChange={e => setContract(p => ({ ...p, startDate: e.target.value }))} />
@@ -633,9 +727,11 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
               {basic.corporateEmail && (
                 <p><span className="font-semibold text-gray-800">Corporativo:</span> {basic.corporateEmail}</p>
               )}
-              {contract.company  && <p><span className="font-semibold text-gray-800">Empresa:</span> {contract.company}</p>}
-              {contract.position && <p><span className="font-semibold text-gray-800">Cargo:</span> {contract.position}</p>}
-              {contract.area     && <p><span className="font-semibold text-gray-800">Área:</span> {contract.area}</p>}
+              {contract.company     && <p><span className="font-semibold text-gray-800">Empresa:</span> {contract.company}</p>}
+              {contract.project     && <p><span className="font-semibold text-gray-800">Proyecto:</span> {contract.project}</p>}
+              {contract.leaderName  && <p><span className="font-semibold text-gray-800">Líder:</span> {contract.leaderName}</p>}
+              {contract.position    && <p><span className="font-semibold text-gray-800">Cargo:</span> {contract.position}</p>}
+              {contract.area        && <p><span className="font-semibold text-gray-800">Área:</span> {contract.area}</p>}
             </div>
           </div>
         )}

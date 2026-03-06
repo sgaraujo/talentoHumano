@@ -1,4 +1,4 @@
-export type UserRole = 'colaborador' | 'excolaborador' | 'aspirante' | 'descartado';
+export type UserRole = 'colaborador' | 'lider' | 'excolaborador' | 'aspirante' | 'descartado';
 
 export interface User {
   id: string;
@@ -9,6 +9,7 @@ export interface User {
   completedOnboardings: string[];
   companyIds?: string[];     // IDs de empresas a las que pertenece
   projectIds?: string[];     // IDs de proyectos asignados
+  leaderId?: string;         // ID del jefe directo (supervisor)
   createdAt: Date;
   updatedAt: Date;
   

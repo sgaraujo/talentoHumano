@@ -21,29 +21,24 @@ import { CompanyAnalyticsPage } from './views/Companies/CompanyAnalyticsPage';
 function App() {
   const { isAuthenticated, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p>Cargando...</p>
-      </div>
-    );
-  }
-
   return (
     <BrowserRouter>
       <Routes>
-        {/* Ruta pública para responder cuestionarios */}
+        {/* Ruta pública — no requiere autenticación, carga inmediatamente */}
         <Route path="/responder/:token" element={<AnswerQuestionnairePage />} />
 
         <Route
           path="/login"
-          element={isAuthenticated ? <Navigate to="/dashboard" /> : <LoginPage />}
+          element={
+            loading ? <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>
+            : isAuthenticated ? <Navigate to="/dashboard" /> : <LoginPage />
+          }
         />
 
         <Route
           path="/dashboard"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <DashboardPage />
               </MainLayout>
@@ -56,7 +51,7 @@ function App() {
         <Route
           path="/usuarios"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <UsersPage />
               </MainLayout>
@@ -69,7 +64,7 @@ function App() {
         <Route
           path="/questionarios"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <QuestionnairesPage />
               </MainLayout>
@@ -83,7 +78,7 @@ function App() {
         <Route
           path="/notificaciones"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <NotificationsPage />
               </MainLayout>
@@ -96,7 +91,7 @@ function App() {
         <Route
           path="/rotacion-talento"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <RotationPage />
               </MainLayout>
@@ -109,7 +104,7 @@ function App() {
         <Route
           path="/chatbot"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <ChatWidget />
               </MainLayout>
@@ -121,7 +116,7 @@ function App() {
 
         <Route path="/busqueda"
         element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <UsersSearchPage />
               </MainLayout>
@@ -132,7 +127,7 @@ function App() {
 
           <Route path="/exportador"
         element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <ExportQueueTable />
               </MainLayout>
@@ -144,7 +139,7 @@ function App() {
         <Route
           path="/empresas"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <CompaniesPage />
               </MainLayout>
@@ -157,7 +152,7 @@ function App() {
         <Route
           path="/empresas/:companyId/analytics"
           element={
-            isAuthenticated ? (
+            !loading && isAuthenticated ? (
               <MainLayout>
                 <CompanyAnalyticsPage />
               </MainLayout>
@@ -169,7 +164,7 @@ function App() {
 
         <Route
           path="*"
-          element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />}
+          element={<Navigate to={loading ? "/login" : isAuthenticated ? "/dashboard" : "/login"} />}
         />
 
         
