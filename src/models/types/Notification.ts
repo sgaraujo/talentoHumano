@@ -26,5 +26,8 @@ export interface NotificationEvent {
   userName: string;
   date: Date;
   title: string;
-  daysUntil: number; // Días que faltan
+  daysUntil: number;
+  company?: string;
+  project?: string;
+  position?: string;
 }

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { userService } from '../services/userService';
 import { analyticsService } from '../services/analyticsService';
+import { companyService } from '../services/companyService';
+import { projectService } from '../services/projectService';
 import type { MovementRecord } from '../models/types/Analytics';
 
 // ========== Helpers para parsear datos del Excel ==========
@@ -37,15 +39,6 @@ function parseNumber(val: any): number | undefined {
   return undefined;
 }
 
-/** "SI"/"SÍ"/"S" → true, "NO"/"N" → false */
-function parseBool(val: any): boolean | undefined {
-  if (val === null || val === undefined || val === '') return undefined;
-  if (typeof val === 'boolean') return val;
-  const str = String(val).trim().toUpperCase();
-  if (['SI', 'SÍ', 'S', 'TRUE', '1'].includes(str)) return true;
-  if (['NO', 'N', 'FALSE', '0'].includes(str)) return false;
-  return undefined;
-}
 
 /** Normaliza MOTIVO de retiro a reason del MovementRecord */
 function normalizeRetiroReason(motivo: string | undefined): { reason: string; notes?: string } {
@@ -182,19 +175,20 @@ export const useUsers = () => {
                 // --- Fechas ---
                 const fechaIngreso = parseExcelDate(row['FECHA DE INGRESO']);
                 const fechaNacimiento = parseExcelDate(row['FECHA DE NACIMIENTO']);
-                const productiveStart = parseExcelDate(row['INICIA PRODUCTIVA']);
-                const productiveEnd = parseExcelDate(row['FIN PRODUCTIVA']);
 
                 // --- Números ---
                 const sueldo = parseNumber(row['Sueldo']);
-                const auxTransporte = parseNumber(row['Aux. de transporte/conectividad']);
-                const auxAlimentacion = parseNumber(row['Auxilio Alimentacion']);
+                const auxTransporte = parseNumber(row['Aux. de transporte/Aux. de conectividad digital'] || row['Aux. de transporte/conectividad']);
+                const auxAlimentacion = parseNumber(row['Auxilio Alimentacion'] || row['Auxilio de Alimentación'] || row['Auxilio de Alimentación 2023']);
+                const auxOperacional = parseNumber(row['Auxilio Operacional u otros auxilios no salariales']);
                 const auxRodamiento = parseNumber(row['Auxilio Rodamiento']);
                 const auxHerramientas = parseNumber(row['Auxilio Herramientas']);
                 const auxComunicacion = parseNumber(row['Auxilio Comunicacion']);
                 const kpiSalarial = parseNumber(row['KPI Salarial']);
-                const edad = parseNumber(row['EDAD']);
-                const llamadosAtencion = parseNumber(row['LLAMADOS DE ATENCION']);
+                const edad = parseNumber(row['EDAD']) !== undefined ? Math.floor(parseNumber(row['EDAD'])!) : undefined;
+                const salario2022 = parseNumber(row['SALARIO BASICO 2022']);
+                const salario2023 = parseNumber(row['SALARIO BASICO 2023']);
+                const salario2024 = parseNumber(row['SALARIO BASICO 2024']);
 
                 // --- Construir objeto User completo ---
                 const user: any = {
@@ -207,14 +201,14 @@ export const useUsers = () => {
                     personalData: {
                         documentType: row['TIPO DOCUMENTO'] || undefined,
                         documentNumber: row['CEDULA'] ? String(row['CEDULA']) : undefined,
+                        documentExpeditionDate: parseExcelDate(row['FECHA EXPEDICION']) || undefined,
                         fullName: fullName || undefined,
                         gender: row['GENERO'] || undefined,
                         birthDate: fechaNacimiento || undefined,
                         age: edad || undefined,
                         ageRange: row['RANGO DE EDAD'] || undefined,
-                        bloodType: row['RH'] || undefined,
                         maritalStatus: row['ESTADO CIVIL'] || undefined,
-                        nationality: row['PAIS - NACIONALIDAD'] || undefined,
+                        nationality: row['PAIS - NACIONALIDAD'] ? String(row['PAIS - NACIONALIDAD']).trim() : undefined,
                         position: row['CARGO'] || undefined,
                         phone: row['TELEFONO PERSONAL'] ? String(row['TELEFONO PERSONAL']) : undefined,
                     },
@@ -239,14 +233,13 @@ export const useUsers = () => {
                             workday: row['JORNADA'] || undefined,
                             workModality: row['MODALIDAD'] || undefined,
                             baseSalary: sueldo || undefined,
-                            productiveStartDate: productiveStart || undefined,
-                            productiveEndDate: productiveEnd || undefined,
                         },
                         assignment: {
-                            company: row['EMPRESA'] || undefined,
-                            project: row['PROYECTO'] || undefined,
+                            company: row['EMPRESA'] ? String(row['EMPRESA']).trim() : undefined,
+                            project: row['PROYECTO'] ? String(row['PROYECTO']).trim() : undefined,
                             analyticalAccount: row['CUENTA ANALITICA'] ? String(row['CUENTA ANALITICA']) : undefined,
-                            location: [row['REGIONAL'], row['BASE DE OPERACION']].filter(Boolean).join(' - ') || undefined,
+                            regional: row['REGIONAL'] || undefined,
+                            sede: row['BASE DE OPERACION'] || undefined,
                             area: row['DEPARTAMENTO'] || undefined,
                             directSupervisor: row['JEFE INMEDIATO'] || undefined,
                             accountingProfile: row['PERFIL CONTABLE'] || undefined,
@@ -259,8 +252,12 @@ export const useUsers = () => {
                     salaryInfo: {
                         salaryType: row['TIPO DE SALARIO'] || undefined,
                         baseSalary: sueldo || undefined,
+                        baseSalary2022: salario2022 || undefined,
+                        baseSalary2023: salario2023 || undefined,
+                        baseSalary2024: salario2024 || undefined,
                         transportAllowance: auxTransporte || undefined,
-                        foodAllowance: auxAlimentacion || undefined,
+                        mealAllowance: auxAlimentacion || undefined,
+                        operationalAllowance: auxOperacional || undefined,
                         vehicleAllowance: auxRodamiento || undefined,
                         toolsAllowance: auxHerramientas || undefined,
                         communicationAllowance: auxComunicacion || undefined,
@@ -283,14 +280,9 @@ export const useUsers = () => {
                     },
 
                     administrativeRecord: {
-                        entryJustification: row['JUSTIFICACIÓN DE INGRESO'] || row['JUSTIFICACION DE INGRESO'] || undefined,
                         terminationDate: fechaRetiro || undefined,
                         terminationReason: row['MOTIVO'] || undefined,
                         terminationJustification: row['JUSTIFICACIÓN RETIRO'] || row['JUSTIFICACION RETIRO'] || undefined,
-                        folderCompliance: parseBool(row['CUMPLIMIENTO DE CARPETA 100%']),
-                        disciplinaryActions: llamadosAtencion ?? undefined,
-                        isMother: parseBool(row['MADRE']),
-                        isPregnant: parseBool(row['EMBARAZO']),
                         lifeInsuranceStatus: row['ESTADO SEGURO DE VIDA'] || undefined,
                     },
 
@@ -339,8 +331,8 @@ export const useUsers = () => {
                     });
                 }
 
-                // Generar retiro si tiene fecha, o si es excolaborador (usar fallback de fecha)
-                const fechaRetiroFinal = fechaRetiro || (isRetirado ? (productiveEnd || new Date()) : null);
+                // Generar retiro si tiene fecha, o si es excolaborador
+                const fechaRetiroFinal = fechaRetiro || (isRetirado ? new Date() : null);
                 if (fechaRetiroFinal) {
                     const { reason, notes } = normalizeRetiroReason(row['MOTIVO']);
                     movementsMap.set(email + '|retiro', {
@@ -358,6 +350,79 @@ export const useUsers = () => {
                     });
                 }
             }
+
+            // ── Auto-crear empresas y proyectos desde el Excel ──────────────
+
+            // 1. Recolectar empresas únicas (con NIT) y pares empresa::proyecto
+            const companyMap = new Map<string, string>(); // nombre → NIT
+            const projectPairs = new Map<string, string>(); // "empresa::proyecto" → empresaNombre
+
+            for (const row of jsonData as any[]) {
+                const empresa = (row['EMPRESA'] || '').toString().trim();
+                const nit     = (row['NIT'] || '').toString().trim();
+                const proyecto = (row['PROYECTO'] || '').toString().trim();
+                if (empresa) companyMap.set(empresa, nit);
+                if (empresa && proyecto) projectPairs.set(`${empresa}::${proyecto}`, empresa);
+            }
+
+            // 2. Crear empresas que no existan, mapear nombre → id
+            const existingCompanies = await companyService.getAll();
+            const companyNameToId = new Map<string, string>();
+            for (const c of existingCompanies) companyNameToId.set(c.name, c.id);
+
+            for (const [name, nit] of companyMap) {
+                if (!companyNameToId.has(name)) {
+                    const id = await companyService.create({
+                        name, nit, active: true,
+                        address: '', phone: '', email: '', logo: '', regional: '', baseDeOperacion: '',
+                    });
+                    companyNameToId.set(name, id);
+                }
+            }
+
+            // 3. Crear proyectos que no existan, mapear "empresa::proyecto" → id
+            const existingProjects = await projectService.getAll();
+            const projectKeyToId = new Map<string, string>();
+            for (const p of existingProjects) {
+                projectKeyToId.set(`${(p.companyName || '').toLowerCase()}::${p.name.toLowerCase()}`, p.id);
+            }
+
+            for (const [key, companyName] of projectPairs) {
+                const lowerKey = key.toLowerCase();
+                if (!projectKeyToId.has(lowerKey)) {
+                    const projectName = key.split('::')[1];
+                    const companyId = companyNameToId.get(companyName) || '';
+                    const id = await projectService.create({
+                        name: projectName,
+                        companyId,
+                        companyName,
+                        status: 'activo',
+                        priority: 'media',
+                        sede: '',
+                    });
+                    projectKeyToId.set(lowerKey, id);
+                }
+            }
+
+            // 4. Inyectar companyId y projectId en cada usuario
+            for (const user of usersToCreate) {
+                const empresa = user.contractInfo?.assignment?.company;
+                const proyecto = user.contractInfo?.assignment?.project;
+                const companyId = empresa ? companyNameToId.get(empresa) : undefined;
+                const projectId = empresa && proyecto
+                    ? projectKeyToId.get(`${empresa.toLowerCase()}::${proyecto.toLowerCase()}`)
+                    : undefined;
+                if (companyId) {
+                    user.contractInfo.assignment.companyId = companyId;
+                    user.companyIds = [companyId];
+                }
+                if (projectId) {
+                    user.contractInfo.assignment.projectId = projectId;
+                    user.projectIds = [projectId];
+                }
+            }
+
+            // ────────────────────────────────────────────────────────────────
 
             // Crear/actualizar usuarios en batch
             const results = await userService.createBatch(usersToCreate);

@@ -3,11 +3,12 @@ import { useUsers } from '@/hooks/useUsers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Upload, Search, Plus, Loader2, Pencil, Trash2, Eye } from 'lucide-react';
+import { Upload, Search, Plus, Loader2, Pencil, Trash2, Eye, UserMinus } from 'lucide-react';
 import { CreateUserDialog } from '@/components/users/CreateUserDialog';
 import { EditUserDialog } from '@/components/users/EditUserDialog';
 import { DeleteUserDialog } from '@/components/users/DeleteUserDialog';
 import { ViewUserProfileDialog } from '@/components/users/ViewUserProfileDialog';
+import { RegisterMovementDialog } from '@/components/analytics/RegisterMovementDialog';
 
 export const UsersPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,6 +20,7 @@ export const UsersPage = () => {
   const { users, stats, loading, importUsersFromExcel, refreshUsers } = useUsers();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [movementDialogOpen, setMovementDialogOpen] = useState(false);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -102,8 +104,18 @@ export const UsersPage = () => {
             />
           </label>
 
-          <Button 
-            variant="default" 
+          <Button
+            variant="outline"
+            onClick={() => setMovementDialogOpen(true)}
+            className="flex-1 sm:flex-none border-red-200 text-red-500 hover:bg-red-50"
+          >
+            <UserMinus className="w-4 h-4 mr-2" />
+            <span className="hidden sm:inline">Registrar Retiro</span>
+            <span className="sm:hidden">Retiro</span>
+          </Button>
+
+          <Button
+            variant="default"
             onClick={() => setCreateDialogOpen(true)}
             className="flex-1 sm:flex-none bg-[#008C3C] hover:bg-[#006C2F] text-white"
           >
@@ -275,6 +287,12 @@ export const UsersPage = () => {
         open={profileDialogOpen}
         onOpenChange={setProfileDialogOpen}
         userId={selectedUserId}
+      />
+
+      <RegisterMovementDialog
+        open={movementDialogOpen}
+        onOpenChange={setMovementDialogOpen}
+        onSuccess={refreshUsers}
       />
     </div>
   );

@@ -19,6 +19,7 @@ import {
   Building2,
   LayoutDashboard,
   FolderKanban,
+  MessageSquare,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
@@ -47,7 +48,8 @@ export const Sidebar = () => {
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     { icon: Users, label: 'Usuarios', path: '/usuarios' },
     { icon: Building2, label: 'Empresas', path: '/empresas' },
-    { icon: FolderKanban, label: 'Proyectos', path: '/proyectos' },
+    { icon: FolderKanban,   label: 'Proyectos',       path: '/proyectos' },
+    { icon: MessageSquare,  label: 'Comunicaciones',  path: '/comunicaciones' },
     { icon: FileText, label: 'Cuestionarios', path: '/questionarios' },
     { icon: Bell, label: 'Notificaciones', path: '/notificaciones' },
     { icon: TrendingUp, label: 'Rotacion y Talento', path: '/rotacion-talento' },

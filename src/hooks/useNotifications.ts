@@ -14,14 +14,12 @@ export const useNotifications = () => {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<NotificationType[]>([]);
 
-  const loadEvents = async (activeFilters?: NotificationType[]) => {
+  const loadEvents = async (activeFilters?: NotificationType[], maxDays = 365) => {
     try {
       setLoading(true);
       setError(null);
-      
-      const data = await notificationService.getAllEvents(activeFilters);
+      const data = await notificationService.getAllEvents(activeFilters, maxDays);
       setEvents(data);
-      
       const statsData = await notificationService.getStats(activeFilters);
       setStats(statsData);
     } catch (err: any) {
@@ -31,9 +29,9 @@ export const useNotifications = () => {
     }
   };
 
-  const applyFilters = (newFilters: NotificationType[]) => {
+  const applyFilters = (newFilters: NotificationType[], maxDays = 365) => {
     setFilters(newFilters);
-    loadEvents(newFilters);
+    loadEvents(newFilters, maxDays);
   };
 
   const clearFilters = () => {

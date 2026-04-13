@@ -15,6 +15,8 @@ import ExportQueueTable from './views/Exporter/ExporterPage';
 import { CompaniesPage } from './views/Companies/CompaniesPage';
 import { CompanyAnalyticsPage } from './views/Companies/CompanyAnalyticsPage';
 import { ProjectsPage } from './views/Projects/ProjectsPage';
+import { CommunicationsPage } from './views/Communications/CommunicationsPage';
+import { ReadCommunicationPage } from './views/Public/ReadCommunicationPage';
 
 
 
@@ -25,8 +27,9 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Ruta pública — no requiere autenticación, carga inmediatamente */}
-        <Route path="/responder/:token" element={<AnswerQuestionnairePage />} />
+        {/* Rutas públicas — no requieren autenticación */}
+        <Route path="/responder/:token"   element={<AnswerQuestionnairePage />} />
+        <Route path="/comunicado/:token"  element={<ReadCommunicationPage />} />
 
         <Route
           path="/login"
@@ -173,6 +176,15 @@ function App() {
             ) : (
               <Navigate to="/login" />
             )
+          }
+        />
+
+        <Route
+          path="/comunicaciones"
+          element={
+            !loading && isAuthenticated ? (
+              <MainLayout><CommunicationsPage /></MainLayout>
+            ) : <Navigate to="/login" />
           }
         />
 

@@ -1,185 +1,272 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNotifications } from '@/hooks/useNotifications';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Search, Cake, Award, Clock, FileText} from 'lucide-react';
+import {
+  Loader2, Search, Cake, Award, Clock, FileText, Download, Building2,
+} from 'lucide-react';
 import { MonthCalendar } from '@/components/notifications/MonthCalendar';
 import type { NotificationType } from '@/models/types/Notification';
 
+// ── constants ─────────────────────────────────────────────────────────────────
+
 const EVENT_TYPES = {
-  birthday: {
-    label: 'Cumpleaños',
-    icon: Cake,
-    color: 'bg-pink-100 text-pink-800 border-pink-200',
-  },
-  work_anniversary: {
-    label: 'Aniversarios',
-    icon: Award,
-    color: 'bg-blue-100 text-blue-800 border-blue-200',
-  },
-  probation_end: {
-    label: 'Periodo de Prueba',
-    icon: Clock,
-    color: 'bg-orange-100 text-orange-800 border-orange-200',
-  },
-  contract_start: {
-    label: 'Inicio de Contrato',
-    icon: FileText,
-    color: 'bg-green-100 text-green-800 border-green-200',
-  },
-  contract_end: {
-    label: 'Fin de Contrato',
-    icon: FileText,
-    color: 'bg-red-100 text-red-800 border-red-200',
-  },
+  birthday:         { label: 'Cumpleaños',          icon: Cake,     color: 'bg-pink-100 text-pink-800 border-pink-200' },
+  work_anniversary: { label: 'Aniversarios',         icon: Award,    color: 'bg-blue-100 text-blue-800 border-blue-200' },
+  probation_end:    { label: 'Periodo de Prueba',    icon: Clock,    color: 'bg-orange-100 text-orange-800 border-orange-200' },
+  contract_start:   { label: 'Inicio de Contrato',  icon: FileText, color: 'bg-green-100 text-green-800 border-green-200' },
+  contract_end:     { label: 'Fin de Contrato',      icon: FileText, color: 'bg-red-100 text-red-800 border-red-200' },
+} as const;
+
+const PERIODS = [
+  { value: '30',  label: 'Próximos 30 días' },
+  { value: '60',  label: 'Próximos 60 días' },
+  { value: '90',  label: 'Próximos 90 días' },
+  { value: '180', label: 'Próximos 6 meses' },
+  { value: '365', label: 'Próximo año' },
+];
+
+const TYPE_LABELS: Record<NotificationType, string> = {
+  birthday:         'Cumpleaños',
+  work_anniversary: 'Aniversario laboral',
+  probation_end:    'Fin de periodo de prueba',
+  contract_start:   'Inicio de contrato',
+  contract_end:     'Fin de contrato',
 };
 
+// ── component ─────────────────────────────────────────────────────────────────
+
 export const NotificationsPage = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const { events, loading, applyFilters } = useNotifications();
 
-  const handleFilterChange = (value: string) => {
-    setSelectedFilter(value);
-    if (value === 'all') {
-      applyFilters([]);
-    } else {
-      applyFilters([value as NotificationType]);
-    }
+  const [search,        setSearch]        = useState('');
+  const [typeFilter,    setTypeFilter]    = useState('all');
+  const [companyFilter, setCompanyFilter] = useState('all');
+  const [period,        setPeriod]        = useState('90');
+  const [exporting,     setExporting]     = useState(false);
+
+  // Unique companies from events
+  const companies = useMemo(() => {
+    const set = new Set(events.map(e => e.company).filter(Boolean));
+    return [...set].sort() as string[];
+  }, [events]);
+
+  // Apply type + period filter via service
+  const handleTypeChange = (value: string) => {
+    setTypeFilter(value);
+    const types = value === 'all' ? [] : [value as NotificationType];
+    applyFilters(types, Number(period));
   };
 
+  const handlePeriodChange = (value: string) => {
+    setPeriod(value);
+    const types = typeFilter === 'all' ? [] : [typeFilter as NotificationType];
+    applyFilters(types, Number(value));
+  };
+
+  // Client-side filters (search + company)
+  const filtered = useMemo(() => {
+    return events.filter(e => {
+      if (companyFilter !== 'all' && e.company !== companyFilter) return false;
+      if (search && !e.userName.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [events, companyFilter, search]);
+
   const getDaysLabel = (days: number) => {
-    if (days < 0) return `Hace ${Math.abs(days)} día(s)`;
+    if (days < 0)  return `Hace ${Math.abs(days)} día(s)`;
     if (days === 0) return 'Hoy';
     if (days === 1) return 'Mañana';
     return `En ${days} día(s)`;
   };
 
-  const filteredEvents = events.filter(event =>
-    event.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    event.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // ── Excel export ────────────────────────────────────────────────────────────
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const XLSX = await import('xlsx');
 
+      const rows = filtered.map(e => ({
+        'Nombre':          e.userName,
+        'Tipo de evento':  TYPE_LABELS[e.type] ?? e.type,
+        'Fecha':           e.date.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        'Días restantes':  e.daysUntil < 0 ? `Hace ${Math.abs(e.daysUntil)} día(s)` : e.daysUntil === 0 ? 'Hoy' : `En ${e.daysUntil} día(s)`,
+        'Empresa':         e.company  || '—',
+        'Proyecto':        e.project  || '—',
+        'Cargo':           e.position || '—',
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+
+      // Column widths
+      ws['!cols'] = [
+        { wch: 30 }, { wch: 25 }, { wch: 14 },
+        { wch: 18 }, { wch: 30 }, { wch: 25 }, { wch: 20 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Notificaciones');
+
+      const periodLabel = PERIODS.find(p => p.value === period)?.label ?? '';
+      const typeLabel   = typeFilter === 'all' ? 'Todos' : TYPE_LABELS[typeFilter as NotificationType];
+      const fileName    = `Notificaciones_${typeLabel}_${periodLabel}.xlsx`
+        .replace(/\s+/g, '_').replace(/[áéíóú]/gi, c => ({ á:'a',é:'e',í:'i',ó:'o',ú:'u' }[c] ?? c));
+
+      XLSX.writeFile(wb, fileName);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ── render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold">Notificaciones</h1>
-        <p className="text-gray-600 mt-1">Eventos importantes de tu equipo</p>
+    <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Notificaciones</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Eventos importantes de tu equipo</p>
+        </div>
+        <Button
+          onClick={handleExport}
+          disabled={exporting || filtered.length === 0}
+          className="bg-[#008C3C] hover:bg-[#006C2F] text-white"
+        >
+          {exporting
+            ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            : <Download className="w-4 h-4 mr-2" />}
+          Exportar Excel ({filtered.length})
+        </Button>
       </div>
 
+      {/* Filtros */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
 
-      {/* Filtro Dropdown */}
-      <Card className="mb-6">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Filtro de Calendario</CardTitle>
-              <CardDescription>Selecciona el tipo de evento que deseas visualizar</CardDescription>
-            </div>
-            <Select value={selectedFilter} onValueChange={handleFilterChange}>
-              <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Selecciona un tipo de evento" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los eventos</SelectItem>
-                {(Object.entries(EVENT_TYPES) as [NotificationType, typeof EVENT_TYPES[NotificationType]][]).map(([type, config]) => {
-                  const Icon = config.icon;
-                  return (
-                    <SelectItem key={type} value={type}>
-                      <div className="flex items-center gap-2">
-                        <Icon className="w-4 h-4" />
-                        {config.label}
-                      </div>
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
+          {/* Buscar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              placeholder="Buscar persona..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-10 border-gray-200"
+            />
           </div>
-        </CardHeader>
-      </Card>
+
+          {/* Tipo */}
+          <Select value={typeFilter} onValueChange={handleTypeChange}>
+            <SelectTrigger className="border-gray-200">
+              <SelectValue placeholder="Tipo de evento" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los eventos</SelectItem>
+              {(Object.entries(EVENT_TYPES) as [NotificationType, typeof EVENT_TYPES[NotificationType]][]).map(([type, cfg]) => {
+                const Icon = cfg.icon;
+                return (
+                  <SelectItem key={type} value={type}>
+                    <div className="flex items-center gap-2">
+                      <Icon className="w-4 h-4" /> {cfg.label}
+                    </div>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+
+          {/* Empresa */}
+          <Select value={companyFilter} onValueChange={setCompanyFilter}>
+            <SelectTrigger className="border-gray-200">
+              <SelectValue placeholder="Todas las empresas" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4" /> Todas las empresas
+                </div>
+              </SelectItem>
+              {companies.map(c => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Período */}
+          <Select value={period} onValueChange={handlePeriodChange}>
+            <SelectTrigger className="border-gray-200">
+              <SelectValue placeholder="Período" />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIODS.map(p => (
+                <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Conteo */}
+      <p className="text-sm text-gray-500 mb-4">
+        {filtered.length} evento{filtered.length !== 1 ? 's' : ''} encontrado{filtered.length !== 1 ? 's' : ''}
+        {filtered.length !== events.length && ` de ${events.length} totales`}
+      </p>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-[#008C3C]" />
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
           {/* Calendario */}
           <div className="lg:col-span-2">
-            <MonthCalendar events={events} />
+            <MonthCalendar events={filtered} />
           </div>
 
-          {/* Lista de eventos próximos */}
-          <div>
-            <Card>
-              <CardHeader>
-                <CardTitle>Próximos Eventos</CardTitle>
-                <CardDescription>
-                  {filteredEvents.length} evento(s)
-                </CardDescription>
-                <div className="relative mt-4">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <Input
-                    placeholder="Buscar..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {filteredEvents.length === 0 ? (
-                  <p className="text-sm text-gray-500 text-center py-8">
-                    No hay eventos próximos
-                  </p>
-                ) : (
-                  <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                    {filteredEvents.map((event) => {
-                      const config = EVENT_TYPES[event.type];
-                      const Icon = config.icon;
-                      
-                      return (
-                        <div
-                          key={event.id}
-                          className={`p-3 rounded-lg border ${config.color}`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <Icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm truncate">
-                                {event.userName}
-                              </p>
-                              <p className="text-xs opacity-75 mt-0.5">
-                                {event.date.toLocaleDateString('es-CO', {
-                                  weekday: 'short',
-                                  month: 'short',
-                                  day: 'numeric',
-                                })}
-                              </p>
-                              <Badge
-                                variant={event.daysUntil < 0 ? 'destructive' : event.daysUntil === 0 ? 'default' : 'secondary'}
-                                className="mt-2"
-                              >
-                                {getDaysLabel(event.daysUntil)}
-                              </Badge>
-                            </div>
-                          </div>
+          {/* Lista */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-gray-100">
+              <h2 className="font-semibold text-[#4A4A4A]">Próximos eventos</h2>
+              <p className="text-xs text-gray-400 mt-0.5">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''}</p>
+            </div>
+
+            {filtered.length === 0 ? (
+              <p className="text-sm text-gray-400 italic text-center py-12">Sin eventos con los filtros actuales</p>
+            ) : (
+              <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
+                {filtered.map(event => {
+                  const cfg  = EVENT_TYPES[event.type];
+                  const Icon = cfg.icon;
+                  return (
+                    <div key={event.id} className={`p-3 ${cfg.color}`}>
+                      <div className="flex items-start gap-3">
+                        <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{event.userName}</p>
+                          {event.company && (
+                            <p className="text-xs opacity-70 truncate">{event.company}</p>
+                          )}
+                          <p className="text-xs opacity-75 mt-0.5">
+                            {event.date.toLocaleDateString('es-CO', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          </p>
+                          <Badge
+                            variant={event.daysUntil < 0 ? 'destructive' : event.daysUntil === 0 ? 'default' : 'secondary'}
+                            className="mt-1 text-[10px]"
+                          >
+                            {getDaysLabel(event.daysUntil)}
+                          </Badge>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

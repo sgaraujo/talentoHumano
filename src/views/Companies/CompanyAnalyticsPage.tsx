@@ -44,7 +44,7 @@ const normalizeGender = (gender?: string): 'Masculino' | 'Femenino' | 'Otro' => 
 const getAge = (user: any): number => {
   if (user.personalData?.age) {
     const n = Number(user.personalData.age);
-    if (!isNaN(n) && n > 0) return n;
+    if (!isNaN(n) && n > 0) return Math.floor(n);
   }
   const birth = toDate(user.personalData?.birthDate);
   if (birth) {

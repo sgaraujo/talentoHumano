@@ -50,17 +50,19 @@ export const ProjectsPage = () => {
   const [form, setForm]                 = useState(EMPTY_FORM);
   const [saving, setSaving]             = useState(false);
 
-  // Leader editing  (projectId → true/false)
+  // Leader editing
   const [editingLeader, setEditingLeader] = useState<string | null>(null);
+  const [leaderSearch, setLeaderSearch]   = useState('');
   const [leaderVal, setLeaderVal]         = useState('');
 
   // Members expand + data
-  const [expandedId, setExpandedId]   = useState<string | null>(null);
-  const [membersMap, setMembersMap]   = useState<Record<string, any[]>>({});
+  const [expandedId, setExpandedId]     = useState<string | null>(null);
+  const [membersMap, setMembersMap]     = useState<Record<string, any[]>>({});
   const [addingMember, setAddingMember] = useState<string | null>(null);
-  const [memberVal, setMemberVal]     = useState('');
+  const [memberSearch, setMemberSearch] = useState('');
+  const [memberVal, setMemberVal]       = useState('');
 
-  // ── Load ──────────────────────────────────────────────────────────────────
+  // ── Load + migrate legacy projects from user profiles ────────────────────
   const load = async () => {
     setLoading(true);
     try {
@@ -69,9 +71,50 @@ export const ProjectsPage = () => {
         companyService.getAll(),
         userService.getAll(),
       ]);
-      setProjects(projs);
       setCompanies(comps);
       setAllUsers(users);
+
+      // Auto-migrate: create Firestore docs for projects that only exist as
+      // strings in user profiles (contractInfo.assignment.project)
+      const knownKeys = new Set(
+        projs.map(p => `${(p.companyName || '').toLowerCase()}::${p.name.toLowerCase()}`)
+      );
+
+      const toCreate: Array<{ name: string; companyId: string; companyName: string; sede: string }> = [];
+      users.forEach(u => {
+        const a = u.contractInfo?.assignment;
+        if (!a?.project?.trim()) return;
+        const key = `${(a.company || '').toLowerCase()}::${a.project.trim().toLowerCase()}`;
+        if (knownKeys.has(key)) return;
+        knownKeys.add(key);
+        const company = comps.find(c => c.name === a.company);
+        toCreate.push({
+          name: a.project.trim(),
+          companyId: company?.id || '',
+          companyName: a.company || '',
+          sede: a.location || '',
+        });
+      });
+
+      if (toCreate.length > 0) {
+        await Promise.all(
+          toCreate.map(p =>
+            projectService.create({
+              name: p.name,
+              companyId: p.companyId,
+              companyName: p.companyName,
+              status: 'activo',
+              priority: 'media',
+              sede: p.sede,
+            })
+          )
+        );
+        // Reload after migration
+        const migrated = await projectService.getAll();
+        setProjects(migrated);
+      } else {
+        setProjects(projs);
+      }
     } catch (e: any) {
       toast.error('Error al cargar proyectos', { description: e.message });
     } finally {
@@ -81,44 +124,69 @@ export const ProjectsPage = () => {
 
   useEffect(() => { load(); }, []);
 
-  // Load members when project expanded
-  useEffect(() => {
-    if (!expandedId || membersMap[expandedId]) return;
-    membershipService.getProjectMembers(expandedId)
-      .then(mems => setMembersMap(prev => ({ ...prev, [expandedId]: mems })))
-      .catch(() => {});
-  }, [expandedId]);
+  // (no async load needed — members derived directly from allUsers below)
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return projects.filter(p => {
-      if (filterCompany !== 'all' && p.companyId !== filterCompany && p.companyName !== filterCompany) return false;
-      if (filterStatus  !== 'all' && p.status !== filterStatus) return false;
+      if (filterCompany !== 'all') {
+        const company = companies.find(c => c.id === filterCompany);
+        if (p.companyId !== filterCompany && p.companyName !== company?.name) return false;
+      }
+      if (filterStatus !== 'all' && p.status !== filterStatus) return false;
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [projects, filterCompany, filterStatus, search]);
+  }, [projects, filterCompany, filterStatus, search, companies]);
 
   const getCompanyName = (p: Project) =>
     p.companyName || companies.find(c => c.id === p.companyId)?.name || '—';
 
-  const getCompanyUsers = (p: Project) =>
-    allUsers.filter(u =>
-      u.companyIds?.includes(p.companyId) ||
-      u.contractInfo?.assignment?.company === p.companyName
-    );
+  const getCompanyUsers = (p: Project) => {
+    // If project has companyId, prefer matching by it; fallback to companyName match; else return all
+    if (p.companyId) {
+      const byId = allUsers.filter(u =>
+        u.companyIds?.includes(p.companyId) ||
+        u.contractInfo?.assignment?.company === p.companyName
+      );
+      if (byId.length > 0) return byId;
+    }
+    if (p.companyName) {
+      const byName = allUsers.filter(u =>
+        u.contractInfo?.assignment?.company === p.companyName
+      );
+      if (byName.length > 0) return byName;
+    }
+    // Fallback: return all users so leader/member assignment is always possible
+    return allUsers;
+  };
 
-  const getLeaderOptions = (p: Project) =>
-    getCompanyUsers(p).filter(u => u.role === 'lider' || u.role === 'colaborador');
+  const getLeaderOptions = (p: Project) => {
+    const companyUsers = getCompanyUsers(p);
+    // Return all company users as potential leaders (not role-restricted)
+    return companyUsers;
+  };
 
-  const getMembersForProject = (projectId: string) => membersMap[projectId] ?? [];
+  // Miembros = usuarios cuyo projectIds incluye el id, O cuyo assignment.project coincide con el nombre
+  const getMembersForProject = (p: Project) => {
+    const fromProfiles = allUsers.filter(u =>
+      u.projectIds?.includes(p.id) ||
+      (p.name && u.contractInfo?.assignment?.project === p.name)
+    ).map(u => ({ userId: u.id, projectId: p.id, role: 'miembro' }));
+
+    // Agregar manualmente añadidos vía membersMap que no estén ya en fromProfiles
+    const profileIds = new Set(fromProfiles.map(m => m.userId));
+    const extra = (membersMap[p.id] ?? []).filter((m: any) => !profileIds.has(m.userId));
+
+    return [...fromProfiles, ...extra];
+  };
 
   const getUserName = (userId: string) =>
     allUsers.find(u => u.id === userId)?.fullName || userId;
 
   const availableToAdd = (p: Project) => {
-    const existing = new Set(getMembersForProject(p.id).map((m: any) => m.userId));
-    return getCompanyUsers(p).filter(u => !existing.has(u.id));
+    const existing = new Set(getMembersForProject(p).map((m: any) => m.userId));
+    return allUsers.filter(u => !existing.has(u.id));
   };
 
   // ── CRUD ─────────────────────────────────────────────────────────────────
@@ -182,6 +250,7 @@ export const ProjectsPage = () => {
   const startEditLeader = (p: Project) => {
     setEditingLeader(p.id);
     setLeaderVal(p.leaderId || '');
+    setLeaderSearch(p.leaderName || '');
   };
 
   const saveLeader = async (p: Project) => {
@@ -226,11 +295,12 @@ export const ProjectsPage = () => {
 
   const handleRemoveMember = async (projectId: string, userId: string) => {
     try {
+      // Remove from project_memberships collection (if exists there)
       await membershipService.removeFromProject(userId, projectId);
-      setMembersMap(prev => ({
-        ...prev,
-        [projectId]: (prev[projectId] || []).filter((m: any) => m.userId !== userId),
-      }));
+      // Reload users so getMembersForProject recomputes from allUsers
+      const { userService: us } = await import('@/services/userService');
+      const updated = await us.getAll();
+      setAllUsers(updated);
       toast.success('Persona removida');
     } catch (e: any) {
       toast.error('Error', { description: e.message });
@@ -318,7 +388,7 @@ export const ProjectsPage = () => {
         <div className="space-y-3">
           {filtered.map(p => {
             const isExpanded   = expandedId === p.id;
-            const members      = getMembersForProject(p.id);
+            const members      = getMembersForProject(p);
             const isAddingHere = addingMember === p.id;
             const available    = availableToAdd(p);
             const companyName  = getCompanyName(p);
@@ -363,26 +433,42 @@ export const ProjectsPage = () => {
 
                     {/* Leader */}
                     {editingLeader === p.id ? (
-                      <div className="flex items-center gap-2 mt-2">
-                        <Select value={leaderVal} onValueChange={setLeaderVal}>
-                          <SelectTrigger className="h-7 text-xs w-48">
-                            <SelectValue placeholder="Sin líder" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="">Sin líder</SelectItem>
-                            {getLeaderOptions(p).map(u => (
-                              <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <div className="relative w-52">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                            <input
+                              autoFocus
+                              value={leaderSearch}
+                              onChange={e => { setLeaderSearch(e.target.value); setLeaderVal(''); }}
+                              placeholder="Buscar persona..."
+                              className="w-full h-7 pl-7 pr-2 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-[#008C3C]"
+                            />
+                          </div>
+                          <button onClick={() => saveLeader(p)}
+                            className="w-6 h-6 rounded-full bg-[#008C3C] text-white flex items-center justify-center hover:bg-[#006C2F]">
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => setEditingLeader(null)}
+                            className="w-6 h-6 rounded-full border border-gray-200 text-gray-400 flex items-center justify-center hover:bg-gray-50">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {leaderSearch.trim().length >= 2 && (
+                          <div className="w-52 max-h-36 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-md z-10 relative">
+                            {[{ id: '', fullName: 'Sin líder' }, ...getLeaderOptions(p).filter(u =>
+                              u.fullName?.toLowerCase().includes(leaderSearch.toLowerCase())
+                            ).slice(0, 20)].map(u => (
+                              <button
+                                key={u.id}
+                                onClick={() => { setLeaderVal(u.id); setLeaderSearch(u.fullName); }}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[#008C3C]/10 transition-colors ${leaderVal === u.id ? 'bg-[#008C3C]/10 font-medium text-[#008C3C]' : 'text-gray-700'}`}
+                              >
+                                {u.fullName}
+                              </button>
                             ))}
-                          </SelectContent>
-                        </Select>
-                        <button onClick={() => saveLeader(p)}
-                          className="w-6 h-6 rounded-full bg-[#008C3C] text-white flex items-center justify-center hover:bg-[#006C2F]">
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => setEditingLeader(null)}
-                          className="w-6 h-6 rounded-full border border-gray-200 text-gray-400 flex items-center justify-center hover:bg-gray-50">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <button onClick={() => startEditLeader(p)}
@@ -447,34 +533,53 @@ export const ProjectsPage = () => {
                     )}
 
                     {isAddingHere ? (
-                      <div className="flex items-center gap-2 pt-1">
-                        <Select value={memberVal} onValueChange={setMemberVal}>
-                          <SelectTrigger className="h-8 text-xs flex-1">
-                            <SelectValue placeholder="Seleccionar persona" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {available.length === 0
-                              ? <SelectItem value="__none" disabled>Sin personas disponibles</SelectItem>
-                              : available.map(u => (
-                                  <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>
-                                ))
-                            }
-                          </SelectContent>
-                        </Select>
-                        <Button size="sm" onClick={() => handleAddMember(p)}
-                          disabled={!memberVal || saving || memberVal === '__none'}
-                          className="bg-[#008C3C] hover:bg-[#006C2F] text-white h-8 text-xs">
-                          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                          Agregar
-                        </Button>
-                        <button onClick={() => { setAddingMember(null); setMemberVal(''); }}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-gray-100">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                      <div className="pt-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                            <input
+                              autoFocus
+                              value={memberSearch}
+                              onChange={e => { setMemberSearch(e.target.value); setMemberVal(''); }}
+                              placeholder="Buscar persona..."
+                              className="w-full h-8 pl-7 pr-2 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-[#008C3C]"
+                            />
+                          </div>
+                          <Button size="sm" onClick={() => handleAddMember(p)}
+                            disabled={!memberVal || saving}
+                            className="bg-[#008C3C] hover:bg-[#006C2F] text-white h-8 text-xs">
+                            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                            Agregar
+                          </Button>
+                          <button onClick={() => { setAddingMember(null); setMemberVal(''); setMemberSearch(''); }}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-gray-100">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {memberSearch.trim().length >= 2 && (
+                          <div className="max-h-36 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-md">
+                            {available.filter(u =>
+                              u.fullName?.toLowerCase().includes(memberSearch.toLowerCase())
+                            ).slice(0, 20).map(u => (
+                              <button
+                                key={u.id}
+                                onClick={() => { setMemberVal(u.id); setMemberSearch(u.fullName); }}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[#008C3C]/10 transition-colors ${memberVal === u.id ? 'bg-[#008C3C]/10 font-medium text-[#008C3C]' : 'text-gray-700'}`}
+                              >
+                                {u.fullName}
+                              </button>
+                            ))}
+                            {available.filter(u =>
+                              u.fullName?.toLowerCase().includes(memberSearch.toLowerCase())
+                            ).length === 0 && (
+                              <p className="px-3 py-2 text-xs text-gray-400 italic">Sin resultados</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <button
-                        onClick={() => { setAddingMember(p.id); setMemberVal(''); }}
+                        onClick={() => { setAddingMember(p.id); setMemberVal(''); setMemberSearch(''); }}
                         className="flex items-center gap-1.5 text-xs text-[#008C3C] hover:underline mt-1">
                         <Plus className="w-3.5 h-3.5" /> Agregar persona
                       </button>

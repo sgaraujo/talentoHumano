@@ -8,13 +8,12 @@ import {
 } from '@/components/ui/select';
 import {
   Loader2, Users, UserPlus, UserMinus, Clock,
-  TrendingUp, TrendingDown, DollarSign, Plus, Filter,
+  TrendingUp, TrendingDown, DollarSign, Filter,
 } from 'lucide-react';
 import {
   Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ComposedChart,
 } from 'recharts';
-import { RegisterMovementDialog } from '@/components/analytics/RegisterMovementDialog';
 
 export const RotationPage = () => {
   const { metrics, loading, refreshMetrics, filterOptions } = useAnalytics();
@@ -22,7 +21,6 @@ export const RotationPage = () => {
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedEmpresa, setSelectedEmpresa] = useState('all');
   const [selectedProyecto, setSelectedProyecto] = useState('all');
-  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 
   const handleFilterChange = () => {
     refreshMetrics({
@@ -74,18 +72,9 @@ export const RotationPage = () => {
     <div className="p-4 sm:p-6 space-y-5 bg-gray-50 min-h-screen">
 
       {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Rotación & Talento</h1>
-          <p className="text-[#4A4A4A]/70 text-sm mt-0.5">Dashboard de análisis de personal</p>
-        </div>
-        <Button
-          onClick={() => setRegisterDialogOpen(true)}
-          className="bg-[#008C3C] hover:bg-[#006C2F] text-white w-full sm:w-auto"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Registrar Movimiento
-        </Button>
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Rotación & Talento</h1>
+        <p className="text-[#4A4A4A]/70 text-sm mt-0.5">Dashboard de análisis de personal</p>
       </div>
 
       {/* ── Filtros ── */}
@@ -151,11 +140,6 @@ export const RotationPage = () => {
         </Button>
       </div>
 
-      <RegisterMovementDialog
-        open={registerDialogOpen}
-        onOpenChange={setRegisterDialogOpen}
-        onSuccess={() => refreshMetrics()}
-      />
 
       {/* ── KPIs principales ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
