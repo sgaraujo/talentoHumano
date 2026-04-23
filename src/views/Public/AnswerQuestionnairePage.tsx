@@ -156,27 +156,27 @@ export const AnswerQuestionnairePage = () => {
         return (
           <div className="mt-2 space-y-2">
             {question.options?.map(opt => {
-              const checked = (answers[question.id] || []).includes(opt.value);
+              const checked = ((answers[question.id] as string[]) || []).includes(opt.value);
               return (
                 <div key={opt.id}
                   className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors
                     ${checked ? 'border-[#008C3C] bg-[#008C3C]/5' : 'border-gray-200 hover:border-[#008C3C]/40'}`}
                   onClick={() => {
-                    const cur = answers[question.id] || [];
-                    setAnswers(p => ({
-                      ...p,
-                      [question.id]: checked
-                        ? cur.filter((v: string) => v !== opt.value)
-                        : [...cur, opt.value],
-                    }));
+                    setAnswers(p => {
+                      const cur: string[] = (p[question.id] as string[]) || [];
+                      return {
+                        ...p,
+                        [question.id]: cur.includes(opt.value)
+                          ? cur.filter(v => v !== opt.value)
+                          : [...cur, opt.value],
+                      };
+                    });
                   }}
                 >
-                  <Checkbox id={opt.id} checked={checked}
+                  <Checkbox checked={checked}
                     className="data-[state=checked]:bg-[#008C3C] data-[state=checked]:border-[#008C3C]"
                     onCheckedChange={() => {}} />
-                  <Label htmlFor={opt.id} className="cursor-pointer font-normal text-gray-700">
-                    {opt.label}
-                  </Label>
+                  <span className="font-normal text-gray-700 text-sm">{opt.label}</span>
                 </div>
               );
             })}
@@ -325,16 +325,6 @@ export const AnswerQuestionnairePage = () => {
               </p>
             </div>
             <div className="bg-white px-5 py-4 space-y-2 text-sm text-gray-600 leading-relaxed">
-              <p>
-                Este formulario nos ayuda a conocerte mejor y a brindarte una experiencia
-                de trabajo personalizada desde el primer día.
-                <strong className="text-[#008C3C]"> Tu información es confidencial</strong> y
-                solo será utilizada para mejorar tu bienestar y desarrollo profesional.
-              </p>
-              <p className="text-gray-500">
-                Tómate el tiempo que necesites — no hay respuestas correctas o incorrectas.
-                ¡Queremos conocer tu historia!
-              </p>
               {questionnaire.description && (
                 <p className="mt-2 pt-2 border-t border-gray-100 text-gray-500 italic">
                   {questionnaire.description}

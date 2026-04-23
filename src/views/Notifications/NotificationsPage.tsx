@@ -7,7 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Loader2, Search, Cake, Award, Clock, FileText, Download, Building2,
+  Loader2, Search, Cake, Award, Clock, FileText, Download, Building2, CalendarDays,
 } from 'lucide-react';
 import { MonthCalendar } from '@/components/notifications/MonthCalendar';
 import type { NotificationType } from '@/models/types/Notification';
@@ -30,6 +30,27 @@ const PERIODS = [
   { value: '365', label: 'Próximo año' },
 ];
 
+const MONTH_NAMES = [
+  'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
+];
+
+/** Generate month options: 3 past + current + 11 future */
+function buildMonthOptions() {
+  const today = new Date();
+  const options: { value: string; label: string }[] = [
+    { value: 'all', label: 'Todos los meses' },
+  ];
+  for (let offset = -3; offset <= 11; offset++) {
+    const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+    options.push({ value, label });
+  }
+  return options;
+}
+const MONTH_OPTIONS = buildMonthOptions();
+
 const TYPE_LABELS: Record<NotificationType, string> = {
   birthday:         'Cumpleaños',
   work_anniversary: 'Aniversario laboral',
@@ -46,7 +67,8 @@ export const NotificationsPage = () => {
   const [search,        setSearch]        = useState('');
   const [typeFilter,    setTypeFilter]    = useState('all');
   const [companyFilter, setCompanyFilter] = useState('all');
-  const [period,        setPeriod]        = useState('90');
+  const [period,        setPeriod]        = useState('365');
+  const [monthFilter,   setMonthFilter]   = useState('all');
   const [exporting,     setExporting]     = useState(false);
 
   // Unique companies from events
@@ -68,14 +90,18 @@ export const NotificationsPage = () => {
     applyFilters(types, Number(value));
   };
 
-  // Client-side filters (search + company)
+  // Client-side filters (search + company + month)
   const filtered = useMemo(() => {
     return events.filter(e => {
       if (companyFilter !== 'all' && e.company !== companyFilter) return false;
       if (search && !e.userName.toLowerCase().includes(search.toLowerCase())) return false;
+      if (monthFilter !== 'all') {
+        const [y, m] = monthFilter.split('-').map(Number);
+        if (e.date.getFullYear() !== y || e.date.getMonth() + 1 !== m) return false;
+      }
       return true;
     });
-  }, [events, companyFilter, search]);
+  }, [events, companyFilter, search, monthFilter]);
 
   const getDaysLabel = (days: number) => {
     if (days < 0)  return `Hace ${Math.abs(days)} día(s)`;
@@ -111,9 +137,12 @@ export const NotificationsPage = () => {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Notificaciones');
 
-      const periodLabel = PERIODS.find(p => p.value === period)?.label ?? '';
+      const monthLabel  = MONTH_OPTIONS.find(o => o.value === monthFilter)?.label ?? '';
       const typeLabel   = typeFilter === 'all' ? 'Todos' : TYPE_LABELS[typeFilter as NotificationType];
-      const fileName    = `Notificaciones_${typeLabel}_${periodLabel}.xlsx`
+      const baseName    = monthFilter !== 'all'
+        ? `Notificaciones_${typeLabel}_${monthLabel}`
+        : `Notificaciones_${typeLabel}_${PERIODS.find(p => p.value === period)?.label ?? ''}`;
+      const fileName    = `${baseName}.xlsx`
         .replace(/\s+/g, '_').replace(/[áéíóú]/gi, c => ({ á:'a',é:'e',í:'i',ó:'o',ú:'u' }[c] ?? c));
 
       XLSX.writeFile(wb, fileName);
@@ -146,7 +175,7 @@ export const NotificationsPage = () => {
 
       {/* Filtros */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
 
           {/* Buscar */}
           <div className="relative">
@@ -196,6 +225,19 @@ export const NotificationsPage = () => {
             </SelectContent>
           </Select>
 
+          {/* Mes */}
+          <Select value={monthFilter} onValueChange={setMonthFilter}>
+            <SelectTrigger className="border-gray-200">
+              <CalendarDays className="w-4 h-4 mr-2 text-gray-400 inline" />
+              <SelectValue placeholder="Todos los meses" />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTH_OPTIONS.map(o => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           {/* Período */}
           <Select value={period} onValueChange={handlePeriodChange}>
             <SelectTrigger className="border-gray-200">
@@ -208,6 +250,22 @@ export const NotificationsPage = () => {
             </SelectContent>
           </Select>
         </div>
+
+        {/* Indicador mes activo */}
+        {monthFilter !== 'all' && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs bg-[#008C3C]/10 text-[#008C3C] font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5">
+              <CalendarDays className="w-3.5 h-3.5" />
+              Filtrando: {MONTH_OPTIONS.find(o => o.value === monthFilter)?.label}
+            </span>
+            <button
+              onClick={() => setMonthFilter('all')}
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
+            >
+              Quitar filtro de mes
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Conteo */}

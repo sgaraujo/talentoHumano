@@ -2,6 +2,12 @@ export type CommunicationTarget = 'all' | 'company' | 'project' | 'manual';
 export type CommunicationStatus = 'draft' | 'sent';
 export type RecipientStatus     = 'pending' | 'read' | 'failed';
 
+export interface CommunicationAttachment {
+  name: string;
+  url: string;
+  link?: string;
+}
+
 export interface Communication {
   id: string;
   title: string;
@@ -14,7 +20,11 @@ export interface Communication {
   totalSent: number;
   totalRead: number;
   status: CommunicationStatus;
-  requiresAck?: boolean; // acuse de recibo obligatorio
+  requiresAck?: boolean;
+  attachments?: CommunicationAttachment[];
+  ctaButton?: { text: string; url: string };
+  questionnaireId?: string;
+  questionnaireName?: string;
 }
 
 export interface CommunicationRecipient {
@@ -26,9 +36,11 @@ export interface CommunicationRecipient {
   company: string;
   project: string;
   token: string;
+  quizToken?: string;
   status: RecipientStatus;
   readAt?: Date;
-  ackAt?: Date;       // acuse de recibo
+  ackAt?: Date;
+  quizSubmittedAt?: Date;
   emailStatus: 'sent' | 'failed' | 'pending';
   sentAt: Date;
 }

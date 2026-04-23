@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
+import { useAppRole } from './hooks/useAppRole';
 import { LoginPage } from './views/Auth/LoginPage';
 import { DashboardPage } from './views/Dashboard/DashboardPage';
 import { UsersPage } from './views/Users/UsersPage';
@@ -17,9 +18,26 @@ import { CompanyAnalyticsPage } from './views/Companies/CompanyAnalyticsPage';
 import { ProjectsPage } from './views/Projects/ProjectsPage';
 import { CommunicationsPage } from './views/Communications/CommunicationsPage';
 import { ReadCommunicationPage } from './views/Public/ReadCommunicationPage';
+import { TaxCalendarPage } from './views/Accounting/TaxCalendarPage';
+import { RolesPage } from './views/Admin/RolesPage';
 
 
 
+
+/** Redirects authenticated users to their role's home page */
+function HomeRedirect() {
+  const { role, loading: roleLoading } = useAppRole();
+  if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
+  return <Navigate to={role === 'contabilidad' ? '/contabilidad' : '/dashboard'} replace />;
+}
+
+/** Renders children only if role can access; otherwise redirects to role home */
+function RoleRoute({ children, path }: { children: React.ReactNode; path: string }) {
+  const { role, loading: roleLoading } = useAppRole();
+  if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
+  if (role === 'contabilidad' && path !== '/contabilidad') return <Navigate to="/contabilidad" replace />;
+  return <>{children}</>;
+}
 
 function App() {
   const { isAuthenticated, loading } = useAuth();
@@ -35,19 +53,21 @@ function App() {
           path="/login"
           element={
             loading ? <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>
-            : isAuthenticated ? <Navigate to="/dashboard" /> : <LoginPage />
+            : isAuthenticated ? <HomeRedirect /> : <LoginPage />
           }
         />
 
         <Route
           path="/dashboard"
           element={
-            !loading && isAuthenticated ? (
-              <MainLayout>
-                <DashboardPage />
-              </MainLayout>
-            ) : (
-              <Navigate to="/login" />
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : (
+              <RoleRoute path="/dashboard">
+                <MainLayout>
+                  <DashboardPage />
+                </MainLayout>
+              </RoleRoute>
             )
           }
         />
@@ -189,8 +209,30 @@ function App() {
         />
 
         <Route
+          path="/roles"
+          element={
+            !loading && isAuthenticated ? (
+              <MainLayout><RolesPage /></MainLayout>
+            ) : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/contabilidad"
+          element={
+            !loading && isAuthenticated ? (
+              <MainLayout><TaxCalendarPage /></MainLayout>
+            ) : <Navigate to="/login" />
+          }
+        />
+
+        <Route
           path="*"
-          element={<Navigate to={loading ? "/login" : isAuthenticated ? "/dashboard" : "/login"} />}
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <HomeRedirect />
+          }
         />
 
         

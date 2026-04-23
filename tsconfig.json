@@ -9,6 +9,7 @@
     }
   ],
   "compilerOptions": {
+    "lib": ["ES2015", "DOM", "ES2021"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

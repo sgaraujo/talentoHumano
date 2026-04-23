@@ -169,7 +169,7 @@ export const useUsers = () => {
                 // --- Determinar role ---
                 const estado = (row['ESTADO'] || '').toString().toUpperCase();
                 const fechaRetiro = parseExcelDate(row['FECHA RETIRO']);
-                const isRetirado = fechaRetiro || estado.includes('RETIRADO') || estado.includes('INACTIVO');
+                const isRetirado = fechaRetiro || estado.includes('RETIRADO') || estado.includes('INACTIVO') || estado.includes('ANULAD');
                 const role = isRetirado ? 'excolaborador' : 'colaborador';
 
                 // --- Fechas ---
@@ -449,10 +449,27 @@ export const useUsers = () => {
             await loadUsers();
             await loadStats();
 
+            // Auto-sincronizar estados de proyectos
+            const syncResult = await projectService.syncStatuses();
+
             return {
                 ...results,
                 movements: movementResults,
+                projectsInactivated: syncResult.inactivated,
             };
+        } catch (err: any) {
+            setError(err.message);
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const syncProjectStatuses = async (): Promise<{ inactivated: number }> => {
+        try {
+            setLoading(true);
+            setError(null);
+            return await projectService.syncStatuses();
         } catch (err: any) {
             setError(err.message);
             throw err;
@@ -475,5 +492,6 @@ export const useUsers = () => {
         refreshUsers: loadUsers,
         updateUser,
         deleteUser,
+        syncProjectStatuses,
     };
 };

@@ -3,7 +3,7 @@ import { useUsers } from '@/hooks/useUsers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Upload, Search, Plus, Loader2, Pencil, Trash2, Eye, UserMinus } from 'lucide-react';
+import { Upload, Search, Plus, Loader2, Pencil, Trash2, Eye, UserMinus, RefreshCw, Download } from 'lucide-react';
 import { CreateUserDialog } from '@/components/users/CreateUserDialog';
 import { EditUserDialog } from '@/components/users/EditUserDialog';
 import { DeleteUserDialog } from '@/components/users/DeleteUserDialog';
@@ -12,12 +12,13 @@ import { RegisterMovementDialog } from '@/components/analytics/RegisterMovementD
 
 export const UsersPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterRole, setFilterRole] = useState<string>('all');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
 
-  const { users, stats, loading, importUsersFromExcel, refreshUsers } = useUsers();
+  const { users, stats, loading, importUsersFromExcel, refreshUsers, syncProjectStatuses } = useUsers();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
@@ -30,8 +31,11 @@ export const UsersPage = () => {
         const movInfo = results.movements
           ? `\n\nMovimientos generados:\n  Ingresos: ${results.movements.ingresos}\n  Retiros: ${results.movements.retiros}`
           : '';
+        const projInfo = results.projectsInactivated != null
+          ? `\n\nProyectos inactivados: ${results.projectsInactivated}`
+          : '';
         const updatedCount = results.updated?.length || 0;
-        alert(`Importacion completada:\n  Nuevos: ${results.success.length}\n  Actualizados: ${updatedCount}\n  Errores: ${results.errors.length}${movInfo}${results.errors.length > 0 ? '\n\nErrores:\n' + results.errors.slice(0, 10).map((e: any) => `- ${e.email}: ${e.error}`).join('\n') + (results.errors.length > 10 ? `\n  ... y ${results.errors.length - 10} mas` : '') : ''}`);
+        alert(`Importacion completada:\n  Nuevos: ${results.success.length}\n  Actualizados: ${updatedCount}\n  Errores: ${results.errors.length}${movInfo}${projInfo}${results.errors.length > 0 ? '\n\nErrores:\n' + results.errors.slice(0, 10).map((e: any) => `- ${e.email}: ${e.error}`).join('\n') + (results.errors.length > 10 ? `\n  ... y ${results.errors.length - 10} mas` : '') : ''}`);
       } catch (error) {
         alert('Error al importar usuarios');
       }
@@ -54,10 +58,80 @@ export const UsersPage = () => {
     setProfileDialogOpen(true);
   };
 
-  const filteredUsers = users.filter((user: any) =>
-    user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.fullName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleSyncProjects = async () => {
+    try {
+      const result = await syncProjectStatuses();
+      alert(`Sincronización completada:\n  Proyectos inactivados: ${result.inactivated}`);
+      refreshUsers();
+    } catch {
+      alert('Error al sincronizar proyectos');
+    }
+  };
+
+  const handleExportExcel = async () => {
+    const XLSX = await import('xlsx');
+    const rows = filteredUsers.map((u: any) => ({
+      'APELLIDOS Y NOMBRES':          u.fullName || '',
+      'CORREO CORPORATIVO':           u.location?.corporateEmail || '',
+      'CORREO ELECTRONICO PERSONAL':  u.location?.personalEmail  || '',
+      'Email':                        u.email || '',
+      'ROL':                          u.role  || '',
+      'CEDULA':                       u.personalData?.documentNumber   || '',
+      'TIPO DOCUMENTO':               u.personalData?.documentType     || '',
+      'FECHA DE NACIMIENTO':          u.personalData?.birthDate ? new Date(u.personalData.birthDate).toLocaleDateString('es-CO') : '',
+      'EDAD':                         u.personalData?.age       || '',
+      'GENERO':                       u.personalData?.gender    || '',
+      'ESTADO CIVIL':                 u.personalData?.maritalStatus || '',
+      'TELEFONO PERSONAL':            u.personalData?.phone     || '',
+      'CARGO':                        u.personalData?.position  || u.contractInfo?.assignment?.position || '',
+      'EMPRESA':                      u.contractInfo?.assignment?.company          || '',
+      'PROYECTO':                     u.contractInfo?.assignment?.project          || '',
+      'CUENTA ANALITICA':             u.contractInfo?.assignment?.analyticalAccount|| '',
+      'JEFE INMEDIATO':               u.contractInfo?.assignment?.directSupervisor || '',
+      'PERFIL':                       u.contractInfo?.assignment?.profile          || '',
+      'PERFIL CONTABLE':              u.contractInfo?.assignment?.accountingProfile|| '',
+      'TIPO DE CONTRATO':             u.contractInfo?.contract?.contractType       || '',
+      'FECHA DE INGRESO':             u.contractInfo?.contract?.startDate ? new Date(u.contractInfo.contract.startDate).toLocaleDateString('es-CO') : '',
+      'MODALIDAD':                    u.contractInfo?.workConditions?.workModality || '',
+      'JORNADA':                      u.contractInfo?.workConditions?.workday      || '',
+      'Sueldo':                       u.salaryInfo?.baseSalary         || '',
+      'Aux. de transporte':           u.salaryInfo?.transportAllowance || '',
+      'Auxilio Alimentacion':         u.salaryInfo?.mealAllowance      || '',
+      'Auxilio Rodamiento':           u.salaryInfo?.vehicleAllowance   || '',
+      'Auxilio Herramientas':         u.salaryInfo?.toolsAllowance     || '',
+      'Auxilio Comunicacion':         u.salaryInfo?.communicationAllowance || '',
+      'KPI Salarial':                 u.salaryInfo?.salaryKpi          || '',
+      'EPS':                          u.socialSecurity?.eps            || '',
+      'AFP':                          u.socialSecurity?.afp            || '',
+      'CCF':                          u.socialSecurity?.ccf            || '',
+      'CESANTIAS':                    u.socialSecurity?.severanceFund  || '',
+      'RIESGO ARL':                   u.socialSecurity?.arlRiskLevel   || '',
+      'ENTIDAD BANCARIA':             u.bankingInfo?.bankName          || '',
+      'TIPO DE CUENTA':               u.bankingInfo?.accountType       || '',
+      'NUMERO DE CUENTA':             u.bankingInfo?.accountNumber     || '',
+      'NIVEL ACADEMICO':              u.professionalProfile?.academicLevel || '',
+      'PROFESION':                    u.professionalProfile?.degree    || '',
+      'DEPARTAMENTO DE RESIDENCIA':   u.location?.state                || '',
+      'CIUDAD DE RESIDENCIA':         u.location?.city                 || '',
+      'DIRECCION VIVIENDA':           u.location?.address              || '',
+      'FECHA RETIRO':                 u.administrativeRecord?.terminationDate ? new Date(u.administrativeRecord.terminationDate).toLocaleDateString('es-CO') : '',
+      'MOTIVO':                       u.administrativeRecord?.terminationReason || '',
+      'JUSTIFICACION RETIRO':         u.administrativeRecord?.terminationJustification || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Usuarios');
+    const label = filterRole !== 'all' ? `_${filterRole}s` : '';
+    XLSX.writeFile(wb, `usuarios${label}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
+  const filteredUsers = users.filter((user: any) => {
+    if (filterRole !== 'all' && user.role !== filterRole) return false;
+    if (searchTerm && !user.email?.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !user.fullName?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    return true;
+  });
 
   return (
     <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
@@ -106,6 +180,30 @@ export const UsersPage = () => {
 
           <Button
             variant="outline"
+            onClick={handleExportExcel}
+            disabled={loading || filteredUsers.length === 0}
+            className="flex-1 sm:flex-none border-[#008C3C]/30 text-[#008C3C] hover:bg-[#008C3C]/5"
+            title="Descargar Excel con los usuarios visibles"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            <span className="hidden sm:inline">Exportar Excel</span>
+            <span className="sm:hidden">Exportar</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={handleSyncProjects}
+            disabled={loading}
+            className="flex-1 sm:flex-none border-[#008C3C]/30 text-[#008C3C] hover:bg-[#008C3C]/5"
+            title="Inactiva proyectos sin personal activo"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            <span className="hidden sm:inline">Sincronizar Proyectos</span>
+            <span className="sm:hidden">Sincronizar</span>
+          </Button>
+
+          <Button
+            variant="outline"
             onClick={() => setMovementDialogOpen(true)}
             className="flex-1 sm:flex-none border-red-200 text-red-500 hover:bg-red-50"
           >
@@ -127,49 +225,49 @@ export const UsersPage = () => {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        <Card className="border-l-4 border-l-[#008C3C] shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-[#4A4A4A]/70 text-xs sm:text-sm">Total Registros</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl sm:text-3xl font-bold text-[#008C3C]">{stats.total}</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-[#7BCB6A] shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-[#4A4A4A]/70 text-xs sm:text-sm">Colaboradores</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl sm:text-3xl font-bold text-[#7BCB6A]">{stats.colaboradores}</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-[#1F8FBF] shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-[#4A4A4A]/70 text-xs sm:text-sm">Aspirantes</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl sm:text-3xl font-bold text-[#1F8FBF]">{stats.aspirantes}</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-[#4A4A4A] shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-[#4A4A4A]/70 text-xs sm:text-sm">Ex-colaboradores</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">{stats.excolaboradores}</p>
-          </CardContent>
-        </Card>
+        {[
+          { label: 'Total Registros',  value: stats.total,           role: 'all',            color: '#008C3C', border: 'border-l-[#008C3C]' },
+          { label: 'Colaboradores',    value: stats.colaboradores,   role: 'colaborador',    color: '#7BCB6A', border: 'border-l-[#7BCB6A]' },
+          { label: 'Aspirantes',       value: stats.aspirantes,      role: 'aspirante',      color: '#1F8FBF', border: 'border-l-[#1F8FBF]' },
+          { label: 'Ex-colaboradores', value: stats.excolaboradores, role: 'excolaborador',  color: '#4A4A4A', border: 'border-l-[#4A4A4A]' },
+        ].map(card => (
+          <Card
+            key={card.role}
+            onClick={() => setFilterRole(prev => prev === card.role ? 'all' : card.role)}
+            className={`border-l-4 ${card.border} shadow-sm hover:shadow-md transition-all cursor-pointer
+              ${filterRole === card.role ? 'ring-2 ring-offset-1' : ''}`}
+            style={filterRole === card.role ? { outline: `2px solid ${card.color}`, outlineOffset: '2px' } : {}}
+          >
+            <CardHeader className="pb-2">
+              <CardDescription className="text-[#4A4A4A]/70 text-xs sm:text-sm">{card.label}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl sm:text-3xl font-bold" style={{ color: card.color }}>{card.value}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <Card className="shadow-sm">
         <CardHeader>
-          <CardTitle className="text-[#4A4A4A]">Lista de Usuarios ({filteredUsers.length})</CardTitle>
-          <CardDescription className="text-[#4A4A4A]/70">
-            Visualiza y gestiona todos los usuarios del sistema
-          </CardDescription>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="text-[#4A4A4A]">
+                Lista de Usuarios ({filteredUsers.length})
+              </CardTitle>
+              <CardDescription className="text-[#4A4A4A]/70">
+                {filterRole === 'all' ? 'Todos los usuarios' : `Filtrado: ${filterRole}s`}
+              </CardDescription>
+            </div>
+            {filterRole !== 'all' && (
+              <button
+                onClick={() => setFilterRole('all')}
+                className="text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                Quitar filtro
+              </button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (

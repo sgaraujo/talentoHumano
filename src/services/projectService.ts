@@ -75,6 +75,45 @@ class ProjectService {
     );
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
   }
+
+  /**
+   * Inactiva proyectos donde headcount = 0 o todos los miembros son excolaboradores.
+   * Returns count of projects inactivated.
+   */
+  async syncStatuses(): Promise<{ inactivated: number }> {
+    const [allProjects, usersSnap] = await Promise.all([
+      this.getAll(),
+      getDocs(collection(db, 'users')),
+    ]);
+
+    // Build map: projectId → array of member roles
+    const projectRoles = new Map<string, string[]>();
+    for (const d of usersSnap.docs) {
+      const data = d.data();
+      const role: string = data.role || 'colaborador';
+      const pids: string[] = [...(data.projectIds || [])];
+      const assignedPid: string | undefined = data.contractInfo?.assignment?.projectId;
+      if (assignedPid && !pids.includes(assignedPid)) pids.push(assignedPid);
+      for (const pid of pids) {
+        if (!projectRoles.has(pid)) projectRoles.set(pid, []);
+        projectRoles.get(pid)!.push(role);
+      }
+    }
+
+    let inactivated = 0;
+    for (const project of allProjects) {
+      if (project.status !== 'activo') continue;
+      const roles = projectRoles.get(project.id) || [];
+      const hc = project.headcount ?? roles.length;
+      const allExcol = roles.length > 0 && roles.every(r => r === 'excolaborador');
+      if (hc === 0 || allExcol) {
+        await this.update(project.id, { status: 'inactivo' });
+        inactivated++;
+      }
+    }
+
+    return { inactivated };
+  }
 }
 
 export const projectService = new ProjectService();
