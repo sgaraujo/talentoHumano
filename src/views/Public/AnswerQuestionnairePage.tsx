@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, CheckCircle2, ClipboardList, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import type { Questionnaire, Question } from "@/models/types/Questionnaire";
@@ -173,9 +172,15 @@ export const AnswerQuestionnairePage = () => {
                     });
                   }}
                 >
-                  <Checkbox checked={checked}
-                    className="data-[state=checked]:bg-[#008C3C] data-[state=checked]:border-[#008C3C]"
-                    onCheckedChange={() => {}} />
+                  <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors
+                    ${checked ? 'bg-[#008C3C] border-[#008C3C]' : 'border-gray-300 bg-white'}`}>
+                    {checked && (
+                      <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none">
+                        <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8"
+                          strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </div>
                   <span className="font-normal text-gray-700 text-sm">{opt.label}</span>
                 </div>
               );
