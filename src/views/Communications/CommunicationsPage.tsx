@@ -540,7 +540,7 @@ export const CommunicationsPage = () => {
         </span>
       </div>
 
-      {/* Table */}
+      {/* List */}
       {loading ? (
         <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-[#008C3C]" /></div>
       ) : filteredComms.length === 0 ? (
@@ -556,143 +556,166 @@ export const CommunicationsPage = () => {
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          {/* Table header */}
-          <div className="grid grid-cols-12 px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
-            <span className="col-span-4">Comunicado</span>
-            <span className="col-span-2 text-center">Enviado a</span>
-            <span className="col-span-1 text-center">Leídos</span>
-            <span className="col-span-1 text-center">Pend.</span>
-            <span className="col-span-2">Apertura</span>
-            <span className="col-span-1 text-center">Fecha</span>
-            <span className="col-span-1 text-center">Ver</span>
-          </div>
-
-          <div className="divide-y divide-gray-50">
+        <>
+          {/* ── Mobile cards (< sm) ── */}
+          <div className="sm:hidden space-y-2">
             {filteredComms.map(comm => {
               const pending = comm.totalSent - comm.totalRead;
               return (
-                <div key={comm.id} className="grid grid-cols-12 px-4 py-3 items-center hover:bg-gray-50/60 transition-colors group">
-
-                  {/* Title + target */}
-                  <div className="col-span-4 min-w-0 pr-2">
-                    <p className="text-sm font-semibold text-[#4A4A4A] truncate">{comm.title}</p>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      {comm.targetType === 'company'
-                        ? <Building2 className="w-3 h-3 text-gray-400" />
-                        : comm.targetType === 'project'
-                        ? <FolderKanban className="w-3 h-3 text-gray-400" />
-                        : comm.targetType === 'manual'
-                        ? <Search className="w-3 h-3 text-gray-400" />
-                        : <Users className="w-3 h-3 text-gray-400" />}
-                      <span className="text-[10px] text-gray-400 truncate">
-                        {comm.targetName || 'Todos'}
-                      </span>
-                      {comm.requiresAck && (
-                        <span className="text-[9px] bg-blue-50 text-blue-600 px-1 rounded">Acuse</span>
-                      )}
+                <div key={comm.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[#4A4A4A] leading-snug">{comm.title}</p>
+                      <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                        {comm.targetType === 'company' ? <Building2 className="w-3 h-3 text-gray-400" />
+                          : comm.targetType === 'project' ? <FolderKanban className="w-3 h-3 text-gray-400" />
+                          : <Users className="w-3 h-3 text-gray-400" />}
+                        <span className="text-[10px] text-gray-400">{comm.targetName || 'Todos'}</span>
+                        <span className="text-[10px] text-gray-300">·</span>
+                        <span className="text-[10px] text-gray-400">{fmtShort(comm.sentAt)}</span>
+                        {comm.requiresAck && <span className="text-[9px] bg-blue-50 text-blue-600 px-1 rounded">Acuse</span>}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button onClick={() => openDetail(comm)}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10 transition-colors">
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button onClick={e => handleDelete(comm, e)}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-
-                  {/* Total sent */}
-                  <div className="col-span-2 text-center">
-                    <span className="text-sm font-semibold text-gray-600">{comm.totalSent}</span>
-                    <p className="text-[10px] text-gray-400">personas</p>
+                  <div className="grid grid-cols-3 gap-2 mb-2 text-center">
+                    <div className="bg-gray-50 rounded-lg py-1.5">
+                      <p className="text-sm font-bold text-gray-600">{comm.totalSent}</p>
+                      <p className="text-[10px] text-gray-400">enviados</p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg py-1.5">
+                      <p className="text-sm font-bold text-[#008C3C]">{comm.totalRead}</p>
+                      <p className="text-[10px] text-gray-400">leídos</p>
+                    </div>
+                    <div className={`rounded-lg py-1.5 ${pending > 0 ? 'bg-orange-50' : 'bg-gray-50'}`}>
+                      <p className={`text-sm font-bold ${pending > 0 ? 'text-orange-500' : 'text-gray-300'}`}>{pending}</p>
+                      <p className="text-[10px] text-gray-400">pend.</p>
+                    </div>
                   </div>
-
-                  {/* Read */}
-                  <div className="col-span-1 text-center">
-                    <span className="text-sm font-semibold text-[#008C3C]">{comm.totalRead}</span>
-                  </div>
-
-                  {/* Pending */}
-                  <div className="col-span-1 text-center">
-                    <span className={`text-sm font-semibold ${pending > 0 ? 'text-orange-500' : 'text-gray-300'}`}>
-                      {pending}
-                    </span>
-                  </div>
-
-                  {/* Progress bar */}
-                  <div className="col-span-2 pr-2">
-                    <PctBar value={comm.totalRead} total={comm.totalSent} />
-                  </div>
-
-                  {/* Date */}
-                  <div className="col-span-1 text-center">
-                    <p className="text-[10px] text-gray-400 leading-tight">{fmtShort(comm.sentAt)}</p>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="col-span-1 flex items-center justify-center gap-1">
-                    <button
-                      onClick={() => openDetail(comm)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10 transition-colors"
-                      title="Ver seguimiento"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={e => handleDelete(comm, e)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
-                      title="Eliminar"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  <PctBar value={comm.totalRead} total={comm.totalSent} />
                 </div>
               );
             })}
           </div>
-        </div>
+
+          {/* ── Desktop table (sm+) ── */}
+          <div className="hidden sm:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="grid grid-cols-12 px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+              <span className="col-span-4">Comunicado</span>
+              <span className="col-span-2 text-center">Enviado a</span>
+              <span className="col-span-1 text-center">Leídos</span>
+              <span className="col-span-1 text-center">Pend.</span>
+              <span className="col-span-2">Apertura</span>
+              <span className="col-span-1 text-center">Fecha</span>
+              <span className="col-span-1 text-center">Ver</span>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {filteredComms.map(comm => {
+                const pending = comm.totalSent - comm.totalRead;
+                return (
+                  <div key={comm.id} className="grid grid-cols-12 px-4 py-3 items-center hover:bg-gray-50/60 transition-colors group">
+                    <div className="col-span-4 min-w-0 pr-2">
+                      <p className="text-sm font-semibold text-[#4A4A4A] truncate">{comm.title}</p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        {comm.targetType === 'company' ? <Building2 className="w-3 h-3 text-gray-400" />
+                          : comm.targetType === 'project' ? <FolderKanban className="w-3 h-3 text-gray-400" />
+                          : comm.targetType === 'manual' ? <Search className="w-3 h-3 text-gray-400" />
+                          : <Users className="w-3 h-3 text-gray-400" />}
+                        <span className="text-[10px] text-gray-400 truncate">{comm.targetName || 'Todos'}</span>
+                        {comm.requiresAck && <span className="text-[9px] bg-blue-50 text-blue-600 px-1 rounded">Acuse</span>}
+                      </div>
+                    </div>
+                    <div className="col-span-2 text-center">
+                      <span className="text-sm font-semibold text-gray-600">{comm.totalSent}</span>
+                      <p className="text-[10px] text-gray-400">personas</p>
+                    </div>
+                    <div className="col-span-1 text-center">
+                      <span className="text-sm font-semibold text-[#008C3C]">{comm.totalRead}</span>
+                    </div>
+                    <div className="col-span-1 text-center">
+                      <span className={`text-sm font-semibold ${pending > 0 ? 'text-orange-500' : 'text-gray-300'}`}>{pending}</span>
+                    </div>
+                    <div className="col-span-2 pr-2">
+                      <PctBar value={comm.totalRead} total={comm.totalSent} />
+                    </div>
+                    <div className="col-span-1 text-center">
+                      <p className="text-[10px] text-gray-400 leading-tight">{fmtShort(comm.sentAt)}</p>
+                    </div>
+                    <div className="col-span-1 flex items-center justify-center gap-1">
+                      <button onClick={() => openDetail(comm)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10 transition-colors">
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={e => handleDelete(comm, e)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
       )}
 
       {/* ── Recipients modal ── */}
       <Dialog open={!!selected} onOpenChange={open => { if (!open) { setSelected(null); if (recUnsubRef.current) { recUnsubRef.current(); recUnsubRef.current = null; } } }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
-          <DialogHeader>
+        <DialogContent className="w-full max-w-3xl h-[100dvh] sm:h-auto sm:max-h-[90vh] flex flex-col p-0 gap-0 sm:rounded-2xl rounded-none">
+
+          <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
             <DialogTitle className="text-base flex items-center gap-2">
               <Mail className="w-4 h-4 text-[#008C3C]" />
-              {selected?.title}
+              <span className="truncate">{selected?.title}</span>
             </DialogTitle>
             <p className="text-xs text-gray-400 mt-0.5">
               Enviado el {fmtShort(selected?.sentAt)} · {selected?.totalSent} destinatarios
             </p>
           </DialogHeader>
 
-          {/* Stats row — derived from live recipients */}
+          {/* Stats + bar */}
           {selected && (() => {
             const totalSent = selected.totalSent;
             const totalRead = recipients.filter(r => r.status === 'read').length;
             const pending   = totalSent - totalRead;
             return (
-              <>
-                <div className="grid grid-cols-3 gap-2 pb-2">
+              <div className="px-4 sm:px-6 py-3 space-y-2 flex-shrink-0">
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     { label: 'Enviados',   value: totalSent, color: 'text-gray-600',   bg: 'bg-gray-50'   },
                     { label: 'Leídos',     value: totalRead, color: 'text-[#008C3C]', bg: 'bg-green-50'  },
                     { label: 'Pendientes', value: pending,   color: 'text-orange-500', bg: 'bg-orange-50' },
                   ].map(s => (
-                    <div key={s.label} className={`${s.bg} rounded-lg p-2.5 text-center border border-gray-100`}>
-                      <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                    <div key={s.label} className={`${s.bg} rounded-lg p-2 text-center border border-gray-100`}>
+                      <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
                       <p className="text-[10px] text-gray-400">{s.label}</p>
                     </div>
                   ))}
                 </div>
                 <PctBar value={totalRead} total={totalSent} />
-              </>
+              </div>
             );
           })()}
 
           {/* Filters */}
-          <div className="flex flex-wrap gap-2 py-2 border-t border-gray-100">
-            <div className="relative flex-1 min-w-36">
+          <div className="px-4 sm:px-6 pb-2 flex flex-wrap gap-2 border-t border-gray-100 pt-2 flex-shrink-0">
+            <div className="relative flex-1 min-w-[120px]">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
               <Input placeholder="Buscar..." value={recSearch}
                 onChange={e => { setRecSearch(e.target.value); setRecPage(1); }}
                 className="pl-8 h-8 text-xs border-gray-200" />
             </div>
             <Select value={recStatus} onValueChange={v => { setRecStatus(v); setRecPage(1); }}>
-              <SelectTrigger className="h-8 text-xs w-32 border-gray-200"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-xs w-28 border-gray-200"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos</SelectItem>
                 <SelectItem value="read">Leídos</SelectItem>
@@ -700,61 +723,47 @@ export const CommunicationsPage = () => {
               </SelectContent>
             </Select>
             <Select value={recCompany} onValueChange={v => { setRecCompany(v); setRecPage(1); }}>
-              <SelectTrigger className="h-8 text-xs w-36 border-gray-200"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-xs w-32 border-gray-200"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todas las empresas</SelectItem>
+                <SelectItem value="all">Todas</SelectItem>
                 {recCompanies.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Button size="sm" variant="outline"
-              onClick={handleResend} disabled={resending}
-              className="h-8 text-xs border-orange-200 text-orange-600 hover:bg-orange-50">
-              {resending
-                ? <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                : <Send className="w-3 h-3 mr-1" />}
-              Reenviar pendientes
-            </Button>
-            <Button size="sm" variant="outline"
-              onClick={handleExportPending}
-              className="h-8 text-xs border-green-200 text-green-700 hover:bg-green-50">
-              <FileDown className="w-3 h-3 mr-1" />
-              Excel
-            </Button>
-            <Button size="sm" variant="outline"
-              onClick={handleExportPDF}
-              className="h-8 text-xs border-red-200 text-red-600 hover:bg-red-50">
-              <FileText className="w-3 h-3 mr-1" />
-              PDF
-            </Button>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="outline" onClick={handleResend} disabled={resending}
+                className="h-8 text-xs border-orange-200 text-orange-600 hover:bg-orange-50 px-2.5">
+                {resending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                <span className="hidden sm:inline ml-1">Reenviar</span>
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleExportPending}
+                className="h-8 text-xs border-green-200 text-green-700 hover:bg-green-50 px-2.5">
+                <FileDown className="w-3 h-3" /><span className="hidden sm:inline ml-1">Excel</span>
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleExportPDF}
+                className="h-8 text-xs border-red-200 text-red-600 hover:bg-red-50 px-2.5">
+                <FileText className="w-3 h-3" /><span className="hidden sm:inline ml-1">PDF</span>
+              </Button>
+            </div>
           </div>
 
-          {/* Table */}
-          <div className="flex-1 overflow-auto border border-gray-100 rounded-lg">
+          {/* Recipients list */}
+          <div className="flex-1 overflow-auto border-t border-gray-100">
             {loadingRec ? (
               <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#008C3C]" /></div>
+            ) : pageRecipients.length === 0 ? (
+              <p className="text-xs text-gray-400 italic text-center py-10">Sin resultados</p>
             ) : (
-              <>
-                <div className="grid grid-cols-12 px-4 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
-                  <span className="col-span-4">Nombre</span>
-                  <span className="col-span-3">Empresa</span>
-                  <span className="col-span-2 text-center">Estado</span>
-                  <span className="col-span-3 text-right">Fecha lectura</span>
-                </div>
-
-                <div className="divide-y divide-gray-50">
-                  {pageRecipients.length === 0 ? (
-                    <p className="text-xs text-gray-400 italic text-center py-8">Sin resultados</p>
-                  ) : pageRecipients.map(r => (
-                    <div key={r.id} className="grid grid-cols-12 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors">
-                      <div className="col-span-4 min-w-0">
+              <div className="divide-y divide-gray-50">
+                {pageRecipients.map(r => (
+                  <div key={r.id} className="px-4 sm:px-6 py-3 hover:bg-gray-50 transition-colors">
+                    {/* Mobile: stacked */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-[#4A4A4A] truncate">{r.userName}</p>
                         <p className="text-[10px] text-gray-400 truncate">{r.userEmail}</p>
+                        <p className="text-[10px] text-gray-400 truncate mt-0.5">{r.company || '—'}{r.project ? ` · ${r.project}` : ''}</p>
                       </div>
-                      <div className="col-span-3 min-w-0">
-                        <p className="text-xs text-gray-500 truncate">{r.company || '—'}</p>
-                        {r.project && <p className="text-[10px] text-gray-400 truncate">{r.project}</p>}
-                      </div>
-                      <div className="col-span-2 flex justify-center">
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
                         {r.status === 'read' ? (
                           <Badge className="bg-green-50 text-green-700 border-green-200 text-[10px] px-1.5">
                             <CheckCircle2 className="w-2.5 h-2.5 mr-0.5" /> Leído
@@ -764,22 +773,20 @@ export const CommunicationsPage = () => {
                             <Clock className="w-2.5 h-2.5 mr-0.5" /> Pendiente
                           </Badge>
                         )}
-                      </div>
-                      <div className="col-span-3 text-right">
-                        <p className="text-[10px] text-gray-400">{r.readAt ? fmt(r.readAt) : '—'}</p>
-                        {r.ackAt && <p className="text-[10px] text-green-600">Acuse ✓</p>}
+                        {r.readAt && <p className="text-[10px] text-gray-400">{fmt(r.readAt)}</p>}
+                        {r.ackAt  && <p className="text-[10px] text-green-600">Acuse ✓</p>}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+          <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-t border-gray-100 flex-shrink-0">
             <p className="text-xs text-gray-400">
-              {filteredRecipients.length} resultado{filteredRecipients.length !== 1 ? 's' : ''} · Página {recPage} de {totalPages}
+              {filteredRecipients.length} · pág. {recPage}/{totalPages}
             </p>
             <div className="flex items-center gap-1">
               <Button size="sm" variant="outline" className="h-7 w-7 p-0"
