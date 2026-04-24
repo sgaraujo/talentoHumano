@@ -3,7 +3,9 @@ import { useUsers } from '@/hooks/useUsers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Upload, Search, Plus, Loader2, Pencil, Trash2, Eye, UserMinus, RefreshCw, Download } from 'lucide-react';
+import { Upload, Search, Plus, Loader2, Pencil, Trash2, Eye, UserMinus, RefreshCw, Download, ShieldCheck } from 'lucide-react';
+import { collection, getDocs, query, where, updateDoc, doc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
 import { CreateUserDialog } from '@/components/users/CreateUserDialog';
 import { EditUserDialog } from '@/components/users/EditUserDialog';
 import { DeleteUserDialog } from '@/components/users/DeleteUserDialog';
@@ -18,7 +20,7 @@ export const UsersPage = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
 
-  const { users, stats, loading, importUsersFromExcel, refreshUsers, syncProjectStatuses } = useUsers();
+  const { users, stats, loading, importUsersFromExcel, refreshUsers, syncProjectStatuses, reactivateAllProjects } = useUsers();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
@@ -61,10 +63,72 @@ export const UsersPage = () => {
   const handleSyncProjects = async () => {
     try {
       const result = await syncProjectStatuses();
-      alert(`Sincronización completada:\n  Proyectos inactivados: ${result.inactivated}`);
+      alert(`Sincronización completada:\n  Proyectos inactivados: ${result.inactivated}\n  Proyectos reactivados: ${result.reactivated}`);
       refreshUsers();
     } catch {
       alert('Error al sincronizar proyectos');
+    }
+  };
+
+  const handleFixRoles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      const EXCOL_ESTADOS = new Set(['ANULADO', 'ANULADA', 'RETIRADO', 'RETIRADA']);
+      let fixed = 0;
+      let errors = 0;
+
+      for (const row of rows) {
+        const estado = (row['ESTADO'] || '').toString().trim().toUpperCase();
+        const email  = (row['CORREO CORPORATIVO'] || row['CORREO'] || row['EMAIL'] || '').toString().trim().toLowerCase();
+        const cedula = (row['NUMERO DE CEDULA'] || row['CEDULA'] || row['NRO CEDULA'] || row['NÚMERO DE CÉDULA'] || '').toString().trim();
+
+        if (!email && !cedula) continue;
+
+        const correctRole = EXCOL_ESTADOS.has(estado) ? 'excolaborador' : 'colaborador';
+
+        try {
+          let userDoc: any = null;
+          if (cedula) {
+            const snap = await getDocs(query(collection(db, 'users'), where('personalData.documentNumber', '==', cedula)));
+            if (!snap.empty) userDoc = snap.docs[0];
+          }
+          if (!userDoc && email) {
+            const snap = await getDocs(query(collection(db, 'users'), where('email', '==', email)));
+            if (!snap.empty) userDoc = snap.docs[0];
+          }
+          if (userDoc && userDoc.data().role !== correctRole) {
+            await updateDoc(doc(db, 'users', userDoc.id), { role: correctRole, updatedAt: new Date() });
+            fixed++;
+          }
+        } catch {
+          errors++;
+        }
+      }
+
+      const sync = await syncProjectStatuses();
+      alert(`Corrección completada:\n  Roles corregidos: ${fixed}\n  Proyectos inactivados: ${sync.inactivated}\n  Proyectos reactivados: ${sync.reactivated}${errors > 0 ? `\n  Errores: ${errors}` : ''}`);
+      refreshUsers();
+    } catch {
+      alert('Error al procesar el archivo');
+    }
+  };
+
+  const handleReactivateAll = async () => {
+    if (!confirm('¿Reactivar TODOS los proyectos inactivos? Esto revertirá la sincronización anterior.')) return;
+    try {
+      const result = await reactivateAllProjects();
+      alert(`Proyectos reactivados: ${result.reactivated}`);
+      refreshUsers();
+    } catch {
+      alert('Error al reactivar proyectos');
     }
   };
 
@@ -190,12 +254,37 @@ export const UsersPage = () => {
             <span className="sm:hidden">Exportar</span>
           </Button>
 
+          <label htmlFor="fix-roles-upload" className="flex-1 sm:flex-none">
+            <Button variant="outline" disabled={loading} asChild
+              className="w-full cursor-pointer border-amber-300 text-amber-700 hover:bg-amber-50"
+              title="Lee solo ESTADO del Excel y corrige roles sin tocar nada más">
+              <span>
+                <ShieldCheck className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Corregir Roles</span>
+                <span className="sm:hidden">Roles</span>
+              </span>
+            </Button>
+            <input id="fix-roles-upload" type="file" accept=".xlsx,.xls" onChange={handleFixRoles} className="hidden" disabled={loading} />
+          </label>
+
+          <Button
+            variant="outline"
+            onClick={handleReactivateAll}
+            disabled={loading}
+            className="flex-1 sm:flex-none border-red-300 text-red-600 hover:bg-red-50"
+            title="Reactivar todos los proyectos inactivos"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            <span className="hidden sm:inline">Reactivar Proyectos</span>
+            <span className="sm:hidden">Reactivar</span>
+          </Button>
+
           <Button
             variant="outline"
             onClick={handleSyncProjects}
             disabled={loading}
             className="flex-1 sm:flex-none border-[#008C3C]/30 text-[#008C3C] hover:bg-[#008C3C]/5"
-            title="Inactiva proyectos sin personal activo"
+            title="Inactiva proyectos donde todos son excolaboradores"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             <span className="hidden sm:inline">Sincronizar Proyectos</span>

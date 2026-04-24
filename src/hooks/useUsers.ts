@@ -167,9 +167,14 @@ export const useUsers = () => {
                 if (!email) continue; // Sin email no se puede crear usuario
 
                 // --- Determinar role ---
-                const estado = (row['ESTADO'] || '').toString().toUpperCase();
+                // ESTADO es la fuente de verdad. La fecha de retiro solo se guarda
+                // como dato histórico pero no determina el rol.
+                const estado = (row['ESTADO'] || '').toString().trim().toUpperCase();
                 const fechaRetiro = parseExcelDate(row['FECHA RETIRO']);
-                const isRetirado = fechaRetiro || estado.includes('RETIRADO') || estado.includes('INACTIVO') || estado.includes('ANULAD');
+                const isRetirado = estado === 'ANULADO'
+                  || estado === 'ANULADA'
+                  || estado === 'RETIRADO'
+                  || estado === 'RETIRADA';
                 const role = isRetirado ? 'excolaborador' : 'colaborador';
 
                 // --- Fechas ---
@@ -465,11 +470,24 @@ export const useUsers = () => {
         }
     };
 
-    const syncProjectStatuses = async (): Promise<{ inactivated: number }> => {
+    const syncProjectStatuses = async (): Promise<{ inactivated: number; reactivated: number }> => {
         try {
             setLoading(true);
             setError(null);
             return await projectService.syncStatuses();
+        } catch (err: any) {
+            setError(err.message);
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const reactivateAllProjects = async (): Promise<{ reactivated: number }> => {
+        try {
+            setLoading(true);
+            setError(null);
+            return await projectService.reactivateAll();
         } catch (err: any) {
             setError(err.message);
             throw err;
@@ -493,5 +511,6 @@ export const useUsers = () => {
         updateUser,
         deleteUser,
         syncProjectStatuses,
+        reactivateAllProjects,
     };
 };

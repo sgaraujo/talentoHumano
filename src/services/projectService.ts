@@ -76,15 +76,27 @@ class ProjectService {
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
   }
 
+  /** Reactiva todos los proyectos que estén inactivos. */
+  async reactivateAll(): Promise<{ reactivated: number }> {
+    const all = await this.getAll();
+    const inactive = all.filter(p => p.status === 'inactivo');
+    await Promise.all(inactive.map(p => this.update(p.id, { status: 'activo' })));
+    return { reactivated: inactive.length };
+  }
+
   /**
-   * Inactiva proyectos donde headcount = 0 o todos los miembros son excolaboradores.
-   * Returns count of projects inactivated.
+   * Sincroniza el estado de todos los proyectos según los roles de sus miembros:
+   * - Al menos 1 miembro activo (colaborador/lider/aspirante) → activo
+   * - Todos los miembros son excolaboradores → inactivo
+   * - Sin miembros registrados → no se toca
    */
-  async syncStatuses(): Promise<{ inactivated: number }> {
+  async syncStatuses(): Promise<{ inactivated: number; reactivated: number }> {
     const [allProjects, usersSnap] = await Promise.all([
       this.getAll(),
       getDocs(collection(db, 'users')),
     ]);
+
+    const ACTIVE_ROLES = new Set(['colaborador', 'lider', 'aspirante']);
 
     // Build map: projectId → array of member roles
     const projectRoles = new Map<string, string[]>();
@@ -101,18 +113,25 @@ class ProjectService {
     }
 
     let inactivated = 0;
+    let reactivated = 0;
+
     for (const project of allProjects) {
-      if (project.status !== 'activo') continue;
       const roles = projectRoles.get(project.id) || [];
-      const hc = project.headcount ?? roles.length;
-      const allExcol = roles.length > 0 && roles.every(r => r === 'excolaborador');
-      if (hc === 0 || allExcol) {
+      if (roles.length === 0) continue; // sin miembros registrados → no tocar
+
+      const hasActive  = roles.some(r => ACTIVE_ROLES.has(r));
+      const allExcol   = !hasActive;
+
+      if (allExcol && project.status === 'activo') {
         await this.update(project.id, { status: 'inactivo' });
         inactivated++;
+      } else if (hasActive && project.status === 'inactivo') {
+        await this.update(project.id, { status: 'activo' });
+        reactivated++;
       }
     }
 
-    return { inactivated };
+    return { inactivated, reactivated };
   }
 }
 
