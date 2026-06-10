@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   MessageCircle, Send, Paperclip, Search, X, Phone,
-  CheckCheck, Check, Clock, AlertCircle, Lock, Image,
-  FileText, Loader2, ChevronLeft, Users, MessageSquare,
+  CheckCheck, Check, Clock, AlertCircle, Lock,
+  FileText, Loader2, ChevronLeft, MessageSquare,
 } from "lucide-react";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 import { storage, functions } from "@/config/firebase";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
