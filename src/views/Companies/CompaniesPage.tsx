@@ -11,13 +11,35 @@ import {
 } from '@/components/ui/dialog';
 import {
   Building2, Plus, Pencil, Trash2, Phone,
-  Mail, MapPin, Search, Loader2, BarChart2,
+  Mail, MapPin, Search, Loader2, BarChart2, PowerOff, Power,
+  Users, Calculator, Upload,
 } from 'lucide-react';
+import { toast } from 'sonner';
+
+const SEED_COMPANIES = [
+  { name: 'NEWSTAR SAS',                                    nit: '901269033-7' },
+  { name: 'NEWFORCE SAS',                                   nit: '901311778-4' },
+  { name: 'INVERSIONES EON SAS',                            nit: '901271083-1' },
+  { name: 'INTEEGRA SAS BIC',                               nit: '900550189-7' },
+  { name: 'NETIA SAS',                                      nit: '901259735-6' },
+  { name: 'NETCOL INGENIERÍA SAS BIC',                      nit: '901193667-8' },
+  { name: 'LETI SAS LOGISTRICA EMPRESARIAL DE TRANSPORTE',  nit: '901264922-7' },
+  { name: 'TRIANGULUM BPO SAS',                             nit: '900265286-1' },
+  { name: 'ITAC COLOMBIA SAS',                              nit: '901432693-6' },
+  { name: 'UNIÓN TEMPORAL ITAC',                            nit: '901351139-9' },
+  { name: 'UNIÓN TEMPORAL TECNOLOGÍA EIP',                  nit: '901817890-4' },
+  { name: 'UNIÓN TEMPORAL FOMENTO TIC',                     nit: '901834909-7' },
+  { name: 'UNIÓN TEMPORAL INTERNUQI',                       nit: '901943575-8' },
+  { name: 'CONSORCIO SCIA NETCOL',                          nit: '901419833-7' },
+  { name: 'PLEX DE COLOMBIA SAS - EN LIQUIDACIÓN',          nit: '901261185-1' },
+  { name: 'RED EMPRESARIAL AMERICANA SAS',                  nit: '900703837-1' },
+];
 import type { Company } from '@/models/types/Company';
 
 const EMPTY: Omit<Company, 'id' | 'createdAt' | 'updatedAt'> = {
   name: '', nit: '', address: '', phone: '', email: '',
   logo: '', regional: '', baseDeOperacion: '', active: true,
+  activeTH: false, activeContabilidad: false,
 };
 
 export const CompaniesPage = () => {
@@ -31,6 +53,7 @@ export const CompaniesPage = () => {
   const [selected, setSelected]   = useState<Company | null>(null);
   const [form, setForm]           = useState(EMPTY);
   const [saving, setSaving]       = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -58,11 +81,28 @@ export const CompaniesPage = () => {
       phone: c.phone || '', email: c.email || '', logo: c.logo || '',
       regional: c.regional || '', baseDeOperacion: c.baseDeOperacion || '',
       active: c.active,
+      activeTH: c.activeTH ?? false,
+      activeContabilidad: c.activeContabilidad ?? false,
     });
     setFormOpen(true);
   };
 
   const openDelete = (c: Company) => { setSelected(c); setDeleteOpen(true); };
+
+  const handleToggleActive = async (c: Company) => {
+    await companyService.update(c.id, { active: !c.active } as any);
+    load();
+  };
+
+  const handleToggleTH = async (c: Company) => {
+    await companyService.update(c.id, { activeTH: !(c.activeTH ?? false) } as any);
+    load();
+  };
+
+  const handleToggleContabilidad = async (c: Company) => {
+    await companyService.update(c.id, { activeContabilidad: !(c.activeContabilidad ?? false) } as any);
+    load();
+  };
 
   const handleSave = async () => {
     if (!form.name || !form.nit) return;
@@ -73,6 +113,24 @@ export const CompaniesPage = () => {
       setFormOpen(false);
       load();
     } finally { setSaving(false); }
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      const existing = new Set(companies.map(c => c.nit.trim()));
+      const missing = SEED_COMPANIES.filter(s => !existing.has(s.nit));
+      if (missing.length === 0) { toast.info('Todas las empresas ya existen'); return; }
+      for (const s of missing) {
+        await companyService.create({ ...EMPTY, name: s.name, nit: s.nit });
+      }
+      toast.success(`${missing.length} empresa${missing.length !== 1 ? 's' : ''} creada${missing.length !== 1 ? 's' : ''}`);
+      load();
+    } catch (e: any) {
+      toast.error('Error al importar', { description: e.message });
+    } finally {
+      setImporting(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -91,13 +149,19 @@ export const CompaniesPage = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Empresas</h1>
           <p className="text-[#4A4A4A]/70 mt-1 text-sm">Gestión de perfiles de empresa</p>
         </div>
-        <Button onClick={openCreate} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
-          <Plus className="w-4 h-4 mr-2" /> Nueva Empresa
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleImport} disabled={importing} variant="outline" className="border-blue-200 text-blue-600 hover:bg-blue-50">
+            {importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+            Importar lista
+          </Button>
+          <Button onClick={openCreate} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
+            <Plus className="w-4 h-4 mr-2" /> Nueva Empresa
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <Card className="border-l-4 border-l-[#008C3C]">
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-gray-500">Total</p>
@@ -110,10 +174,16 @@ export const CompaniesPage = () => {
             <p className="text-2xl font-bold text-[#1F8FBF]">{companies.filter(c => c.active).length}</p>
           </CardContent>
         </Card>
-        <Card className="border-l-4 border-l-gray-400">
+        <Card className="border-l-4 border-l-emerald-500">
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-gray-500">Inactivas</p>
-            <p className="text-2xl font-bold text-gray-500">{companies.filter(c => !c.active).length}</p>
+            <p className="text-xs text-gray-500">Talento Humano</p>
+            <p className="text-2xl font-bold text-emerald-600">{companies.filter(c => c.activeTH).length}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-blue-500">
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-gray-500">Contabilidad</p>
+            <p className="text-2xl font-bold text-blue-600">{companies.filter(c => c.activeContabilidad).length}</p>
           </CardContent>
         </Card>
       </div>
@@ -206,6 +276,30 @@ export const CompaniesPage = () => {
                   )}
                 </div>
 
+                {/* Module toggles */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => handleToggleTH(c)}
+                    title={c.activeTH ? 'Desactivar para Talento Humano' : 'Activar para Talento Humano'}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors
+                      ${c.activeTH
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}
+                  >
+                    <Users className="w-3 h-3" /> Talento H.
+                  </button>
+                  <button
+                    onClick={() => handleToggleContabilidad(c)}
+                    title={c.activeContabilidad ? 'Desactivar para Contabilidad' : 'Activar para Contabilidad'}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors
+                      ${c.activeContabilidad
+                        ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
+                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}
+                  >
+                    <Calculator className="w-3 h-3" /> Contabilidad
+                  </button>
+                </div>
+
                 {/* Actions */}
                 <div className="flex gap-2 pt-1 mt-auto">
                   <Button
@@ -217,6 +311,14 @@ export const CompaniesPage = () => {
                   </Button>
                   <Button size="sm" variant="outline" className="text-xs" onClick={() => openEdit(c)}>
                     <Pencil className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    size="sm" variant="outline"
+                    className={`text-xs ${c.active ? 'text-orange-500 hover:bg-orange-50 border-orange-200' : 'text-green-600 hover:bg-green-50 border-green-200'}`}
+                    onClick={() => handleToggleActive(c)}
+                    title={c.active ? 'Desactivar empresa' : 'Activar empresa'}
+                  >
+                    {c.active ? <PowerOff className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
                   </Button>
                   <Button
                     size="sm" variant="outline"
@@ -270,6 +372,33 @@ export const CompaniesPage = () => {
             <div className="col-span-2 space-y-1">
               <Label>URL del logo</Label>
               <Input value={form.logo} onChange={e => setForm(f => ({ ...f, logo: e.target.value }))} placeholder="https://..." />
+            </div>
+            <div className="col-span-2 pt-1">
+              <Label className="text-xs text-gray-500 mb-2 block">Módulos activos</Label>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, activeTH: !f.activeTH }))}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-1 justify-center
+                    ${form.activeTH
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                >
+                  <Users className="w-4 h-4" />
+                  Talento Humano
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, activeContabilidad: !f.activeContabilidad }))}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-1 justify-center
+                    ${form.activeContabilidad
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                >
+                  <Calculator className="w-4 h-4" />
+                  Contabilidad
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>

@@ -2,11 +2,30 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { NotificationEvent, NotificationType } from '../models/types/Notification';
 
+function parseDateLocal(v: any): Date | null {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (v?.toDate) {
+    const d = v.toDate();
+    if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    }
+    return d;
+  }
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const [yr, mo, dy] = v.split('-').map(Number);
+    return new Date(yr, mo - 1, dy);
+  }
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 class NotificationService {
   // Calcular días entre dos fechas
   private daysBetween(date1: Date, date2: Date): number {
-    const diffTime = date2.getTime() - date1.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const d1 = new Date(date1); d1.setHours(0, 0, 0, 0);
+    const d2 = new Date(date2); d2.setHours(0, 0, 0, 0);
+    return Math.round((d2.getTime() - d1.getTime()) / 86_400_000);
   }
 
   // Obtener la fecha del próximo cumpleaños
@@ -80,9 +99,7 @@ class NotificationService {
     const today = new Date();
     for (const user of users) {
       if (!user.personalData?.birthDate) continue;
-      const birthDate = user.personalData.birthDate.toDate
-        ? user.personalData.birthDate.toDate()
-        : new Date(user.personalData.birthDate);
+      const birthDate = parseDateLocal(user.personalData.birthDate)!;
       const nextBirthday = this.getNextBirthday(birthDate);
       const daysUntil = this.daysBetween(today, nextBirthday);
       if (daysUntil >= 0 && daysUntil <= maxDays) {
@@ -244,9 +261,7 @@ class NotificationService {
 
         // Cumpleaños
         if (user.personalData?.birthDate) {
-          const bd = user.personalData.birthDate.toDate
-            ? user.personalData.birthDate.toDate()
-            : new Date(user.personalData.birthDate);
+          const bd = parseDateLocal(user.personalData.birthDate)!;
           const eventDate = new Date(year, month, bd.getDate());
           if (eventDate.getMonth() === month) {
             const age = year - bd.getFullYear();

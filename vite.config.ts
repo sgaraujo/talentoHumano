@@ -10,6 +10,10 @@ export default defineConfig({
     },
   },
   server: {
+    watch: {
+      usePolling: true,
+      interval: 300,
+    },
     proxy: {
       '/nelyoda/us-central1': {
         target: 'https://us-central1-nelyoda.cloudfunctions.net',

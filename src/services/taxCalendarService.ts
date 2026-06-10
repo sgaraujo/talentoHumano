@@ -1,9 +1,9 @@
 import {
   collection, addDoc, getDocs, doc, updateDoc,
-  query, orderBy, writeBatch, serverTimestamp,
+  query, orderBy, writeBatch, serverTimestamp, arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import type { TaxObligation, TaxStatus } from '../models/types/TaxObligation';
+import type { TaxObligation, TaxStatus, StatusHistoryEntry } from '../models/types/TaxObligation';
 import type { Company } from '../models/types/Company';
 
 function toDate(v: any): Date | undefined {
@@ -13,17 +13,35 @@ function toDate(v: any): Date | undefined {
   return new Date(v);
 }
 
+/** Convierte dueDate a string YYYY-MM-DD usando fecha LOCAL (no UTC) para evitar desfase de zona horaria */
+function normalizeDueDate(v: any): string | undefined {
+  if (!v) return undefined;
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  let d: Date;
+  if (v?.toDate) d = v.toDate();
+  else if (v instanceof Date) d = v;
+  else return String(v);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 class TaxCalendarService {
   private col = 'tax_obligations';
 
   async getAll(): Promise<TaxObligation[]> {
     const snap = await getDocs(query(collection(db, this.col), orderBy('dueDate', 'asc')));
-    return snap.docs.map(d => ({
-      id: d.id,
-      ...d.data(),
-      updatedAt: toDate(d.data().updatedAt),
-      createdAt: toDate(d.data().createdAt),
-    })) as TaxObligation[];
+    return snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        dueDate:   normalizeDueDate(data.dueDate) ?? data.dueDate,
+        updatedAt: toDate(data.updatedAt),
+        createdAt: toDate(data.createdAt),
+      };
+    }) as TaxObligation[];
   }
 
   async updateStatus(id: string, status: TaxStatus, observation?: string): Promise<void> {
@@ -38,6 +56,13 @@ class TaxCalendarService {
 
   async update(id: string, data: Partial<Omit<TaxObligation, 'id' | 'createdAt'>>): Promise<void> {
     await updateDoc(doc(db, this.col, id), { ...data, updatedAt: serverTimestamp() });
+  }
+
+  async appendStatusHistory(id: string, entry: StatusHistoryEntry): Promise<void> {
+    await updateDoc(doc(db, this.col, id), {
+      statusHistory: arrayUnion(entry),
+      updatedAt: serverTimestamp(),
+    });
   }
 
   async delete(id: string): Promise<void> {

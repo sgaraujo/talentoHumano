@@ -109,6 +109,11 @@ export const ReadCommunicationPage = () => {
                 href={communication.ctaButton.url}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => {
+                  if (recipient && !recipient.ctaClickedAt) {
+                    communicationService.markCtaClicked(recipient.id, communication.id).catch(() => {});
+                  }
+                }}
                 className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-sm px-6 py-3 rounded-xl transition-colors"
               >
                 <MousePointerClick className="w-4 h-4" />

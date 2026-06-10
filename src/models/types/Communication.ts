@@ -19,12 +19,14 @@ export interface Communication {
   targetName?: string;
   totalSent: number;
   totalRead: number;
+  totalCtaClicks?: number;
   status: CommunicationStatus;
   requiresAck?: boolean;
   attachments?: CommunicationAttachment[];
   ctaButton?: { text: string; url: string };
   questionnaireId?: string;
   questionnaireName?: string;
+  senderKey?: 'default' | 'inteegra';
 }
 
 export interface CommunicationRecipient {
@@ -40,6 +42,7 @@ export interface CommunicationRecipient {
   status: RecipientStatus;
   readAt?: Date;
   ackAt?: Date;
+  ctaClickedAt?: Date;
   quizSubmittedAt?: Date;
   emailStatus: 'sent' | 'failed' | 'pending';
   sentAt: Date;

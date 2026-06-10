@@ -7,22 +7,66 @@ import type { MovementRecord } from '../models/types/Analytics';
 
 // ========== Helpers para parsear datos del Excel ==========
 
-/** Convierte número serial de Excel o string a Date */
+/** Convierte número serial de Excel, Date o string a Date (medianoche local) */
 function parseExcelDate(val: any): Date | undefined {
   if (!val) return undefined;
-  if (val instanceof Date) return val;
+
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return undefined;
+    // Re-construir en zona local para evitar desfase UTC
+    return new Date(val.getFullYear(), val.getMonth(), val.getDate());
+  }
+
   if (typeof val === 'number') {
-    // Excel serial date: días desde 1900-01-01 (con bug del leap year 1900)
+    if (val <= 0) return undefined;
     const excelEpoch = new Date(1899, 11, 30);
-    const date = new Date(excelEpoch.getTime() + val * 86400000);
-    return isNaN(date.getTime()) ? undefined : date;
+    const tmp = new Date(excelEpoch.getTime() + val * 86400000);
+    if (isNaN(tmp.getTime())) return undefined;
+    return new Date(tmp.getFullYear(), tmp.getMonth(), tmp.getDate());
   }
+
   if (typeof val === 'string') {
-    const trimmed = val.trim();
-    if (!trimmed) return undefined;
-    const parsed = new Date(trimmed);
-    return isNaN(parsed.getTime()) ? undefined : parsed;
+    const s = val.trim();
+    if (!s) return undefined;
+    // YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, m, d] = s.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    // DD/MM/YYYY or D/M/YYYY (Colombia standard)
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+      const [d, m, y] = s.split('/').map(Number);
+      const dt = new Date(y, m - 1, d);
+      return isNaN(dt.getTime()) ? undefined : dt;
+    }
+    // DD-MM-YYYY
+    if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
+      const [d, m, y] = s.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      return isNaN(dt.getTime()) ? undefined : dt;
+    }
+    // DD/MM/YY
+    if (/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(s)) {
+      const [d, m, yy] = s.split('/').map(Number);
+      const y = yy < 50 ? 2000 + yy : 1900 + yy;
+      return new Date(y, m - 1, d);
+    }
+    // YYYY/MM/DD
+    if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) {
+      const [y, m, d] = s.split('/').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    return undefined;
   }
+  return undefined;
+}
+
+/** Normaliza SI/NO/X/1/TRUE a boolean */
+function parseBool(val: any): boolean | undefined {
+  if (val === undefined || val === null || val === '') return undefined;
+  const s = String(val).trim().toUpperCase();
+  if (['SI', 'SÍ', 'S', '1', 'TRUE', 'X', 'YES', 'Y'].includes(s)) return true;
+  if (['NO', 'N', '0', 'FALSE'].includes(s)) return false;
   return undefined;
 }
 
@@ -40,15 +84,45 @@ function parseNumber(val: any): number | undefined {
 }
 
 
-/** Normaliza MOTIVO de retiro a reason del MovementRecord */
+const MOTIVOS_RETIRO = [
+  'Fallecimiento',
+  'Anulado',
+  'Renuncia voluntaria',
+  'Sustitución patronal',
+  'Terminación contrato a término fijo',
+  'Terminación contrato con justa causa',
+  'Terminación contrato sin justa causa',
+  'Terminación contrato de aprendizaje',
+  'Terminación de contrato por mutuo acuerdo',
+  'Terminación de contrato por obra o labor',
+  'Terminación de contrato por periodo de prueba',
+  'Terminación de contrato unilateral de aprendizaje',
+];
+
+/** Normaliza MOTIVO del Excel al motivo estándar más cercano */
 function normalizeRetiroReason(motivo: string | undefined): { reason: string; notes?: string } {
-  if (!motivo) return { reason: 'voluntario' };
-  const lower = motivo.toLowerCase();
-  if (lower.includes('voluntar')) return { reason: 'voluntario' };
-  if (lower.includes('involuntar') || lower.includes('despid') || lower.includes('justa causa')) {
-    return { reason: 'involuntario' };
-  }
-  return { reason: 'voluntario', notes: motivo };
+  if (!motivo) return { reason: 'Renuncia voluntaria' };
+  const lower = motivo.toLowerCase().trim();
+
+  if (lower.includes('fallec') || lower.includes('muerte'))           return { reason: 'Fallecimiento' };
+  if (lower.includes('anulad'))                                        return { reason: 'Anulado' };
+  if (lower.includes('renuncia') || lower.includes('voluntar'))       return { reason: 'Renuncia voluntaria' };
+  if (lower.includes('sustit') || lower.includes('patronal'))         return { reason: 'Sustitución patronal' };
+  if (lower.includes('justa causa'))                                   return { reason: 'Terminación contrato con justa causa' };
+  if (lower.includes('sin justa') || lower.includes('injusta'))       return { reason: 'Terminación contrato sin justa causa' };
+  if (lower.includes('aprendiz') && lower.includes('unilateral'))     return { reason: 'Terminación de contrato unilateral de aprendizaje' };
+  if (lower.includes('aprendiz'))                                      return { reason: 'Terminación contrato de aprendizaje' };
+  if (lower.includes('mutuo') || lower.includes('acuerdo'))           return { reason: 'Terminación de contrato por mutuo acuerdo' };
+  if (lower.includes('obra') || lower.includes('labor'))              return { reason: 'Terminación de contrato por obra o labor' };
+  if (lower.includes('prueba') || lower.includes('periodo'))          return { reason: 'Terminación de contrato por periodo de prueba' };
+  if (lower.includes('fijo') || lower.includes('término fijo'))       return { reason: 'Terminación contrato a término fijo' };
+  if (lower.includes('involuntar') || lower.includes('despid'))       return { reason: 'Terminación contrato sin justa causa' };
+
+  // Si el texto del Excel coincide exactamente con algún motivo estándar
+  const exact = MOTIVOS_RETIRO.find(m => m.toLowerCase() === lower);
+  if (exact) return { reason: exact };
+
+  return { reason: 'Renuncia voluntaria', notes: motivo };
 }
 
 /** Elimina recursivamente campos con valor undefined (Firestore los rechaza) */
@@ -194,6 +268,9 @@ export const useUsers = () => {
                 const salario2022 = parseNumber(row['SALARIO BASICO 2022']);
                 const salario2023 = parseNumber(row['SALARIO BASICO 2023']);
                 const salario2024 = parseNumber(row['SALARIO BASICO 2024']);
+                const auxSoporte       = parseNumber(row['Auxilio de Soporte']);
+                const iniciaProductiva = parseExcelDate(row['INICIA PRODUCTIVA']);
+                const finProductiva    = parseExcelDate(row['FIN PRODUCTIVA']);
 
                 // --- Construir objeto User completo ---
                 const user: any = {
@@ -204,18 +281,19 @@ export const useUsers = () => {
                     completedOnboardings: [],
 
                     personalData: {
-                        documentType: row['TIPO DOCUMENTO'] || undefined,
-                        documentNumber: row['CEDULA'] ? String(row['CEDULA']) : undefined,
+                        documentType:          row['TIPO DOCUMENTO'] || undefined,
+                        documentNumber:        row['CEDULA'] ? String(row['CEDULA']) : undefined,
                         documentExpeditionDate: parseExcelDate(row['FECHA EXPEDICION']) || undefined,
-                        fullName: fullName || undefined,
-                        gender: row['GENERO'] || undefined,
-                        birthDate: fechaNacimiento || undefined,
-                        age: edad || undefined,
-                        ageRange: row['RANGO DE EDAD'] || undefined,
-                        maritalStatus: row['ESTADO CIVIL'] || undefined,
-                        nationality: row['PAIS - NACIONALIDAD'] ? String(row['PAIS - NACIONALIDAD']).trim() : undefined,
-                        position: row['CARGO'] || undefined,
-                        phone: row['TELEFONO PERSONAL'] ? String(row['TELEFONO PERSONAL']) : undefined,
+                        fullName:              fullName || undefined,
+                        gender:                row['GENERO'] || undefined,
+                        birthDate:             fechaNacimiento || undefined,
+                        age:                   edad || undefined,
+                        ageRange:              row['RANGO DE EDAD'] || undefined,
+                        bloodType:             row['RH'] ? String(row['RH']).trim() : undefined,
+                        maritalStatus:         row['ESTADO CIVIL'] || undefined,
+                        nationality:           row['PAIS - NACIONALIDAD'] ? String(row['PAIS - NACIONALIDAD']).trim() : undefined,
+                        position:              row['CARGO'] || undefined,
+                        phone:                 row['TELEFONO PERSONAL'] ? String(row['TELEFONO PERSONAL']) : undefined,
                     },
 
                     location: {
@@ -231,13 +309,16 @@ export const useUsers = () => {
 
                     contractInfo: {
                         contract: {
-                            contractType: row['TIPO DE CONTRATO'] || undefined,
-                            startDate: fechaIngreso || undefined,
+                            contractType:      row['TIPO DE CONTRATO'] || undefined,
+                            startDate:         fechaIngreso || undefined,
+                            entryJustification: row['JUSTIFICACIÓN DE INGRESO'] || row['JUSTIFICACION DE INGRESO'] || undefined,
                         },
                         workConditions: {
-                            workday: row['JORNADA'] || undefined,
-                            workModality: row['MODALIDAD'] || undefined,
-                            baseSalary: sueldo || undefined,
+                            workday:              row['JORNADA'] || undefined,
+                            workModality:         row['MODALIDAD'] || undefined,
+                            baseSalary:           sueldo || undefined,
+                            productiveStartDate:  iniciaProductiva || undefined,
+                            productiveEndDate:    finProductiva || undefined,
                         },
                         assignment: {
                             company: row['EMPRESA'] ? String(row['EMPRESA']).trim() : undefined,
@@ -255,19 +336,20 @@ export const useUsers = () => {
                     },
 
                     salaryInfo: {
-                        salaryType: row['TIPO DE SALARIO'] || undefined,
-                        baseSalary: sueldo || undefined,
-                        baseSalary2022: salario2022 || undefined,
-                        baseSalary2023: salario2023 || undefined,
-                        baseSalary2024: salario2024 || undefined,
-                        transportAllowance: auxTransporte || undefined,
-                        mealAllowance: auxAlimentacion || undefined,
-                        operationalAllowance: auxOperacional || undefined,
-                        vehicleAllowance: auxRodamiento || undefined,
-                        toolsAllowance: auxHerramientas || undefined,
+                        salaryType:            row['TIPO DE SALARIO'] || undefined,
+                        baseSalary:            sueldo || undefined,
+                        baseSalary2022:        salario2022 || undefined,
+                        baseSalary2023:        salario2023 || undefined,
+                        baseSalary2024:        salario2024 || undefined,
+                        transportAllowance:    auxTransporte || undefined,
+                        mealAllowance:         auxAlimentacion || undefined,
+                        operationalAllowance:  auxOperacional || undefined,
+                        supportAllowance:      auxSoporte || undefined,
+                        vehicleAllowance:      auxRodamiento || undefined,
+                        toolsAllowance:        auxHerramientas || undefined,
                         communicationAllowance: auxComunicacion || undefined,
-                        salaryKpi: kpiSalarial || undefined,
-                        discountRecord: row['Acta de Descuento'] || undefined,
+                        salaryKpi:             kpiSalarial || undefined,
+                        discountRecord:        row['Acta de Descuento'] || undefined,
                     },
 
                     socialSecurity: {
@@ -285,15 +367,22 @@ export const useUsers = () => {
                     },
 
                     administrativeRecord: {
-                        terminationDate: fechaRetiro || undefined,
-                        terminationReason: row['MOTIVO'] || undefined,
+                        terminationDate:          fechaRetiro || undefined,
+                        terminationReason:        row['MOTIVO'] || undefined,
                         terminationJustification: row['JUSTIFICACIÓN RETIRO'] || row['JUSTIFICACION RETIRO'] || undefined,
-                        lifeInsuranceStatus: row['ESTADO SEGURO DE VIDA'] || undefined,
+                        entryJustification:       row['JUSTIFICACIÓN DE INGRESO'] || row['JUSTIFICACION DE INGRESO'] || undefined,
+                        lifeInsuranceStatus:      row['ESTADO SEGURO DE VIDA'] || undefined,
+                        isMother:                 parseBool(row['MADRE']),
+                        isPregnant:               parseBool(row['EMBARAZO']),
+                        disciplinaryActions:      parseNumber(row['LLAMADOS DE ATENCION']) !== undefined
+                                                    ? Math.floor(parseNumber(row['LLAMADOS DE ATENCION'])!) : undefined,
+                        folderCompliance:         parseBool(row['CUMPLIMIENTO DE CARPETA 100%']),
                     },
 
                     professionalProfile: {
-                        academicLevel: row['NIVEL ACADEMICA'] || row['NIVEL ACADEMICO'] || undefined,
-                        degree: row['PROFESION'] || undefined,
+                        academicLevel:        row['NIVEL ACADEMICA'] || row['NIVEL ACADEMICO'] || undefined,
+                        degree:               row['PROFESION'] || undefined,
+                        professionalLicense:  row['COPNIA/CPNI'] ? String(row['COPNIA/CPNI']).trim() : undefined,
                     },
                 };
 

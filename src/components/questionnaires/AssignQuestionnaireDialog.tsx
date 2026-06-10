@@ -104,7 +104,9 @@ export const AssignQuestionnaireDialog = ({
     setLoading(true);
 
     try {
-      const usersToAssign = users.filter(u => selectedUsers.has(u.id));
+      const usersToAssign = users
+        .filter(u => selectedUsers.has(u.id))
+        .map(u => ({ ...u, email: u.corporateEmail || u.email }));
 
       console.log('Enviando cuestionario a:', usersToAssign.map(u => u.email));
 

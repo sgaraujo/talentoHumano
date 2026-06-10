@@ -1,13 +1,22 @@
 export type TaxStatus =
   | ''
   | 'No iniciado'
+  | 'En revisión'
   | 'Revisado'
   | 'Presentado'
   | 'Informe Enviado'
+  | 'Informe Enviado RF'
+  | 'Impuesto Enviado para pago' //Recordar a financiera el valor pagado obligatorio --- enviar recordatorio preguntando si pago en la fecha establecida y cambiar el booleano a true --- recordatorio un día antes de que se venza el pago y maximo el dia del vencimiento.
   | 'No aplica'
   | 'Pagado';
 
 export type ObligationType = 'Impuestos' | 'Información Exógena' | 'Reportes' | string;
+
+export interface StatusHistoryEntry {
+  status: TaxStatus;
+  changedBy: string;
+  changedAt: string; // ISO string
+}
 
 export interface TaxAttachment {
   name: string;
@@ -31,6 +40,12 @@ export interface TaxObligation {
   advisor: string;
   observation: string;
   attachments?: TaxAttachment[];
+  statusHistory?: StatusHistoryEntry[];
+  projected?: number;
+  paid?: number;
+  presentedAt?: string;  // ISO string — fecha real de presentación ante DIAN
+  accountingUser?: string;  // contabilidad que diligenció el formulario
+  financieraUser?: string;  // financiera que registró el pago
   updatedAt?: Date;
   createdAt?: Date;
 }

@@ -28,8 +28,11 @@ export interface Questionnaire {
   
   // Onboarding
   isOnboarding?: boolean;
-  isRequired?: boolean; // NUEVO: Si es obligatorio completarlo
-  allowMultipleCompletions?: boolean; // NUEVO: Si se puede responder múltiples veces
+  isRequired?: boolean;
+  allowMultipleCompletions?: boolean;
+
+  // Formulario público
+  isPublic?: boolean;
   
   // Mapeo de preguntas a campos del perfil
   fieldMappings?: Array<{

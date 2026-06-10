@@ -192,7 +192,7 @@ export const CompanyAnalyticsPage = () => {
 
       if (filterTipo !== 'todos') {
         const reason = e.administrativeRecord?.terminationReason?.toLowerCase() ?? '';
-        const isVoluntario = reason.includes('voluntario') || reason.includes('renuncia');
+        const isVoluntario = reason.includes('renuncia') || reason.includes('mutuo acuerdo') || reason === 'voluntario';
         if (filterTipo === 'voluntario' && !isVoluntario) return false;
         if (filterTipo === 'involuntario' && isVoluntario) return false;
       }
@@ -301,7 +301,7 @@ export const CompanyAnalyticsPage = () => {
 
   const retirosVoluntarios = retirados.filter(e => {
     const r = e.administrativeRecord?.terminationReason?.toLowerCase() ?? '';
-    return r.includes('voluntario') || r.includes('renuncia');
+    return r.includes('renuncia') || r.includes('mutuo acuerdo') || r === 'voluntario';
   }).length;
 
   const retirosInvoluntarios = retirados.length - retirosVoluntarios;

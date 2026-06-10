@@ -1,6 +1,6 @@
 // src/hooks/useOnboardingExportTabs.ts
 import { useCallback, useEffect, useState } from "react";
-import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { db } from "@/config/firebase";
 import type { Questionnaire } from "@/models/types/Questionnaire";
 
@@ -14,10 +14,8 @@ export function useOnboardingExportTabs() {
     setError("");
 
     try {
-      // ✅ SOLO ACTIVOS (5 deberían aparecer aquí)
       const q = query(
         collection(db, "questionnaires"),
-        where("active", "==", true),
         orderBy("createdAt", "desc")
       );
 

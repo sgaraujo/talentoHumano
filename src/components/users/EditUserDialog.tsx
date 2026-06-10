@@ -19,7 +19,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, Plus } from 'lucide-react';
 
-const CORPORATE_DOMAIN = 'inteegra.net.co';
+
 
 const COLOMBIAN_BANKS = [
   'Bancolombia','Banco de Bogotá','Banco Popular','Banco Davivienda',
@@ -278,10 +278,12 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
     [allUsers, contract.companyId, contract.company, user?.id],
   );
 
-  const leaderOptions = useMemo(
-    () => companyUsers.filter(u => u.role === 'lider' || u.role === 'colaborador'),
-    [companyUsers],
-  );
+  const leaderOptions = useMemo(() => {
+    // Todos los líderes son globales — aparecen para cualquier empresa
+    return allUsers
+      .filter(u => u.id !== user?.id && (u.role === 'lider' || (u as any).isGlobalLeader))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, 'es'));
+  }, [allUsers, user?.id]);
 
   const uniq = (arr: (string | undefined)[]) =>
     [...new Set(arr.filter((v): v is string => !!v))].sort();
@@ -413,11 +415,6 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
                   onChange={e => setBasic(p => ({ ...p, email: e.target.value }))}
                   placeholder="juan@gmail.com"
                 />
-                {basic.email.includes(CORPORATE_DOMAIN) && (
-                  <p className="text-xs text-amber-600 mt-1">
-                    ⚠️ Parece un correo corporativo. Los cuestionarios deben enviarse al correo personal.
-                  </p>
-                )}
               </Field>
 
               <Field label="Tipo de usuario">
@@ -488,12 +485,12 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
 
               <Field label="Líder">
                 <Select
-                  value={contract.leaderId}
+                  value={contract.leaderId || undefined}
                   onValueChange={v => {
                     const l = leaderOptions.find(u => u.id === v);
                     setContract(p => ({ ...p, leaderId: v, leaderName: l?.fullName || '' }));
                   }}
-                  disabled={!contract.companyId}
+                  disabled={leaderOptions.length === 0}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar líder (opcional)" />

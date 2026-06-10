@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription,
@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Building2, UserCheck, UserMinus } from 'lucide-react';
+import { Loader2, Building2, UserCheck, UserMinus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '@/services/userService';
 import { analyticsService } from '@/services/analyticsService';
@@ -44,6 +44,9 @@ export const RegisterMovementDialog = ({
   const [loadingData, setLoadingData] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
+  const [search, setSearch] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) loadData();
@@ -76,11 +79,23 @@ export const RegisterMovementDialog = ({
     }
   };
 
-  // RETIRO: colaboradores y líderes activos
-  const filteredUsers = useMemo(
+  // Colaboradores y líderes activos
+  const activeUsers = useMemo(
     () => users.filter(u => u.role === 'colaborador' || u.role === 'lider'),
     [users],
   );
+
+  // Resultados de búsqueda por nombre o cédula
+  const searchResults = useMemo(() => {
+    if (search.trim().length < 2) return [];
+    const q = search.trim().toLowerCase();
+    return activeUsers
+      .filter(u =>
+        u.fullName?.toLowerCase().includes(q) ||
+        (u as any).personalData?.documentNumber?.toString().includes(q)
+      )
+      .slice(0, 10);
+  }, [search, activeUsers]);
 
   const selectedUser = users.find(u => u.id === formData.userId);
 
@@ -134,6 +149,7 @@ export const RegisterMovementDialog = ({
       });
 
       setFormData({ ...EMPTY_FORM });
+      setSearch('');
       onSuccess();
       onOpenChange(false);
     } catch (error: any) {
@@ -172,26 +188,66 @@ export const RegisterMovementDialog = ({
                 Persona que se retira *
               </p>
 
-              {filteredUsers.length === 0 ? (
-                <div className="p-4 rounded-xl bg-yellow-50 border border-yellow-200 text-sm text-yellow-800">
-                  No hay colaboradores activos para retirar.
+              {/* Persona seleccionada */}
+              {selectedUser ? (
+                <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-[#008C3C]/30 bg-[#008C3C]/5">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm text-[#4A4A4A] truncate">{selectedUser.fullName}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{selectedUser.email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { set('userId', ''); setSearch(''); }}
+                    className="text-gray-400 hover:text-red-500 flex-shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               ) : (
-                <Select value={formData.userId} onValueChange={v => set('userId', v)}>
-                  <SelectTrigger className="border-gray-200 focus:ring-[#008C3C]">
-                    <SelectValue placeholder="Selecciona una persona" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredUsers.map(u => (
-                      <SelectItem key={u.id} value={u.id}>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{u.fullName || u.email}</span>
-                          <Badge variant="outline" className="text-[10px] px-1 py-0">{u.role}</Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div ref={searchRef} className="relative">
+                  <Input
+                    placeholder="Escribe el nombre o cédula (mín. 2 caracteres)…"
+                    value={search}
+                    onChange={e => { setSearch(e.target.value); setShowResults(true); }}
+                    onFocus={() => setShowResults(true)}
+                    className="border-gray-200 focus-visible:ring-[#008C3C]"
+                    autoComplete="off"
+                  />
+                  {showResults && searchResults.length > 0 && (
+                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-lg overflow-hidden">
+                      {searchResults.map(u => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onMouseDown={() => {
+                            set('userId', u.id);
+                            setSearch('');
+                            setShowResults(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#008C3C]/5 text-left border-b border-gray-50 last:border-0"
+                        >
+                          <div className="w-8 h-8 rounded-full bg-[#008C3C]/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-xs font-bold text-[#008C3C]">
+                              {u.fullName?.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-[#4A4A4A] truncate">{u.fullName}</p>
+                            <p className="text-[10px] text-gray-400 truncate">
+                              {(u as any).contractInfo?.assignment?.company || u.email}
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] px-1.5 flex-shrink-0">{u.role}</Badge>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {showResults && search.trim().length >= 2 && searchResults.length === 0 && (
+                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-lg px-4 py-3 text-sm text-gray-400">
+                      Sin resultados para "{search}"
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* RETIRO: mostrar empresa/proyecto/área del perfil como info de solo lectura */}
@@ -245,8 +301,18 @@ export const RegisterMovementDialog = ({
                       <SelectValue placeholder="Selecciona un motivo" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="voluntario">Voluntario</SelectItem>
-                      <SelectItem value="involuntario">Involuntario</SelectItem>
+                      <SelectItem value="Fallecimiento">Fallecimiento</SelectItem>
+                      <SelectItem value="Anulado">Anulado</SelectItem>
+                      <SelectItem value="Renuncia voluntaria">Renuncia voluntaria</SelectItem>
+                      <SelectItem value="Sustitución patronal">Sustitución patronal</SelectItem>
+                      <SelectItem value="Terminación contrato a término fijo">Terminación contrato a término fijo</SelectItem>
+                      <SelectItem value="Terminación contrato con justa causa">Terminación contrato con justa causa</SelectItem>
+                      <SelectItem value="Terminación contrato sin justa causa">Terminación contrato sin justa causa</SelectItem>
+                      <SelectItem value="Terminación contrato de aprendizaje">Terminación contrato de aprendizaje</SelectItem>
+                      <SelectItem value="Terminación de contrato por mutuo acuerdo">Terminación de contrato por mutuo acuerdo</SelectItem>
+                      <SelectItem value="Terminación de contrato por obra o labor">Terminación de contrato por obra o labor</SelectItem>
+                      <SelectItem value="Terminación de contrato por periodo de prueba">Terminación de contrato por periodo de prueba</SelectItem>
+                      <SelectItem value="Terminación de contrato unilateral de aprendizaje">Terminación de contrato unilateral de aprendizaje</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

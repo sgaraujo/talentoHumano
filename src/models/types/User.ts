@@ -10,6 +10,7 @@ export interface User {
   companyIds?: string[];     // IDs de empresas a las que pertenece
   projectIds?: string[];     // IDs de proyectos asignados
   leaderId?: string;         // ID del jefe directo (supervisor)
+  isGlobalLeader?: boolean;  // aparece en la lista de líderes de todas las empresas
   createdAt: Date;
   updatedAt: Date;
   
@@ -25,6 +26,7 @@ export interface User {
   socialSecurity?: SocialSecurity;
   bankingInfo?: BankingInfo;
   administrativeRecord?: AdministrativeRecord;
+  employmentHistory?: EmploymentRecord[];
 }
 
 // ========== DATOS PERSONALES ==========
@@ -235,6 +237,20 @@ export interface BankingInfo {
 }
 
 // ========== REGISTRO ADMINISTRATIVO ==========
+// ========== HISTORIAL LABORAL (auto-generado) ==========
+export interface EmploymentRecord {
+  company: string;
+  companyId?: string;
+  project?: string;
+  projectId?: string;
+  position?: string;
+  area?: string;
+  contractType?: string;
+  startDate?: string;   // ISO date
+  endDate?: string;     // ISO date — fecha en que dejó esta posición
+  createdAt: string;    // cuando se generó el registro
+}
+
 export interface AdministrativeRecord {
   entryJustification?: string;
   terminationDate?: Date;

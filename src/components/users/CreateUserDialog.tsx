@@ -344,11 +344,20 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
   const positionOptions = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.position)), [companyUsers]);
   const sedeOptions     = useMemo(() => uniq(companyUsers.map(u => u.contractInfo?.assignment?.location)), [companyUsers]);
 
-  // Líderes disponibles en esta empresa
-  const leaderOptions = useMemo(() =>
-    companyUsers.filter(u => u.role === 'lider' || u.role === 'colaborador'),
-    [companyUsers]
-  );
+  // Líderes: todos con role lider del sistema (o misma empresa si hay companyId)
+  const leaderOptions = useMemo(() => {
+    const pool = contract.companyId
+      ? allUsers.filter(u =>
+          u.companyIds?.includes(contract.companyId) ||
+          u.contractInfo?.assignment?.company === contract.company
+        )
+      : allUsers;
+    const byRole = pool.filter(u => u.role === 'lider' || u.role === 'colaborador');
+    // fallback: si no hay nadie en la empresa con ese rol, mostrar todos los líderes
+    return byRole.length > 0
+      ? byRole
+      : allUsers.filter(u => u.role === 'lider');
+  }, [allUsers, companyUsers, contract.companyId, contract.company]);
 
   // ── submit ───────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -459,7 +468,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
         try {
           await assignmentService.assignBatchToUser(
             qs,
-            { id: newUserId, email: basic.email, fullName: basic.fullName },
+            { id: newUserId, email: basic.corporateEmail || basic.email, fullName: basic.fullName },
           );
         } catch (err) { console.warn('Batch assignment failed:', err); }
       }
@@ -505,14 +514,9 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
               </Field>
             </div>
 
-            <Field label="Correo personal" required hint="Gmail, Hotmail u otro correo NO corporativo — aquí llegarán los cuestionarios">
+            <Field label="Correo personal" required hint="Gmail, Hotmail u otro correo NO corporativo — se usa para el acceso a la plataforma">
               <Input type="email" placeholder="juan@gmail.com" value={basic.email}
                 onChange={e => setBasic(p => ({ ...p, email: e.target.value }))} />
-              {basic.email.includes(CORPORATE_DOMAIN) && (
-                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                  ⚠️ Parece un correo corporativo. Los cuestionarios deben enviarse al correo personal.
-                </p>
-              )}
             </Field>
 
             <Field label="Tipo de usuario" required>
@@ -596,8 +600,8 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
             <div className="sm:col-span-2">
               <Field label="Líder / Jefe directo">
                 <Select
-                  value={contract.leaderId}
-                  disabled={!contract.companyId}
+                  value={contract.leaderId || undefined}
+                  disabled={leaderOptions.length === 0}
                   onValueChange={v => {
                     const u = leaderOptions.find(x => x.id === v);
                     setContract(p => ({ ...p, leaderId: v, leaderName: u?.fullName ?? '' }));

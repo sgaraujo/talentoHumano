@@ -18,11 +18,17 @@ export interface RotationMetrics {
     voluntario: number;
     involuntario: number;
   };
-  
+
   externoVsInterno: {
     externo: number;
     interno: number;
   };
+
+  // Desglose por motivo de retiro
+  motivosRetiro: Record<string, number>;
+
+  // Headcount por proyecto
+  headcountPorProyecto: { proyecto: string; empresa: string; count: number }[];
   
   // Tendencias mensuales
   ingresosPorMes: MonthlyData[];
@@ -64,7 +70,7 @@ export interface MovementRecord {
   userName: string;
   userEmail: string;
   date: Date;
-  reason?: string; // voluntario, involuntario
+  reason?: string;
   company?: string;
   project?: string;
   sede?: string;

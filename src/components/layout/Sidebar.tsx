@@ -3,10 +3,10 @@ import { useAppRole } from '@/hooks/useAppRole';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Users, FileText, TrendingUp, Bell, Download, Archive, Settings,
+  Users, FileText, Bell, Download, Archive, Settings, Send,
   BookOpen, LogOut, Bot, Search, Menu, X, ChevronLeft, Building2,
   LayoutDashboard, FolderKanban, MessageSquare, Calculator, Shield,
-  ChevronDown,
+  ChevronDown, BarChart2, Mail, MessageCircle,
 } from 'lucide-react';
 import { ROLE_LABELS } from '@/models/types/AppRole';
 import { Link, useLocation } from 'react-router-dom';
@@ -27,9 +27,11 @@ const GROUPS: MenuGroup[] = [
       { icon: Building2,     label: 'Empresas',           path: '/empresas' },
       { icon: FolderKanban,  label: 'Proyectos',          path: '/proyectos' },
       { icon: MessageSquare, label: 'Comunicaciones',     path: '/comunicaciones' },
+      { icon: MessageCircle, label: 'WhatsApp',           path: '/whatsapp' },
       { icon: Bell,          label: 'Notificaciones',     path: '/notificaciones' },
-      { icon: TrendingUp,    label: 'Rotación y Talento', path: '/rotacion-talento' },
       { icon: FileText,      label: 'Cuestionarios',      path: '/questionarios' },
+      { icon: BarChart2,     label: 'Est. Cuestionarios', path: '/estadisticas-cuestionarios' },
+      { icon: Mail,          label: 'Est. Correos',        path: '/estadisticas-correos' },
       { icon: Bot,           label: 'Chat IA',            path: '/chatbot' },
       { icon: Search,        label: 'Búsqueda',           path: '/busqueda' },
       { icon: Download,      label: 'Exportador',         path: '/exportador' },
@@ -44,6 +46,7 @@ const GROUPS: MenuGroup[] = [
     icon: Calculator,
     items: [
       { icon: Calculator, label: 'Calendario Tributario', path: '/contabilidad' },
+      { icon: Send,       label: 'Mensajes',              path: '/contabilidad/mensajes' },
     ],
   },
   {
@@ -168,11 +171,11 @@ export const Sidebar = () => {
         {/* Menu */}
         <ScrollArea className="flex-1 px-2 py-3">
 
-          {/* Dashboard — always visible if accessible */}
+          {/* Dashboard → Analítica de Talento Humano */}
           {canAccess('/dashboard') && (
             <div className="mb-1">
               <NavItem
-                item={{ icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' }}
+                item={{ icon: LayoutDashboard, label: 'Analítica de Talento Humano', path: '/dashboard' }}
                 collapsed={collapsed}
               />
             </div>

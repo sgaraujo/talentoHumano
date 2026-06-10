@@ -227,8 +227,12 @@ class AnalyticsService {
         ? Math.round((tiempoPromedioEmpresa / countWithContract) * 10) / 10
         : 0;
 
-      const retirosVoluntarios = retiros.filter(r => r.reason === 'voluntario').length;
-      const retirosInvoluntarios = retiros.filter(r => r.reason === 'involuntario').length;
+      const esVoluntario = (r: string = '') => {
+        const l = r.toLowerCase();
+        return l.includes('renuncia') || l.includes('mutuo acuerdo') || l === 'voluntario';
+      };
+      const retirosVoluntarios   = retiros.filter(r => esVoluntario(r.reason)).length;
+      const retirosInvoluntarios = retiros.filter(r => !esVoluntario(r.reason)).length;
 
       const rotacionGeneral = headcount > 0
         ? Math.round((retiros.length / headcount) * 100 * 100) / 100
@@ -305,6 +309,29 @@ class AnalyticsService {
         return false;
       }).length;
 
+      const MOTIVOS_ORDEN = [
+        'Fallecimiento',
+        'Anulado',
+        'Renuncia voluntaria',
+        'Sustitución patronal',
+        'Terminación contrato a término fijo',
+        'Terminación contrato con justa causa',
+        'Terminación contrato sin justa causa',
+        'Terminación contrato de aprendizaje',
+        'Terminación de contrato por mutuo acuerdo',
+        'Terminación de contrato por obra o labor',
+        'Terminación de contrato por periodo de prueba',
+        'Terminación de contrato unilateral de aprendizaje',
+      ];
+      const motivosRetiro: Record<string, number> = {};
+      for (const m of MOTIVOS_ORDEN) motivosRetiro[m] = 0;
+      retiros.forEach(r => {
+        const key = r.reason && motivosRetiro.hasOwnProperty(r.reason)
+          ? r.reason
+          : 'Sin motivo';
+        motivosRetiro[key] = (motivosRetiro[key] || 0) + 1;
+      });
+
       return {
         totalIngresos: ingresos.length,
         totalRetiros: retiros.length,
@@ -324,6 +351,19 @@ class AnalyticsService {
           externo: retirosVoluntarios,
           interno: retirosInvoluntarios,
         },
+        motivosRetiro,
+        headcountPorProyecto: (() => {
+          const map = new Map<string, { empresa: string; count: number }>();
+          colaboradores.forEach(u => {
+            const proj = u.contractInfo?.assignment?.project || 'Sin proyecto';
+            const emp  = u.contractInfo?.assignment?.company  || '';
+            if (!map.has(proj)) map.set(proj, { empresa: emp, count: 0 });
+            map.get(proj)!.count++;
+          });
+          return [...map.entries()]
+            .map(([proyecto, d]) => ({ proyecto, empresa: d.empresa, count: d.count }))
+            .sort((a, b) => b.count - a.count);
+        })(),
         ingresosPorMes: monthlyData,
         retirosPorMes: monthlyData,
         costoRetiros,

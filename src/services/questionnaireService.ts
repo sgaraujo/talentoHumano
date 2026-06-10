@@ -1,4 +1,4 @@
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, getDoc, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { Questionnaire, QuestionnaireResponse } from '../models/types/Questionnaire';
 
@@ -220,35 +220,44 @@ class QuestionnaireService {
     });
   }
 
-  async getExportQueueByQuestionnaire(questionnaireId: string, max = 200) {
+  async getExportQueueByQuestionnaire(questionnaireId: string, _max = 200) {
     const col = collection(db, this.responsesCollection);
 
+    // Fetch all responses for the questionnaire without orderBy/status filters
+    // so Firestore never silently drops documents with missing or mismatched
+    // completedAt types. We filter and sort in memory instead.
     const qAll = query(
       col,
-      where("questionnaireId", "==", questionnaireId),
-      where("status", "==", "completed"),
-      orderBy("completedAt", "desc"),
-      limit(max)
+      where("questionnaireId", "==", questionnaireId)
     );
 
     const snap = await getDocs(qAll);
 
-    return snap.docs.map((d) => {
+    const all = snap.docs.map((d) => {
       const data: any = d.data();
+      const completedAt = data.completedAt?.toDate?.() ?? (data.completedAt ? new Date(data.completedAt) : null);
       return {
         id: d.id,
         questionnaireId: data.questionnaireId,
         userId: data.userId,
+        userName:  data.userName  || "",
+        userEmail: data.userEmail || "",
         answers: data.answers || {},
-        status: data.status,
-        completedAt: data.completedAt?.toDate?.() || new Date(data.completedAt),
-
-        // 🔥 claves para UI
-        exported: data.exported === true, // si no existe -> false
+        status: data.status ?? "",
+        completedAt,
+        exported: data.exported === true,
         exportedAt: data.exportedAt?.toDate?.() || data.exportedAt || null,
         exportError: data.exportError || "",
       };
     });
+
+    return all
+      .filter(r => r.status === "completed")
+      .sort((a, b) => {
+        const ta = a.completedAt?.getTime() ?? 0;
+        const tb = b.completedAt?.getTime() ?? 0;
+        return tb - ta; // desc
+      });
   }
 
 

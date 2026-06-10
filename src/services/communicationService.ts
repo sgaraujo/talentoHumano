@@ -36,11 +36,12 @@ class CommunicationService {
     ctaButton?: { text: string; url: string };
     questionnaireId?: string;
     questionnaireName?: string;
+    senderKey?: 'default' | 'inteegra';
   }): Promise<string> {
     const {
       title, body, sentBy, targetType, targetId, targetName,
       requiresAck, recipients, attachments,
-      ctaButton, questionnaireId, questionnaireName,
+      ctaButton, questionnaireId, questionnaireName, senderKey,
     } = params;
 
     const docRef = await addDoc(collection(db, this.col), {
@@ -50,6 +51,7 @@ class CommunicationService {
       attachments: attachments || [],
       ...(ctaButton        ? { ctaButton }                             : {}),
       ...(questionnaireId  ? { questionnaireId, questionnaireName: questionnaireName || '' } : {}),
+      ...(senderKey && senderKey !== 'default' ? { senderKey } : {}),
       totalSent: recipients.length,
       totalRead: 0,
       status: 'sent',
@@ -60,7 +62,7 @@ class CommunicationService {
     const baseUrl = import.meta.env.VITE_APP_URL ?? window.location.origin;
 
     const batch = writeBatch(db);
-    const tokenMap: Array<{ email: string; name: string; link: string; quizLink?: string }> = [];
+    const tokenMap: Array<{ email: string; name: string; link: string; quizLink?: string; ctaTrackingUrl?: string }> = [];
 
     for (const r of recipients) {
       const token     = generateToken();
@@ -101,7 +103,8 @@ class CommunicationService {
         emailStatus: 'pending',
         sentAt: serverTimestamp(),
       });
-      tokenMap.push({ email: r.userEmail, name: r.userName, link, quizLink });
+      const ctaTrackingUrl = ctaButton ? `${baseUrl}/comunicado/${token}/cta` : undefined;
+      tokenMap.push({ email: r.userEmail, name: r.userName, link, quizLink, ctaTrackingUrl });
     }
     await batch.commit();
 
@@ -113,6 +116,7 @@ class CommunicationService {
         attachments: attachments || [],
         ctaButton: ctaButton || null,
         questionnaireName: questionnaireName || null,
+        senderKey: senderKey || 'default',
       });
       const snap = await getDocs(query(collection(db, this.recCol), where('communicationId', '==', communicationId)));
       const batch2 = writeBatch(db);
@@ -156,9 +160,10 @@ class CommunicationService {
       query(collection(db, this.recCol), where('communicationId', '==', communicationId)),
       snap => onChange(snap.docs.map(d => ({
         id: d.id, ...d.data(),
-        sentAt: toDate(d.data().sentAt),
-        readAt: d.data().readAt ? toDate(d.data().readAt) : undefined,
-        ackAt:  d.data().ackAt  ? toDate(d.data().ackAt)  : undefined,
+        sentAt:        toDate(d.data().sentAt),
+        readAt:        d.data().readAt        ? toDate(d.data().readAt)        : undefined,
+        ackAt:         d.data().ackAt         ? toDate(d.data().ackAt)         : undefined,
+        ctaClickedAt:  d.data().ctaClickedAt  ? toDate(d.data().ctaClickedAt)  : undefined,
       })) as CommunicationRecipient[])
     );
   }
@@ -169,9 +174,10 @@ class CommunicationService {
     );
     return snap.docs.map(d => ({
       id: d.id, ...d.data(),
-      sentAt: toDate(d.data().sentAt),
-      readAt: d.data().readAt ? toDate(d.data().readAt) : undefined,
-      ackAt:  d.data().ackAt  ? toDate(d.data().ackAt)  : undefined,
+      sentAt:        toDate(d.data().sentAt),
+      readAt:        d.data().readAt        ? toDate(d.data().readAt)        : undefined,
+      ackAt:         d.data().ackAt         ? toDate(d.data().ackAt)         : undefined,
+      ctaClickedAt:  d.data().ctaClickedAt  ? toDate(d.data().ctaClickedAt)  : undefined,
     })) as CommunicationRecipient[];
   }
 
@@ -213,6 +219,136 @@ class CommunicationService {
       status: 'read',
       readAt: serverTimestamp(),
       ackAt: serverTimestamp(),
+    });
+  }
+
+  async markCtaClicked(recipientId: string, communicationId: string): Promise<void> {
+    await updateDoc(doc(db, this.recCol, recipientId), {
+      ctaClickedAt: serverTimestamp(),
+    });
+    try {
+      const commDoc = await getDoc(doc(db, this.col, communicationId));
+      if (commDoc.exists()) {
+        const current = commDoc.data().totalCtaClicks || 0;
+        await updateDoc(doc(db, this.col, communicationId), { totalCtaClicks: current + 1 });
+      }
+    } catch { /* unauthenticated */ }
+  }
+
+  // ── Resend to one recipient ───────────────────────────────────────────────
+
+  async resendOne(recipient: CommunicationRecipient, comm: Communication): Promise<void> {
+    const baseUrl = import.meta.env.VITE_APP_URL ?? window.location.origin;
+    const link = `${baseUrl}/comunicado/${recipient.token}`;
+    const quizLink = recipient.quizToken ? `${baseUrl}/responder/${recipient.quizToken}` : undefined;
+    const ctaTrackingUrl = comm.ctaButton ? `${baseUrl}/comunicado/${recipient.token}/cta` : undefined;
+    const sendFn = httpsCallable(functions, 'sendCommunicationEmail');
+    await sendFn({
+      communicationId: comm.id,
+      title: comm.title,
+      body: comm.body,
+      recipients: [{ email: recipient.userEmail, name: recipient.userName, link, quizLink, ctaTrackingUrl }],
+      attachments: comm.attachments ?? [],
+      ctaButton: comm.ctaButton ?? null,
+      questionnaireName: comm.questionnaireName ?? null,
+      senderKey: comm.senderKey || 'default',
+    });
+  }
+
+  // ── Add a new recipient to an existing comunicado ─────────────────────────
+
+  async addRecipient(params: {
+    communicationId: string;
+    userId: string;
+    userName: string;
+    userEmail: string;
+    company: string;
+    project: string;
+    comm: Communication;
+  }): Promise<void> {
+    const { communicationId, userId, userName, userEmail, company, project, comm } = params;
+    const baseUrl = import.meta.env.VITE_APP_URL ?? window.location.origin;
+
+    // Leer el comunicado fresco de Firestore para tener questionnaireId autoritativo
+    const commRef = doc(db, this.col, communicationId);
+    const commSnap = await getDoc(commRef);
+    const commData = commSnap.exists() ? commSnap.data() : {};
+    const questionnaireId   = (commData.questionnaireId   || comm.questionnaireId)   as string | undefined;
+    const questionnaireName = (commData.questionnaireName || comm.questionnaireName) as string | undefined;
+    const title       = (commData.title       || comm.title)       as string;
+    const body        = (commData.body        || comm.body)        as string;
+    const attachments = (commData.attachments || comm.attachments  || []) as Communication['attachments'];
+    const ctaButton   = (commData.ctaButton   || comm.ctaButton)   as Communication['ctaButton'] | undefined;
+
+    const token = generateToken();
+    const link  = `${baseUrl}/comunicado/${token}`;
+
+    let quizToken: string | undefined;
+    let quizLink:  string | undefined;
+
+    const batch = writeBatch(db);
+    const rRef  = doc(collection(db, this.recCol));
+
+    if (questionnaireId) {
+      quizToken = generateToken();
+      quizLink  = `${baseUrl}/responder/${quizToken}`;
+      const qRef = doc(collection(db, 'questionnaire_assignments'));
+      batch.set(qRef, {
+        questionnaireId,
+        token: quizToken,
+        userId, userName, userEmail,
+        status: 'pending',
+        source: 'communication',
+        communicationId,
+        recipientId: rRef.id,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    batch.set(rRef, {
+      communicationId,
+      userId, userName, userEmail,
+      company, project,
+      token,
+      ...(quizToken ? { quizToken } : {}),
+      status: 'pending',
+      emailStatus: 'pending',
+      sentAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    await updateDoc(commRef, { totalSent: (commData.totalSent || 0) + 1 });
+
+    const sendFn = httpsCallable(functions, 'sendCommunicationEmail');
+    await sendFn({
+      communicationId,
+      title,
+      body,
+      recipients: [{ email: userEmail, name: userName, link, ...(quizLink ? { quizLink } : {}), ...(ctaButton ? { ctaTrackingUrl: `${baseUrl}/comunicado/${token}/cta` } : {}) }],
+      attachments: attachments ?? [],
+      ctaButton: ctaButton ?? null,
+      questionnaireName: questionnaireName ?? null,
+      senderKey: (commData.senderKey || comm.senderKey || 'default'),
+    });
+    await updateDoc(doc(db, this.recCol, rRef.id), { emailStatus: 'sent' });
+  }
+
+  // ── Update content ────────────────────────────────────────────────────────
+
+  async updateContent(
+    communicationId: string,
+    fields: {
+      title: string;
+      body: string;
+      attachments?: { name: string; url: string; link?: string }[];
+      ctaButton?: { text: string; url: string } | null;
+    }
+  ): Promise<void> {
+    await updateDoc(doc(db, this.col, communicationId), {
+      title: fields.title,
+      body: fields.body,
+      ...(fields.attachments !== undefined ? { attachments: fields.attachments } : {}),
+      ctaButton: fields.ctaButton ?? null,
     });
   }
 

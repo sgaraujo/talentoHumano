@@ -14,6 +14,8 @@ type QueueRow = {
   id: string;
   questionnaireId: string;
   userId: string;
+  userName?: string;
+  userEmail?: string;
   answers: Record<string, any>;
   status: "pending" | "completed";
   completedAt: any;
@@ -58,12 +60,23 @@ function ResponseTable({
       setQuestionnaire(q);
       const data = await questionnaireService.getExportQueueByQuestionnaire(questionnaireId, 500);
       setRows(data as any);
+      // Primero: usar userName/userEmail guardados directamente en la respuesta
+      const directMap: Record<string, { fullName?: string; email?: string }> = {};
+      (data as QueueRow[]).forEach(r => {
+        if (r.userName || r.userEmail) {
+          directMap[r.userId] = { fullName: r.userName || undefined, email: r.userEmail || undefined };
+        }
+      });
+
+      // Luego: intentar enriquecer con el doc de users (puede no existir si se recargó la BD)
       const uids = Array.from(new Set((data as any[]).map((r) => r.userId).filter(Boolean)));
       const entries = await Promise.all(
         uids.map(async (uid) => {
           const snap = await getDoc(doc(db, "users", uid));
           const d: any = snap.exists() ? snap.data() : null;
-          return [uid, { fullName: d?.fullName, email: d?.email }] as const;
+          const fromDoc = d ? { fullName: d.fullName, email: d.email } : null;
+          const fromResponse = directMap[uid];
+          return [uid, fromDoc ?? fromResponse ?? {}] as const;
         })
       );
       setUserMap(Object.fromEntries(entries));
@@ -91,8 +104,8 @@ function ResponseTable({
 
     const headers = ["Nombre", "Correo", "Fecha respuesta", ...columns.map((c) => c.header)];
     const data = completedRows.map((r) => [
-      userMap[r.userId]?.fullName ?? "Sin nombre",
-      userMap[r.userId]?.email ?? r.userId,
+      userMap[r.userId]?.fullName ?? r.userName ?? "Sin nombre",
+      userMap[r.userId]?.email ?? r.userEmail ?? r.userId,
       toDateStr(r.completedAt),
       ...columns.map((c) => formatCellValue(r.answers?.[c.id])),
     ]);

@@ -3,14 +3,32 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
+import { getDianObligationsByNit } from "./dianCalendar2026";
+import { ALL_BOGOTA_2026 } from "./bogotaCalendar2026";
 
 admin.initializeApp();
 
+// ── WhatsApp / Meta Business ─────────────────────────────────────────────
+export { waWebhook } from "./whatsapp/webhookHandler";
+export { sendWhatsAppMessage, sendWaTemplate } from "./whatsapp/sendMessageHandler";
 
-const TENANT_ID = defineSecret("TENANT_ID");
-const CLIENT_ID = defineSecret("CLIENT_ID");
-const CLIENT_SECRET = defineSecret("CLIENT_SECRET");
-const SENDER_EMAIL = defineSecret("SENDER_EMAIL");
+
+const TENANT_ID      = defineSecret("TENANT_ID");
+const CLIENT_ID      = defineSecret("CLIENT_ID");
+const CLIENT_SECRET  = defineSecret("CLIENT_SECRET");
+const SENDER_EMAIL   = defineSecret("SENDER_EMAIL");
+const SENDER_EMAIL_2 = defineSecret("SENDER_EMAIL_2"); // inteegrados@inteegra.net.co
+
+// Credenciales del tenant de inteegra.net.co
+const TENANT_ID_2     = defineSecret("TENANT_ID_2");
+const CLIENT_ID_2     = defineSecret("CLIENT_ID_2");
+const CLIENT_SECRET_2 = defineSecret("CLIENT_SECRET_2");
+
+// Credenciales del tenant de triangulum.net.co
+const TENANT_ID_3     = defineSecret("TENANT_ID_3");
+const CLIENT_ID_3     = defineSecret("CLIENT_ID_3");
+const CLIENT_SECRET_3 = defineSecret("CLIENT_SECRET_3");
+const SENDER_EMAIL_3  = defineSecret("SENDER_EMAIL_3"); // lguio@triangulum.net.co
 
 async function getGraphToken(): Promise<string> {
   const tenantId = TENANT_ID.value();
@@ -31,6 +49,44 @@ async function getGraphToken(): Promise<string> {
     body,
   });
 
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data.access_token as string;
+}
+
+async function getGraphTokenInteegra(): Promise<string> {
+  const url = `https://login.microsoftonline.com/${TENANT_ID_2.value()}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID_2.value(),
+    scope: "https://graph.microsoft.com/.default",
+    client_secret: CLIENT_SECRET_2.value(),
+    grant_type: "client_credentials",
+  });
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data.access_token as string;
+}
+
+async function getGraphTokenTriangulum(): Promise<string> {
+  const url = `https://login.microsoftonline.com/${TENANT_ID_3.value()}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID_3.value(),
+    scope: "https://graph.microsoft.com/.default",
+    client_secret: CLIENT_SECRET_3.value(),
+    grant_type: "client_credentials",
+  });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(JSON.stringify(data));
   return data.access_token as string;
@@ -382,6 +438,35 @@ export const submitPublicResponse = onCall(
       throw new HttpsError("failed-precondition", "Asignación sin cuestionario");
     }
 
+    // Verificar por email: bloquear si el mismo correo ya completó antes (IDs cambiaron por recarga de BD)
+    if (assignment.userEmail) {
+      const prevSnap = await firestore
+        .collection("questionnaire_assignments")
+        .where("userEmail", "==", assignment.userEmail)
+        .where("questionnaireId", "==", questionnaireId)
+        .where("status", "==", "completed")
+        .limit(1)
+        .get();
+
+      if (!prevSnap.empty) {
+        // Find the existing response for this email so we can link the assignment
+        // without creating a duplicate response record.
+        const existingResp = await firestore
+          .collection("questionnaire_responses")
+          .where("userEmail", "==", assignment.userEmail)
+          .where("questionnaireId", "==", questionnaireId)
+          .limit(1)
+          .get();
+        const existingResponseId = existingResp.empty ? null : existingResp.docs[0].id;
+        await assDoc.ref.update({
+          status: "completed",
+          completedAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...(existingResponseId ? { responseId: existingResponseId } : {}),
+        });
+        throw new HttpsError("failed-precondition", "Este cuestionario ya fue respondido");
+      }
+    }
+
     // 2) Traer cuestionario
     const qDoc = await firestore.collection("questionnaires").doc(questionnaireId).get();
     if (!qDoc.exists) {
@@ -389,10 +474,12 @@ export const submitPublicResponse = onCall(
     }
     const questionnaire = qDoc.data()!;
 
-    // 3) Guardar respuesta
+    // 3) Guardar respuesta — incluir userName y userEmail para que sobrevivan recargas de BD
     const responseRef = await firestore.collection("questionnaire_responses").add({
       questionnaireId,
       userId,
+      userName:  assignment.userName  || "",
+      userEmail: assignment.userEmail || "",
       answers,
       status: "completed",
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -580,17 +667,25 @@ export const sendCommunicationEmail = onCall(
   {
     region: "us-central1",
     cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
+    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL, SENDER_EMAIL_2, TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, TENANT_ID_3, CLIENT_ID_3, CLIENT_SECRET_3, SENDER_EMAIL_3],
   },
   async (request) => {
-    const { communicationId, title, body, recipients, attachments = [], ctaButton = null, questionnaireName = null } = request.data || {};
+    const { communicationId, title, body, recipients, attachments = [], ctaButton = null, questionnaireName = null, senderKey = 'default' } = request.data || {};
 
     if (!title || !body || !Array.isArray(recipients) || recipients.length === 0) {
       throw new HttpsError("invalid-argument", "Faltan campos requeridos");
     }
 
-    const graphToken = await getGraphToken();
-    const sender     = SENDER_EMAIL.value().trim();
+    const graphToken = senderKey === 'inteegra'
+      ? await getGraphTokenInteegra()
+      : senderKey === 'triangulum'
+        ? await getGraphTokenTriangulum()
+        : await getGraphToken();
+    const sender = senderKey === 'inteegra'
+      ? SENDER_EMAIL_2.value().trim()
+      : senderKey === 'triangulum'
+        ? SENDER_EMAIL_3.value().trim()
+        : SENDER_EMAIL.value().trim();
     const year       = new Date().getFullYear();
     const dateStr    = new Date().toLocaleDateString("es-CO", {
       day: "2-digit", month: "long", year: "numeric",
@@ -655,9 +750,10 @@ export const sendCommunicationEmail = onCall(
     const errors: Array<{ email: string; error: string }> = [];
     let sent = 0;
 
-    for (const recipient of recipients as Array<{ email: string; name: string; link: string; quizLink?: string }>) {
+    for (const recipient of recipients as Array<{ email: string; name: string; link: string; quizLink?: string; ctaTrackingUrl?: string }>) {
       try {
         const quizLink: string | null = recipient.quizLink || null;
+        const ctaUrl: string | null = recipient.ctaTrackingUrl || (ctaButton ? ctaButton.url : null);
 
         const html = `
 <!DOCTYPE html>
@@ -746,12 +842,12 @@ export const sendCommunicationEmail = onCall(
                 </tr>
               </table>
 
-              ${ctaButton ? `
+              ${ctaButton && ctaUrl ? `
               <!-- BOTÓN CTA ADICIONAL -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px">
                 <tr>
                   <td align="center">
-                    <a href="${ctaButton.url}" target="_blank" rel="noopener noreferrer"
+                    <a href="${ctaUrl}" target="_blank" rel="noopener noreferrer"
                        style="display:inline-block;background:#7c3aed;color:#ffffff !important;
                               text-decoration:none;padding:13px 32px;border-radius:10px;
                               font-weight:700;font-size:14px;letter-spacing:0.3px;border:0">
@@ -921,6 +1017,31 @@ export const getPublicAssignment = onCall(
       throw new HttpsError("failed-precondition", "Asignación sin questionnaireId");
     }
 
+    // Verificar por email: si el mismo correo ya completó este cuestionario en una asignación anterior
+    // (ocurre cuando se recarga la base y cambian los IDs pero el correo es el mismo)
+    if (assignment.userEmail) {
+      const prevSnap = await admin
+        .firestore()
+        .collection("questionnaire_assignments")
+        .where("userEmail", "==", assignment.userEmail)
+        .where("questionnaireId", "==", questionnaireId)
+        .where("status", "==", "completed")
+        .limit(1)
+        .get();
+
+      if (!prevSnap.empty) {
+        // Marcar la asignación actual como completada para mantener consistencia
+        await assDoc.ref.update({
+          status: "completed",
+          completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return {
+          assignment: { id: assDoc.id, ...assignment, status: "completed" },
+          questionnaire: null,
+        };
+      }
+    }
+
     // 2) Traer cuestionario
     const qDoc = await admin.firestore().collection("questionnaires").doc(questionnaireId).get();
     if (!qDoc.exists) {
@@ -971,11 +1092,20 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
   today.setHours(0, 0, 0, 0);
   const todayStr = today.toISOString().slice(0, 10);
 
-  // Load all non-completed obligations
+  // Load all non-completed obligations from Firestore
   const snap = await db.collection("tax_obligations").get();
-  const obligations: TaxObligation[] = snap.docs
+  const firestoreObligations: TaxObligation[] = snap.docs
     .map(d => ({ id: d.id, ...d.data() } as TaxObligation))
     .filter(o => !COMPLETED_STATUSES.has(o.status));
+
+  // Index completed obligations by nit+taxType+dueDate to skip calendar reminders for them
+  const completedSnap = await db.collection("tax_obligations").get();
+  const completedKeys = new Set(
+    completedSnap.docs
+      .map(d => d.data())
+      .filter(d => COMPLETED_STATUSES.has(d.status))
+      .map(d => `${d.nit}__${(d.taxType as string).toLowerCase().trim()}__${d.dueDate}`)
+  );
 
   // Load all contabilidad + admin users to always notify them
   const rolesSnap = await db.collection("platform_roles")
@@ -1004,120 +1134,238 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
   };
 
   let skipped = 0;
+  let currentBatch = db.batch();
+  let batchCount = 0;
+  const flushBatch = async () => { if (batchCount > 0) { await currentBatch.commit(); currentBatch = db.batch(); batchCount = 0; } };
+  const addLog = async (data: object) => {
+    currentBatch.set(logRef.doc(), { ...data, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    batchCount++;
+    if (batchCount >= 400) await flushBatch();
+  };
 
-  for (const obl of obligations) {
+  // ── 1. Firestore obligations ─────────────────────────────────────────────────
+  for (const obl of firestoreObligations) {
     if (!obl.dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(obl.dueDate)) continue;
 
     const due = new Date(obl.dueDate + "T00:00:00");
     const daysLeft = Math.round((due.getTime() - today.getTime()) / 86_400_000);
 
-    // Check if this falls on an alert threshold
     if (!ALERT_THRESHOLDS.includes(daysLeft)) continue;
 
     const alertKey = `${obl.id}_${daysLeft}_${todayStr}`;
     if (alreadySent.has(alertKey)) { skipped++; continue; }
 
-    // Add to advisor's list (if set and looks like an email)
     if (obl.advisor && obl.advisor.includes("@")) {
       ensureRecipient(obl.advisor, obl.advisor).obligations.push({ ...obl, daysLeft, threshold: daysLeft });
     }
-
-    // Add to all global recipients
     for (const gr of globalRecipients) {
       ensureRecipient(gr.email, gr.name).obligations.push({ ...obl, daysLeft, threshold: daysLeft });
     }
 
-    // Mark as sent
-    await logRef.add({ key: alertKey, sentDate: todayStr, obligationId: obl.id, daysLeft, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    await addLog({ key: alertKey, sentDate: todayStr, obligationId: obl.id, daysLeft });
   }
+
+  // ── 2. Auto-generated calendar obligations (DIAN + Bogotá) ──────────────────
+  // Load all active companies with contabilidad enabled
+  const companiesSnap = await db.collection("companies")
+    .where("active", "==", true)
+    .where("activeContabilidad", "==", true)
+    .get();
+
+  const bogotaCalendar: TaxObligation[] = ALL_BOGOTA_2026.map(o => ({
+    id: `bogota__${o.taxType}__${o.dueDate}`,
+    company: "—",
+    nit:     "—",
+    taxType: o.taxType,
+    obligationType: "Impuestos",
+    period:  o.period,
+    dueDate: o.dueDate,
+    year:    o.dueDate.slice(0, 4),
+    status:  "",
+    advisor: "",
+    observation: "",
+  }));
+
+  for (const compDoc of companiesSnap.docs) {
+    const comp = compDoc.data();
+    const nit: string = comp.nit || "";
+    if (!nit) continue;
+
+    const hidden = new Set<string>(comp.hiddenTaxTypes ?? []);
+
+    // DIAN national obligations
+    const dianObls = getDianObligationsByNit(nit).filter(o => !hidden.has(o.taxType));
+    // Bogotá district obligations
+    const bogotaObls = bogotaCalendar.filter(o => !hidden.has(o.taxType));
+
+    const calendarObls: TaxObligation[] = [
+      ...dianObls.map(o => ({
+        id: `cal__${nit}__${o.taxType}__${o.dueDate}`,
+        company: comp.name || nit,
+        nit,
+        taxType: o.taxType,
+        obligationType: "Impuestos",
+        period: o.period,
+        dueDate: o.dueDate,
+        year: o.dueDate.slice(0, 4),
+        status: "",
+        advisor: "",
+        observation: "",
+      })),
+      ...bogotaObls.map(o => ({
+        ...o,
+        id: `cal__${nit}__${o.taxType}__${o.dueDate}`,
+        company: comp.name || nit,
+        nit,
+      })),
+    ];
+
+    for (const obl of calendarObls) {
+      if (!obl.dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(obl.dueDate)) continue;
+
+      const due = new Date(obl.dueDate + "T00:00:00");
+      const daysLeft = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+      if (!ALERT_THRESHOLDS.includes(daysLeft)) continue;
+
+      // Skip if already registered with a completed status in Firestore
+      const completedKey = `${nit}__${obl.taxType.toLowerCase().trim()}__${obl.dueDate}`;
+      if (completedKeys.has(completedKey)) { skipped++; continue; }
+
+      const alertKey = `cal__${nit}__${obl.taxType}__${obl.dueDate}__${daysLeft}__${todayStr}`;
+      if (alreadySent.has(alertKey)) { skipped++; continue; }
+
+      for (const gr of globalRecipients) {
+        ensureRecipient(gr.email, gr.name).obligations.push({ ...obl, daysLeft, threshold: daysLeft });
+      }
+
+      await addLog({ key: alertKey, sentDate: todayStr, obligationId: obl.id, daysLeft });
+    }
+  }
+
+  await flushBatch();
 
   if (recipientMap.size === 0) return { sent: 0, skipped };
 
   // Send emails
-  const graphToken = await getGraphToken();
-  const sender = SENDER_EMAIL.value().trim();
+  const graphToken = await getGraphTokenInteegra();
+  const sender = SENDER_EMAIL_2.value().trim();
   let sent = 0;
 
   for (const recipient of recipientMap.values()) {
     if (recipient.obligations.length === 0) continue;
 
-    // Sort by daysLeft asc
-    recipient.obligations.sort((a, b) => a.daysLeft - b.daysLeft);
+    // Orden oficial de empresas
+    const COMPANY_ORDER = [
+      "inteegra",
+      "netcol",
+      "inversiones eon",
+      "itac colombia",
+      "consorcio scia",
+      "triangulum",
+      "netia",
+      "logistica empresarial",
+      "leti",
+      "newstar",
+      "newforce",
+      "union temporal tecnologia",
+      "union temporal fomento",
+      "union temporal internuqui",
+      "union temporal itac",
+      "plex de colombia",
+      "red empresarial",
+    ];
+    const normalizeCompany = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+    const companyIdx = (name: string) => {
+      const n = normalizeCompany(name);
+      const idx = COMPANY_ORDER.findIndex(c => n.includes(c) || c.includes(n));
+      return idx === -1 ? COMPANY_ORDER.length : idx;
+    };
+
+    // Sort: primero por empresa (orden oficial), luego por días asc
+    recipient.obligations.sort((a, b) => {
+      const cmp = companyIdx(a.company) - companyIdx(b.company);
+      return cmp !== 0 ? cmp : a.daysLeft - b.daysLeft;
+    });
 
     const rows = recipient.obligations.map(o => {
-      const urgencyColor = o.daysLeft <= 1 ? "#dc2626" : o.daysLeft <= 3 ? "#ea580c" : o.daysLeft <= 7 ? "#d97706" : "#2563eb";
+      const urgencyColor = o.daysLeft <= 1 ? "#dc2626" : o.daysLeft <= 3 ? "#ea580c" : o.daysLeft <= 7 ? "#d97706" : "#1d4ed8";
       const urgencyBg    = o.daysLeft <= 1 ? "#fef2f2" : o.daysLeft <= 3 ? "#fff7ed" : o.daysLeft <= 7 ? "#fffbeb" : "#eff6ff";
-      const daysLabel    = o.daysLeft === 0 ? "¡HOY!" : o.daysLeft === 1 ? "Mañana" : `${o.daysLeft} días`;
+      const daysLabel    = o.daysLeft === 0 ? "HOY" : o.daysLeft === 1 ? "Ma&#xF1;ana" : `${o.daysLeft} d&#xED;as`;
       return `
-        <tr style="border-bottom:1px solid #f3f4f6">
-          <td style="padding:12px 16px;font-size:13px;color:#1f2937;font-weight:600">${o.company}</td>
-          <td style="padding:12px 16px;font-size:13px;color:#374151">${o.taxType}</td>
-          <td style="padding:12px 16px;font-size:13px;color:#6b7280">${o.period}</td>
-          <td style="padding:12px 16px;font-size:13px;color:#6b7280;white-space:nowrap">${o.dueDate.split("-").reverse().join("/")}</td>
-          <td style="padding:12px 16px;text-align:center">
-            <span style="background:${urgencyBg};color:${urgencyColor};font-weight:700;font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid ${urgencyColor}40">
-              ${daysLabel}
-            </span>
+        <tr>
+          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1f2937;font-weight:600;border-bottom:1px solid #f3f4f6">${o.company}</td>
+          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6">${o.taxType}</td>
+          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6">${o.period}</td>
+          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap">${o.dueDate.split("-").reverse().join("/")}</td>
+          <td align="center" bgcolor="${urgencyBg}" style="padding:11px 14px;background-color:${urgencyBg};border-bottom:1px solid #f3f4f6">
+            <span style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:${urgencyColor}">${daysLabel}</span>
           </td>
         </tr>`;
     }).join("");
 
     const year = new Date().getFullYear();
-    const html = `
-<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/></head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 16px">
-<tr><td align="center">
-<table width="100%" style="max-width:640px" cellpadding="0" cellspacing="0">
+    const dateStr = new Date().toLocaleDateString("es-CO",{weekday:"long",day:"2-digit",month:"long",year:"numeric"});
+    const html = `<!DOCTYPE html>
+<html lang="es" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<!--[if mso]>
+<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+<![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#f3f4f6">
+<tr><td align="center" style="padding:24px 16px">
+<!--[if mso]><table role="presentation" width="620" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" style="max-width:620px" cellpadding="0" cellspacing="0">
 
-  <!-- Header -->
-  <tr><td style="background:linear-gradient(135deg,#004d22,#008C3C);padding:32px;border-radius:16px 16px 0 0;text-align:center">
-    <h1 style="color:#fff;margin:0 0 4px;font-size:24px;letter-spacing:4px;font-weight:800">
-      INTE<span style="color:#7BCB6A">E</span>GRADOS
-    </h1>
-    <p style="color:#a7f3d0;margin:0;font-size:11px;letter-spacing:2px">CALENDARIO TRIBUTARIO</p>
-    <div style="width:40px;height:3px;background:#7BCB6A;border-radius:2px;margin:16px auto 0"></div>
-    <p style="color:#fff;margin:14px 0 0;font-size:18px;font-weight:700">⚠️ Alertas de Vencimiento</p>
-    <p style="color:#a7f3d0;margin:6px 0 0;font-size:12px">${new Date().toLocaleDateString("es-CO",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}</p>
-  </td></tr>
-
-  <!-- Greeting -->
-  <tr><td style="background:#f0fdf4;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;padding:16px 32px">
-    <p style="margin:0;font-size:15px;color:#166534">
-      Hola <strong>${recipient.name}</strong>, tienes <strong>${recipient.obligations.length}</strong> obligación${recipient.obligations.length !== 1 ? "es" : ""} tributaria${recipient.obligations.length !== 1 ? "s" : ""} próxima${recipient.obligations.length !== 1 ? "s" : ""} a vencer:
-    </p>
-  </td></tr>
-
-  <!-- Table -->
-  <tr><td style="background:#fff;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;padding:24px 32px">
-    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-      <thead>
-        <tr style="background:#f9fafb">
-          <th style="padding:10px 16px;font-size:11px;color:#6b7280;text-align:left;font-weight:700;text-transform:uppercase;letter-spacing:1px">Empresa</th>
-          <th style="padding:10px 16px;font-size:11px;color:#6b7280;text-align:left;font-weight:700;text-transform:uppercase;letter-spacing:1px">Obligación</th>
-          <th style="padding:10px 16px;font-size:11px;color:#6b7280;text-align:left;font-weight:700;text-transform:uppercase;letter-spacing:1px">Periodo</th>
-          <th style="padding:10px 16px;font-size:11px;color:#6b7280;text-align:left;font-weight:700;text-transform:uppercase;letter-spacing:1px">Vence</th>
-          <th style="padding:10px 16px;font-size:11px;color:#6b7280;text-align:center;font-weight:700;text-transform:uppercase;letter-spacing:1px">Días</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
+  <!-- HEADER -->
+  <tr><td bgcolor="#006C2F" style="background-color:#006C2F;padding:28px 32px;text-align:center">
+    <p style="margin:0 0 2px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:#7BCB6A;letter-spacing:3px;text-transform:uppercase">CALENDARIO TRIBUTARIO</p>
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:26px;font-weight:800;color:#ffffff;letter-spacing:3px">INTEEGRADOS</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 0">
+      <tr><td bgcolor="#7BCB6A" style="background-color:#7BCB6A;height:3px;width:40px;font-size:0;line-height:0">&nbsp;</td></tr>
     </table>
-    <p style="margin:20px 0 0;font-size:12px;color:#9ca3af;text-align:center">
-      Ingresa a la plataforma para actualizar el estado de cada obligación.
+    <p style="margin:14px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;color:#ffffff">Alertas de Vencimiento</p>
+    <p style="margin:4px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#a7f3d0">${dateStr}</p>
+  </td></tr>
+
+  <!-- GREETING -->
+  <tr><td bgcolor="#f0fdf4" style="background-color:#f0fdf4;padding:14px 32px;border-left:1px solid #d1fae5;border-right:1px solid #d1fae5">
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#166534">
+      Hola <strong>${recipient.name}</strong>, tienes <strong>${recipient.obligations.length}</strong> obligaci${recipient.obligations.length !== 1 ? "ones tributarias pr&#xF3;ximas" : "&#xF3;n tributaria pr&#xF3;xima"} a vencer:
     </p>
   </td></tr>
 
-  <!-- Footer -->
-  <tr><td style="background:#1f2937;border-radius:0 0 16px 16px;padding:20px 32px;text-align:center">
-    <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:2px;color:#fff">
-      INTE<span style="color:#7BCB6A">E</span>GRADOS
+  <!-- TABLE WRAPPER -->
+  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb">
+      <tr bgcolor="#f9fafb" style="background-color:#f9fafb">
+        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Empresa</th>
+        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Obligaci&#xF3;n</th>
+        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Per&#xED;odo</th>
+        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Vence</th>
+        <th align="center" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">D&#xED;as</th>
+      </tr>
+      ${rows}
+    </table>
+    <p style="margin:18px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9ca3af;text-align:center">
+      Ingresa a la plataforma para actualizar el estado de cada obligaci&#xF3;n.
     </p>
-    <p style="margin:0;font-size:10px;color:#6b7280">
-      Alerta automática del Calendario Tributario &middot; &copy; ${year} Inteegrados
+  </td></tr>
+
+  <!-- FOOTER -->
+  <tr><td bgcolor="#1f2937" style="background-color:#1f2937;padding:18px 32px;text-align:center">
+    <p style="margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;color:#ffffff">INTEEGRADOS</p>
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280">
+      Alerta autom&#xE1;tica &middot; Calendario Tributario &middot; &copy; ${year}
     </p>
   </td></tr>
 
 </table>
+<!--[if mso]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body></html>`;
@@ -1142,15 +1390,16 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
   return { sent, skipped };
 }
 
+
 /**
  * Scheduled: runs every day at 8:00 AM Colombia time (UTC-5 = 13:00 UTC)
  */
 export const scheduledTaxAlerts = onSchedule(
   {
-    schedule: "0 13 * * *",
+    schedule: "0 10 * * *",
     timeZone: "America/Bogota",
     region: "us-central1",
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async () => {
     const result = await runTaxAlerts(admin.firestore());
@@ -1165,13 +1414,14 @@ export const triggerTaxAlerts = onCall(
   {
     region: "us-central1",
     cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async () => {
     const result = await runTaxAlerts(admin.firestore());
     return result;
   }
 );
+
 
 /**
  * Creates calendar events (Teams/Outlook) for all non-completed tax obligations.
@@ -1183,7 +1433,7 @@ export const scheduleTaxInCalendar = onCall(
   {
     region: "us-central1",
     cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
     const db = admin.firestore();
@@ -1223,8 +1473,8 @@ export const scheduleTaxInCalendar = onCall(
     const existingSnap = await eventsRef.get();
     const alreadyScheduled = new Set(existingSnap.docs.map(d => d.data().obligationId as string));
 
-    const graphToken = await getGraphToken();
-    const sender = SENDER_EMAIL.value().trim();
+    const graphToken = await getGraphTokenInteegra();
+    const sender = SENDER_EMAIL_2.value().trim();
     let scheduled = 0;
     let skipped = 0;
 
@@ -1287,6 +1537,101 @@ export const scheduleTaxInCalendar = onCall(
     return { scheduled, skipped };
   }
 );
+// ── Fetch public questionnaire (no auth required) ────────────────────────────
+export const getPublicQuestionnaire = onCall(
+  { region: "us-central1", cors: true },
+  async (request) => {
+    const questionnaireId = String(request.data?.questionnaireId || "").trim();
+    if (!questionnaireId) throw new HttpsError("invalid-argument", "questionnaireId requerido");
+
+    const firestore = admin.firestore();
+    const qDoc = await firestore.collection("questionnaires").doc(questionnaireId).get();
+
+    if (!qDoc.exists) throw new HttpsError("not-found", "Formulario no encontrado");
+
+    const q = qDoc.data()!;
+    if (!q.active)   throw new HttpsError("failed-precondition", "Este formulario ya no está activo");
+    if (!q.isPublic) throw new HttpsError("permission-denied", "Este formulario no es público");
+
+    return {
+      id: qDoc.id,
+      title:       q.title       ?? "",
+      description: q.description ?? "",
+      questions:   q.questions   ?? [],
+    };
+  }
+);
+
+// ── Public form submission (no token/assignment required) ────────────────────
+export const submitPublicFormResponse = onCall(
+  { region: "us-central1", cors: true },
+  async (request) => {
+    const { questionnaireId, name, email, answers } = request.data ?? {};
+
+    if (!questionnaireId || typeof questionnaireId !== "string") {
+      throw new HttpsError("invalid-argument", "questionnaireId requerido");
+    }
+    if (!name || typeof name !== "string" || name.trim() === "") {
+      throw new HttpsError("invalid-argument", "nombre requerido");
+    }
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      throw new HttpsError("invalid-argument", "correo inválido");
+    }
+    if (!answers || typeof answers !== "object") {
+      throw new HttpsError("invalid-argument", "respuestas requeridas");
+    }
+
+    const firestore = admin.firestore();
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanName  = name.trim();
+
+    // 1) Verificar que el cuestionario existe, está activo y es público
+    const qDoc = await firestore.collection("questionnaires").doc(questionnaireId).get();
+    if (!qDoc.exists) {
+      throw new HttpsError("not-found", "Formulario no encontrado");
+    }
+    const q = qDoc.data()!;
+    if (!q.active) {
+      throw new HttpsError("failed-precondition", "Este formulario ya no está activo");
+    }
+    if (!q.isPublic) {
+      throw new HttpsError("permission-denied", "Este formulario no es público");
+    }
+
+    // 2) Verificar que el correo no haya respondido antes (por cualquier canal)
+    const prev = await firestore
+      .collection("questionnaire_responses")
+      .where("questionnaireId", "==", questionnaireId)
+      .where("userEmail", "==", cleanEmail)
+      .limit(1)
+      .get();
+
+    if (!prev.empty) {
+      throw new HttpsError(
+        "already-exists",
+        "Este correo ya respondió este formulario"
+      );
+    }
+
+    // 3) Guardar respuesta
+    await firestore.collection("questionnaire_responses").add({
+      questionnaireId,
+      userId:    cleanEmail,
+      userName:  cleanName,
+      userEmail: cleanEmail,
+      answers,
+      status:      "completed",
+      source:      "public",
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      exported:    false,
+      exportedAt:  null,
+      exportError: null,
+    });
+
+    return { ok: true };
+  }
+);
+
 // Trigger: when a recipient is marked as read, sync totalRead on the communication doc
 export const onRecipientRead = onDocumentUpdated(
   { document: "comunicado_recipients/{docId}", region: "us-central1" },
@@ -1307,5 +1652,692 @@ export const onRecipientRead = onDocumentUpdated(
     await db.collection("comunicados").doc(communicationId).update({
       totalRead: snap.size,
     });
+  }
+);
+
+/**
+ * Notifica por correo en cada cambio de estado de una obligación tributaria.
+ * - No iniciado → aviso de inicio de proceso
+ * - Revisado / Informe Enviado / Presentado → aviso de avance
+ * - Pagado → correo especial solicitando registro del comprobante
+ */
+export const notifyTaxStatusChange = onCall(
+  {
+    region: "us-central1",
+    cors: true,
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
+  },
+  async (request) => {
+    const {
+      companyName,
+      nit,
+      taxType,
+      period,
+      dueDate,
+      newStatus,
+      changedBy,
+      recipients,       // [{ name, email }]
+      projectedAmount,  // valor proyectado (opcional)
+      forFinanciera,    // true cuando el correo va al equipo financiero
+      obligationId,     // ID Firestore para deep link
+    } = request.data || {};
+
+    if (!companyName || !taxType || !newStatus || !recipients?.length) {
+      throw new HttpsError("invalid-argument", "Faltan campos requeridos");
+    }
+
+    const year = new Date().getFullYear();
+    const token  = await getGraphTokenInteegra();
+    const sender = SENDER_EMAIL_2.value().trim();
+
+    const fmtDate = (d: string) => {
+      if (!d) return "—";
+      const [y, m, dd] = d.split("-");
+      const months = ["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+      return `${dd} ${months[parseInt(m)] ?? m} ${y}`;
+    };
+
+    const STATUS_LABELS: Record<string, string> = {
+      "No iniciado":    "Proceso iniciado 🚀",
+      "Revisado":       "Revisada ✔",
+      "Informe Enviado":"Informe enviado al cliente ✔",
+      "Presentado":     "Presentada ante la DIAN ✔",
+      "Pagado":         "Pagada ✔",
+      "No aplica":      "Marcada como No aplica",
+    };
+
+    const STATUS_COLORS: Record<string, string> = {
+      "No iniciado":    "#6366f1",
+      "Revisado":       "#3b82f6",
+      "Informe Enviado":"#0d9488",
+      "Presentado":     "#7c3aed",
+      "Pagado":         "#16a34a",
+      "No aplica":      "#9ca3af",
+    };
+
+    const badgeColor = STATUS_COLORS[newStatus] ?? "#008C3C";
+    const badgeLabel = STATUS_LABELS[newStatus] ?? newStatus;
+    const isPagado   = newStatus === "Pagado";
+
+    const infoBlock = `
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="border:1px solid #e5e7eb;border-radius:10px;margin:20px 0;overflow:hidden">
+        <tr style="background:#f9fafb">
+          <td style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:700;
+                     text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid #e5e7eb"
+              colspan="2">Detalle de la obligación</td>
+        </tr>
+        ${[
+          ["Empresa",   companyName],
+          ["NIT",       nit ?? "—"],
+          ["Impuesto",  taxType],
+          ["Período",   period ?? "—"],
+          ["Vence",     fmtDate(dueDate)],
+          ["Registrado por", changedBy ?? "—"],
+        ].map(([label, value]) => `
+          <tr>
+            <td style="padding:8px 16px;font-size:12px;color:#6b7280;width:38%;
+                       border-bottom:1px solid #f3f4f6">${label}</td>
+            <td style="padding:8px 16px;font-size:12px;color:#111827;font-weight:600;
+                       border-bottom:1px solid #f3f4f6">${value}</td>
+          </tr>
+        `).join("")}
+      </table>
+    `;
+
+    const fmtCurrency = (v: any) => {
+      const n = parseFloat(v);
+      if (isNaN(n)) return "—";
+      return n.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
+    };
+
+    const isPresentado   = newStatus === "Presentado";
+    const isIniciado     = newStatus === "No iniciado";
+
+    const pagadoCallout = isPagado ? `
+      <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;
+                  padding:16px 20px;margin:20px 0">
+        <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:#92400e">
+          ⚠️ Acción requerida — Equipo Financiero
+        </p>
+        <p style="margin:0;font-size:13px;color:#78350f;line-height:1.6">
+          Esta obligación fue marcada como <b>Pagada</b>. Por favor registra el
+          comprobante de pago y el <b>valor real pagado</b> en la plataforma para
+          mantener el historial completo.
+        </p>
+      </div>
+    ` : "";
+
+    const financieraCallout = (isPresentado && forFinanciera) ? `
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;
+                  padding:16px 20px;margin:20px 0">
+        <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:#166534">
+          💳 Acción requerida — Equipo Financiero
+        </p>
+        <p style="margin:0 0 10px;font-size:13px;color:#15803d;line-height:1.6">
+          La obligación <b>${taxType}</b> de <b>${companyName}</b> ya fue
+          <b>presentada</b>. Por favor ingresa a la plataforma y registra el
+          <b>valor real pagado</b> en el campo "Valor pagado" para cerrar el ciclo.
+        </p>
+        ${projectedAmount ? `
+        <p style="margin:0;font-size:12px;color:#166534;background:#dcfce7;
+                  border-radius:6px;padding:8px 12px;display:inline-block">
+          Valor proyectado por contabilidad: <b>${fmtCurrency(projectedAmount)}</b>
+        </p>` : ""}
+      </div>
+    ` : "";
+
+    const subject = isPagado
+      ? `[Acción requerida] ${taxType} — ${companyName} marcado como Pagado`
+      : (isPresentado && forFinanciera)
+        ? `[Pago pendiente] ${taxType} — ${companyName}: registra el valor pagado`
+        : isIniciado
+          ? `[Proceso iniciado] ${taxType} — ${companyName}`
+          : `[Calendario Tributario] ${taxType} — ${companyName}: ${newStatus}`;
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto;
+                  line-height:1.6;color:#374151">
+        <div style="background:linear-gradient(135deg,#005528,#008C3C);padding:28px 24px;
+                    border-radius:12px 12px 0 0;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:22px;letter-spacing:2px;font-weight:800">
+            INTE<span style="color:#7BCB6A">E</span>GRADOS
+          </h1>
+          <p style="color:#7BCB6A;margin:4px 0 0;font-size:11px;letter-spacing:1px">
+            CALENDARIO TRIBUTARIO
+          </p>
+        </div>
+
+        <div style="background:#fff;padding:28px 24px;border:1px solid #e5e7eb;
+                    border-top:none;border-radius:0 0 12px 12px">
+          <p style="font-size:15px;margin-top:0">Hola equipo,</p>
+
+          <p style="font-size:14px;color:#374151">
+            La siguiente obligación tributaria cambió su estado a
+            <span style="display:inline-block;background:${badgeColor};color:#fff;
+                         font-weight:700;font-size:12px;padding:3px 10px;
+                         border-radius:20px;vertical-align:middle">
+              ${badgeLabel}
+            </span>
+          </p>
+
+          ${infoBlock}
+          ${financieraCallout}
+          ${pagadoCallout}
+
+          ${obligationId ? `
+          <div style="text-align:center;margin:24px 0 8px">
+            <a href="https://nelyoda.web.app/contabilidad?obl=${obligationId}"
+               target="_blank"
+               style="display:inline-block;background:#008C3C;color:#ffffff;
+                      text-decoration:none;font-weight:700;font-size:14px;
+                      padding:14px 32px;border-radius:10px;letter-spacing:0.3px">
+              📋 Ver obligación en el calendario
+            </a>
+          </div>
+          ` : ""}
+
+          <p style="font-size:11px;color:#9ca3af;text-align:center;
+                    margin-top:24px;border-top:1px solid #f3f4f6;padding-top:16px">
+            &copy; ${year} Inteegrados &middot; Todos los derechos reservados
+          </p>
+        </div>
+      </div>
+    `;
+
+    const sendUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`;
+
+    await Promise.all(
+      (recipients as Array<{ name: string; email: string }>).map(r =>
+        fetch(sendUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: {
+              subject,
+              body: { contentType: "HTML", content: html },
+              toRecipients: [{ emailAddress: { address: r.email } }],
+            },
+            saveToSentItems: false,
+          }),
+        }).then(async res => {
+          if (!res.ok) {
+            const txt = await res.text();
+            console.error(`notifyTaxStatusChange: failed for ${r.email}:`, txt);
+          }
+        })
+      )
+    );
+
+    return { ok: true };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLANTILLA DE ACCESO A LA PLATAFORMA
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Envía correo de bienvenida/actualización de acceso a un usuario de la plataforma.
+ * Payload: { recipientEmail, recipientName, role, roleLabel, modules, isNewAccess }
+ */
+export const sendPlatformAccessEmail = onCall(
+  { region: "us-central1", cors: true, secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2] },
+  async (request) => {
+    const {
+      recipientEmail,
+      recipientName,
+      role,
+      roleLabel,
+      modules = [],
+      isNewAccess = true,
+    } = request.data || {};
+
+    console.log("sendPlatformAccessEmail START — recipientEmail:", recipientEmail, "role:", role);
+
+    if (!recipientEmail) throw new HttpsError("invalid-argument", "recipientEmail requerido");
+
+    try {
+    const token  = await getGraphTokenInteegra();
+    const sender = SENDER_EMAIL_2.value().trim();
+    console.log("sendPlatformAccessEmail: token ok, sender:", sender, "to:", recipientEmail);
+    const year   = new Date().getFullYear();
+
+    const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+      admin:          { bg: "#f3e8ff", text: "#7e22ce", border: "#d8b4fe" },
+      talento_humano: { bg: "#f0fdf4", text: "#15803d", border: "#86efac" },
+      contabilidad:   { bg: "#eff6ff", text: "#1d4ed8", border: "#93c5fd" },
+      financiera:     { bg: "#ecfdf5", text: "#065f46", border: "#6ee7b7" },
+    };
+    const roleColor = ROLE_COLORS[role] ?? { bg: "#f9fafb", text: "#374151", border: "#e5e7eb" };
+
+    const moduleItems = (modules as string[]).map(m =>
+      `<li style="padding:3px 0;color:#374151;font-size:13px">✓ ${m}</li>`
+    ).join("");
+
+    const subject = isNewAccess
+      ? `¡Bienvenido/a a la plataforma Inteegrados!`
+      : `Tu acceso a Inteegrados ha sido actualizado`;
+
+    const headline = isNewAccess
+      ? `¡Hola <b>${recipientName || recipientEmail}</b>, te damos la bienvenida!`
+      : `Hola <b>${recipientName || recipientEmail}</b>, tu acceso ha sido actualizado.`;
+
+    const intro = isNewAccess
+      ? `Se te ha asignado acceso a la plataforma <b>Inteegrados</b> con el siguiente rol:`
+      : `Tu rol en la plataforma <b>Inteegrados</b> ha cambiado:`;
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;line-height:1.6">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#005528,#008C3C);padding:32px 24px;border-radius:12px 12px 0 0;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:24px;letter-spacing:3px;font-weight:800">
+            INTE<span style="color:#7BCB6A">E</span>GRADOS
+          </h1>
+          <p style="color:#7BCB6A;margin:4px 0 0;font-size:11px;letter-spacing:1.5px;text-transform:uppercase">
+            Plataforma de Gestión
+          </p>
+        </div>
+
+        <!-- Body -->
+        <div style="background:#fff;padding:32px 24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
+
+          <p style="font-size:16px;color:#374151;margin:0 0 6px">${headline}</p>
+          <p style="color:#6b7280;margin:0 0 20px;font-size:14px">${intro}</p>
+
+          <!-- Role badge -->
+          <div style="display:inline-block;background:${roleColor.bg};color:${roleColor.text};
+                      border:1px solid ${roleColor.border};border-radius:8px;
+                      padding:10px 20px;margin-bottom:20px;font-weight:700;font-size:15px">
+            ${roleLabel || role}
+          </div>
+
+          <!-- Login email -->
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px 20px;margin-bottom:20px">
+            <p style="margin:0 0 4px;font-size:11px;color:#166534;text-transform:uppercase;font-weight:700;letter-spacing:1px">
+              Tu correo de acceso
+            </p>
+            <p style="margin:0;font-size:17px;font-weight:700;color:#166534">${recipientEmail}</p>
+            <p style="margin:6px 0 0;font-size:12px;color:#4ade80">Úsalo para ingresar a la plataforma</p>
+          </div>
+
+          ${modules.length > 0 ? `
+          <!-- Modules -->
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;margin-bottom:24px">
+            <p style="margin:0 0 10px;font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700;letter-spacing:1px">
+              Módulos disponibles
+            </p>
+            <ul style="margin:0;padding-left:4px;list-style:none">
+              ${moduleItems}
+            </ul>
+          </div>
+          ` : ""}
+
+          <!-- CTA -->
+          <div style="text-align:center;margin:24px 0 8px">
+            <a href="https://nelyoda.web.app"
+               target="_blank"
+               style="display:inline-block;background:#008C3C;color:#ffffff;
+                      text-decoration:none;font-weight:700;font-size:14px;
+                      padding:14px 36px;border-radius:10px;letter-spacing:0.3px">
+              Ingresar a la plataforma
+            </a>
+          </div>
+
+          <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:8px">
+            Si tienes preguntas, responde este correo.
+          </p>
+
+          <p style="font-size:11px;color:#d1d5db;text-align:center;
+                    margin-top:24px;border-top:1px solid #f3f4f6;padding-top:16px">
+            &copy; ${year} Inteegrados &middot; Todos los derechos reservados
+          </p>
+        </div>
+      </div>
+    `;
+
+    const sendUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`;
+    const res = await fetch(sendUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: "HTML", content: html },
+          toRecipients: [{ emailAddress: { address: recipientEmail } }],
+        },
+        saveToSentItems: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("sendPlatformAccessEmail Graph error:", res.status, errText);
+      throw new HttpsError("internal", `Graph sendMail error ${res.status}: ${errText}`);
+    }
+
+      console.log("sendPlatformAccessEmail: sent ok to", recipientEmail);
+      return { ok: true };
+    } catch (e: any) {
+      if (e?.code) throw e; // re-throw HttpsError
+      console.error("sendPlatformAccessEmail unhandled error:", e?.message, String(e));
+      throw new HttpsError("internal", e?.message ?? String(e));
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPORT OBLIGACIONES LEGALES 2026 (one-shot seed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LEGAL_OBLIGATIONS_2026 = [
+  { company:"Netcol Ingeniería SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Supersociedades 1 - Estados Financieros Fin de Ejercicio",obligationType:"Reportes",period:"Supersociedades 1 - Estados Financieros Fin de Ejercicio",dueDate:"2026-04-30",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Netcol Ingeniería SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Supersociedades 08 - Reporte de Sostenibilidad",obligationType:"Reportes",period:"Supersociedades 08 - Reporte de Sostenibilidad",dueDate:"2026-07-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Registro Único de Proponentes",obligationType:"Reportes",period:"Registro Único de Proponentes",dueDate:"2026-04-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Contribución a la CRC",obligationType:"Reportes",period:"Contribución a la CRC",dueDate:"2026-01-31",year:"2026",status:"Pagado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Contribución a la CRC",obligationType:"Reportes",period:"Contribución a la CRC",dueDate:"2026-07-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-02-02",year:"2026",status:"Pagado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-04-30",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-07-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inteegra SAS BIC",nit:"901193667",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-11-03",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Triangulum BPO SAS",nit:"900550189",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Triangulum BPO SAS",nit:"900550189",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Triangulum BPO SAS",nit:"900550189",city:"Bogotá",scope:"Nacional",taxType:"Registro Único de Proponentes",obligationType:"Reportes",period:"Registro Único de Proponentes",dueDate:"2026-04-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Registro Único de Proponentes",obligationType:"Reportes",period:"Registro Único de Proponentes",dueDate:"2026-04-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Contribución a la CRC",obligationType:"Reportes",period:"Contribución a la CRC",dueDate:"2026-01-31",year:"2026",status:"Pagado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Contribución a la CRC",obligationType:"Reportes",period:"Contribución a la CRC",dueDate:"2026-07-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-02-02",year:"2026",status:"Pagado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-04-30",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-07-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"ITAC Colombia SAS",nit:"900265286",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-11-03",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Inversiones EON SAS",nit:"901419833",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newstar SAS",nit:"901271083",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newstar SAS",nit:"901271083",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newstar SAS",nit:"901271083",city:"Bogotá",scope:"Nacional",taxType:"Registro Único de Proponentes",obligationType:"Reportes",period:"Registro Único de Proponentes",dueDate:"2026-04-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"LOGISTICA EMPRESARIAL DE TRANSPORTE",nit:"901269033",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Netia SAS",nit:"901264922",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Netia SAS",nit:"901264922",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Netia SAS",nit:"901264922",city:"Bogotá",scope:"Nacional",taxType:"Registro Único de Proponentes",obligationType:"Reportes",period:"Registro Único de Proponentes",dueDate:"2026-04-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Registro Único de Proponentes",obligationType:"Reportes",period:"Registro Único de Proponentes",dueDate:"2026-04-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Contribución a la CRC",obligationType:"Reportes",period:"Contribución a la CRC",dueDate:"2026-01-31",year:"2026",status:"Pagado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Contribución a la CRC",obligationType:"Reportes",period:"Contribución a la CRC",dueDate:"2026-07-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-02-02",year:"2026",status:"Pagado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-04-30",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-07-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Newforce SAS",nit:"901259735",city:"Bogotá",scope:"Nacional",taxType:"Comisión de Regulación de Comunicaciones - CRC",obligationType:"Reportes",period:"Comisión de Regulación de Comunicaciones - CRC",dueDate:"2026-11-03",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Unión Temporal Fomento TIC",nit:"901311778",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Unión Temporal Fomento TIC",nit:"901311778",city:"Bogotá",scope:"Nacional",taxType:"Matrícula Mercantil",obligationType:"Reportes",period:"Matrícula Mercantil",dueDate:"2026-03-31",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Unión Temporal Fomento TIC",nit:"901311778",city:"Bogotá",scope:"Nacional",taxType:"Registro Único de Proponentes",obligationType:"Reportes",period:"Registro Único de Proponentes",dueDate:"2026-04-09",year:"2026",status:"No iniciado",advisor:"",observation:"",attachments:[] },
+  { company:"Unión Temporal Tecnología EIP",nit:"901834909",city:"Bogotá",scope:"Nacional",taxType:"Actualización RUB",obligationType:"Reportes",period:"Actualización RUB",dueDate:"2026-05-04",year:"2026",status:"No iniciado",advisor:"",observation:"no hay cambio de beneficiarios finales",attachments:[] },
+];
+
+/**
+ * Importa las 44 obligaciones legales 2026 a tax_obligations.
+ * Es idempotente: verifica duplicados por company+taxType+dueDate antes de crear.
+ */
+export const importLegalObligations2026 = onCall(
+  { region: "us-central1", cors: true },
+  async () => {
+    const db = admin.firestore();
+    const col = db.collection("tax_obligations");
+    const ts = admin.firestore.FieldValue.serverTimestamp();
+
+    let created = 0;
+    let skipped = 0;
+
+    for (const obl of LEGAL_OBLIGATIONS_2026) {
+      const existing = await col
+        .where("company", "==", obl.company)
+        .where("taxType",  "==", obl.taxType)
+        .where("dueDate",  "==", obl.dueDate)
+        .limit(1)
+        .get();
+
+      if (!existing.empty) { skipped++; continue; }
+
+      await col.add({ ...obl, createdAt: ts, updatedAt: ts });
+      created++;
+    }
+
+    return { created, skipped, total: LEGAL_OBLIGATIONS_2026.length };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MIGRACIÓN: marcar emailStatus en asignaciones sin tracking
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const migrateEmailStatuses = onCall(
+  { region: "us-central1", cors: true },
+  async () => {
+    const snap = await admin.firestore().collection("questionnaire_assignments").get();
+
+    let markedSent    = 0;
+    let markedLegacy  = 0;
+    let alreadyTagged = 0;
+
+    const BATCH_SIZE = 400;
+    let batch = admin.firestore().batch();
+    let ops   = 0;
+
+    const flush = async () => {
+      if (ops > 0) { await batch.commit(); batch = admin.firestore().batch(); ops = 0; }
+    };
+
+    for (const doc of snap.docs) {
+      const data = doc.data();
+
+      // Ya tiene emailStatus → saltar
+      if (data.emailStatus && data.emailStatus !== "") { alreadyTagged++; continue; }
+
+      const newStatus = data.status === "completed" ? "sent" : "legacy";
+      batch.update(doc.ref, { emailStatus: newStatus });
+      ops++;
+
+      if (newStatus === "sent") markedSent++;
+      else markedLegacy++;
+
+      if (ops >= BATCH_SIZE) await flush();
+    }
+    await flush();
+
+    return { markedSent, markedLegacy, alreadyTagged, total: snap.size };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MENSAJE PERSONALIZADO — Contabilidad → usuarios internos
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const sendAccountingMessage = onCall(
+  { region: "us-central1", cors: true, secrets: [TENANT_ID_3, CLIENT_ID_3, CLIENT_SECRET_3, SENDER_EMAIL_3] },
+  async (request) => {
+    const { subject, body, recipients, attachments: atts = [] } = request.data || {};
+
+    if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0)
+      throw new HttpsError("invalid-argument", "subject, body y recipients son requeridos");
+
+    const token  = await getGraphTokenTriangulum();
+    const sender = SENDER_EMAIL_3.value().trim();
+    const year   = new Date().getFullYear();
+    const dateStr = new Date().toLocaleDateString("es-CO", {
+      weekday: "long", day: "2-digit", month: "long", year: "numeric",
+    });
+
+    const bodyHtml = body
+      .split("\n")
+      .filter((l: string) => l.trim())
+      .map((l: string) => `<p style="margin:0 0 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#374151;line-height:1.7">${l}</p>`)
+      .join("");
+
+    const isImage = (n: string) => /\.(jpe?g|png|gif|webp|svg)$/i.test(n);
+    const attRows = (atts as Array<{name:string;url:string}>).map(a => isImage(a.name) ? `
+      <tr><td style="padding:12px 0;border-bottom:1px solid #f3f4f6;text-align:center">
+        <img src="${a.url}" alt="${a.name}" style="max-width:100%;height:auto;border-radius:8px;border:1px solid #e5e7eb;display:block;margin:0 auto"/>
+      </td></tr>` : `
+      <tr><td style="padding:8px 0;border-bottom:1px solid #f3f4f6">
+        <span style="font-size:14px;margin-right:8px">&#x1F4CE;</span>
+        <span style="font-size:13px;color:#374151">${a.name}</span>
+      </td></tr>`).join("");
+    const attSection = atts.length ? `
+      <table width="100%" cellpadding="0" cellspacing="0"
+        style="background:#f8faff;border:1px solid #dbeafe;border-radius:10px;padding:4px 16px;margin:24px 0">
+        <tr><td style="padding:12px 0 4px">
+          <p style="margin:0;font-size:11px;color:#3b82f6;text-transform:uppercase;font-weight:700;letter-spacing:1px">Archivos adjuntos</p>
+        </td></tr>${attRows}
+      </table>` : "";
+
+    const firmaBlock = "";
+
+    const html = `<!DOCTYPE html>
+<html lang="es" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#f1f5f9">
+<tr><td align="center" style="padding:28px 16px">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" style="max-width:600px" cellpadding="0" cellspacing="0">
+
+  <!-- HEADER azul -->
+  <tr><td bgcolor="#1e3a5f" style="background-color:#1e3a5f;padding:32px 32px 24px;text-align:center">
+    <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto 16px">
+      <tr><td bgcolor="#2563eb" style="background-color:#2563eb;width:56px;height:56px;border-radius:14px;text-align:center;vertical-align:middle;font-size:28px;line-height:56px">&#x1F9FE;</td></tr>
+    </table>
+    <p style="margin:0 0 2px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:#93c5fd;letter-spacing:3px;text-transform:uppercase">Comunicado Oficial</p>
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:800;color:#ffffff;letter-spacing:1px">Equipo de Contabilidad</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:14px auto 0">
+      <tr><td bgcolor="#3b82f6" style="background-color:#3b82f6;height:2px;width:48px;font-size:0;line-height:0">&nbsp;</td></tr>
+    </table>
+    <p style="margin:12px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#93c5fd">${dateStr}</p>
+  </td></tr>
+
+  <!-- SUBJECT BAR -->
+  <tr><td bgcolor="#2563eb" style="background-color:#2563eb;padding:14px 32px">
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;color:#ffffff">${subject}</p>
+  </td></tr>
+
+  <!-- BODY -->
+  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:32px 32px 24px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">
+    <p style="margin:0 0 18px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#374151">
+      Estimado/a <strong>colaborador/a</strong>,
+    </p>
+    ${bodyHtml}
+    ${attSection}
+  </td></tr>
+
+  ${firmaBlock}
+
+  <!-- FOOTER -->
+  <tr><td bgcolor="#1e3a5f" style="background-color:#1e3a5f;padding:20px 32px;text-align:center">
+    <p style="margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:1px;color:#ffffff">Equipo de Contabilidad</p>
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#64748b">
+      Mensaje confidencial &middot; &copy; ${year} &middot; Todos los derechos reservados
+    </p>
+  </td></tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body></html>`;
+
+    const sendUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`;
+
+    await Promise.all(
+      (recipients as Array<{ name: string; email: string }>).map(r =>
+        fetch(sendUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: {
+              subject,
+              body: { contentType: "HTML", content: html },
+              toRecipients: [{ emailAddress: { address: r.email } }],
+            },
+            saveToSentItems: true,
+          }),
+        }).then(async res => {
+          if (!res.ok) {
+            const txt = await res.text();
+            console.error(`sendAccountingMessage: failed for ${r.email}:`, txt);
+          }
+        })
+      )
+    );
+
+    return { ok: true, sent: recipients.length };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARCAR LÍDERES GLOBALES (one-shot)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GLOBAL_LEADER_NAMES = [
+  "alvarez mendoza jhonattan eduardo",
+  "bermudez arias diana caterine",
+  "blanco lopez fredy",
+  "castillo tafur lina maria",
+  "cuellar rojas fabio andres",
+  "deaza rodriguez daniel mauricio",
+  "duque barahona julian francisco",
+  "franco toca alexander giovanny",
+  "garcia peña william fernando",
+  "gomez harold mauricio",
+  "gonzalez alayon oscar fernando",
+  "guio rodriguez lina janneth",
+  "gutierrez botero william roberto",
+  "laverde rodriguez leidy alejandra",
+  "linares trujillo darwin alexis",
+  "mogollon olave jainer jose",
+  "monroy ortiz diego edisson",
+  "murcia rodriguez carlos angel",
+  "oidor martinez diego fernando",
+  "ospino vargas jose manuel",
+  "otalvarez barbosa rodrigo alberto",
+  "paez rojas miguel hernando",
+  "pinto sandoval nelly mayreth",
+  "ruiz chirivi john freddy",
+  "sanchez moscoso fredy",
+  "valbuena martinez andres arturo",
+  "vargas tovar sonia fernanda",
+  "zapata chaux manuel salvador",
+];
+
+function normalizeNameFn(s: string): string {
+  return s.toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ").trim();
+}
+
+export const setGlobalLeaders = onCall(
+  { region: "us-central1", cors: true },
+  async () => {
+    const snap = await admin.firestore().collection("users").get();
+    let marked = 0;
+    let notFound: string[] = [...GLOBAL_LEADER_NAMES];
+    const batch = admin.firestore().batch();
+
+    for (const d of snap.docs) {
+      const name = normalizeNameFn(d.data().fullName || "");
+      const match = GLOBAL_LEADER_NAMES.includes(name);
+      if (match) {
+        batch.update(d.ref, { role: "lider", isGlobalLeader: true });
+        marked++;
+        notFound = notFound.filter(n => n !== name);
+      }
+    }
+
+    await batch.commit();
+    return { marked, notFound, total: snap.size };
   }
 );
