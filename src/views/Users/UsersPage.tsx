@@ -37,7 +37,7 @@ export const UsersPage = () => {
   const [selectedUserId,     setSelectedUserId]      = useState<string | null>(null);
   const [movementDialogOpen, setMovementDialogOpen]  = useState(false);
 
-  const { users, loading, importUsersFromExcel, refreshUsers } = useUsers();
+  const { users, loading, importProgress, importUsersFromExcel, refreshUsers } = useUsers();
 
   // ── Derived option lists ────────────────────────────────────────────────────
 
@@ -126,8 +126,12 @@ export const UsersPage = () => {
           ? `\n\nMovimientos generados:\n  Ingresos: ${results.movements.ingresos}\n  Retiros: ${results.movements.retiros}` : '';
         const projInfo = results.projectsInactivated != null
           ? `\n\nProyectos inactivados: ${results.projectsInactivated}` : '';
+        const dupInfo = results.duplicateRowsMerged
+          ? `\n  Filas duplicadas consolidadas: ${results.duplicateRowsMerged}` : '';
+        const forcedInfo = results.forcedExcolaboradores
+          ? `\n  Excolaboradores asegurados por lista fija: ${results.forcedExcolaboradores}` : '';
         const updatedCount = results.updated?.length || 0;
-        alert(`Importación completada:\n  Nuevos: ${results.success.length}\n  Actualizados: ${updatedCount}\n  Errores: ${results.errors.length}${movInfo}${projInfo}${results.errors.length > 0 ? '\n\nErrores:\n' + results.errors.slice(0, 10).map((e: any) => `- ${e.email}: ${e.error}`).join('\n') + (results.errors.length > 10 ? `\n  ... y ${results.errors.length - 10} más` : '') : ''}`);
+        alert(`Importación completada:\n  Nuevos: ${results.success.length}\n  Actualizados: ${updatedCount}\n  Errores: ${results.errors.length}${dupInfo}${forcedInfo}${movInfo}${projInfo}${results.errors.length > 0 ? '\n\nErrores:\n' + results.errors.slice(0, 10).map((e: any) => `- ${e.email}: ${e.error}`).join('\n') + (results.errors.length > 10 ? `\n  ... y ${results.errors.length - 10} más` : '') : ''}`);
       } catch {
         alert('Error al importar usuarios');
       }
@@ -345,6 +349,21 @@ export const UsersPage = () => {
             Nuevo Usuario
           </Button>
         </div>
+
+        {importProgress && (
+          <div className="rounded-lg border border-[#1F8FBF]/20 bg-[#1F8FBF]/5 px-3 py-2">
+            <div className="flex items-center justify-between gap-3 text-xs font-medium text-[#4A4A4A]">
+              <span>{importProgress.label}</span>
+              <span className="tabular-nums text-[#1F8FBF]">{importProgress.percent}%</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white border border-[#1F8FBF]/10">
+              <div
+                className="h-full rounded-full bg-[#1F8FBF] transition-all duration-300"
+                style={{ width: `${importProgress.percent}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Table */}

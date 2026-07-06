@@ -1,4 +1,4 @@
-import { collection, getDocs, addDoc, query, where, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, query, where, writeBatch, doc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { RotationMetrics, MonthlyData, FilterOptions, MovementRecord } from '../models/types/Analytics';
 
@@ -58,9 +58,13 @@ class AnalyticsService {
       const q = query(collection(db, this.movementsCollection), where('createdBy', '==', createdBy));
       const snapshot = await getDocs(q);
       let deleted = 0;
-      for (const d of snapshot.docs) {
-        await deleteDoc(doc(db, this.movementsCollection, d.id));
-        deleted++;
+
+      for (let i = 0; i < snapshot.docs.length; i += 450) {
+        const batch = writeBatch(db);
+        const chunk = snapshot.docs.slice(i, i + 450);
+        chunk.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        deleted += chunk.length;
       }
       console.log(`🗑️ ${deleted} movements eliminados (source: ${createdBy})`);
       return deleted;
@@ -74,6 +78,16 @@ class AnalyticsService {
   async registerMovementsBatch(movements: Omit<MovementRecord, 'id' | 'createdAt'>[]): Promise<{ ingresos: number; retiros: number }> {
     let ingresos = 0;
     let retiros = 0;
+
+    let batch = writeBatch(db);
+    let operationCount = 0;
+
+    const commitIfFull = async () => {
+      if (operationCount < 450) return;
+      await batch.commit();
+      batch = writeBatch(db);
+      operationCount = 0;
+    };
 
     for (const movement of movements) {
       try {
@@ -95,14 +109,19 @@ class AnalyticsService {
         if (movement.cost !== undefined && movement.cost !== null) cleanMovement.cost = movement.cost;
         if (movement.notes) cleanMovement.notes = movement.notes;
 
-        await addDoc(collection(db, this.movementsCollection), cleanMovement);
+        const ref = doc(collection(db, this.movementsCollection));
+        batch.set(ref, cleanMovement);
+        operationCount++;
 
         if (movement.type === 'ingreso') ingresos++;
         if (movement.type === 'retiro') retiros++;
+        await commitIfFull();
       } catch (error) {
         console.error('Error registrando movimiento en batch:', error);
       }
     }
+
+    if (operationCount > 0) await batch.commit();
 
     console.log(`✅ Movements batch: ${ingresos} ingresos, ${retiros} retiros`);
     return { ingresos, retiros };

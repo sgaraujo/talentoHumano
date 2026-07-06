@@ -4,6 +4,7 @@ import {
   getDocs,
   deleteDoc,
   doc,
+  writeBatch,
   query,
   where,
   updateDoc,
@@ -12,6 +13,32 @@ import {
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import type { User } from "../models/types/User";
+
+function normalizeEmail(email: any): string {
+  return String(email || "").trim().toLowerCase();
+}
+
+function mergePlainObjects(base: any, incoming: any): any {
+  if (!base || typeof base !== "object" || base instanceof Date) return incoming;
+  if (!incoming || typeof incoming !== "object" || incoming instanceof Date) return incoming;
+
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(incoming)) {
+    const current = merged[key];
+    merged[key] =
+      current &&
+      value &&
+      typeof current === "object" &&
+      typeof value === "object" &&
+      !(current instanceof Date) &&
+      !(value instanceof Date) &&
+      !Array.isArray(current) &&
+      !Array.isArray(value)
+        ? mergePlainObjects(current, value)
+        : value;
+  }
+  return merged;
+}
 
 class UserService {
   [x: string]: any;
@@ -181,6 +208,45 @@ class UserService {
     }
   }
 
+  async markEmailsAsExcolaborador(emails: string[]): Promise<number> {
+    const forced = new Set(emails.map(normalizeEmail).filter(Boolean));
+    if (forced.size === 0) return 0;
+
+    const snapshot = await getDocs(collection(db, this.collectionName));
+    let batch = writeBatch(db);
+    let operationCount = 0;
+    let updated = 0;
+
+    const commitIfFull = async () => {
+      if (operationCount < 450) return;
+      await batch.commit();
+      batch = writeBatch(db);
+      operationCount = 0;
+    };
+
+    for (const d of snapshot.docs) {
+      const data = d.data();
+      const matches = [
+        data.email,
+        data.location?.corporateEmail,
+        data.location?.personalEmail,
+      ].some((email) => forced.has(normalizeEmail(email)));
+
+      if (!matches || data.role === "excolaborador") continue;
+
+      batch.update(doc(db, this.collectionName, d.id), {
+        role: "excolaborador",
+        updatedAt: new Date(),
+      });
+      operationCount++;
+      updated++;
+      await commitIfFull();
+    }
+
+    if (operationCount > 0) await batch.commit();
+    return updated;
+  }
+
   /**
    * ✅ Batch recomendado:
    * Si NO tienes uid (porque esos usuarios aún no existen en Auth),
@@ -193,6 +259,45 @@ class UserService {
         success: [] as string[],
         updated: [] as string[],
         errors: [] as { email: string; error: string }[],
+      };
+
+      const existingUsersSnap = await getDocs(collection(db, this.collectionName));
+      const usersByDocument = new Map<string, any>();
+      const usersByEmail = new Map<string, any>();
+
+      const indexDoc = (snapshotDoc: any) => {
+        const data = snapshotDoc.data();
+        const documentNumber = String(data.personalData?.documentNumber || "").trim();
+        if (documentNumber && !usersByDocument.has(documentNumber)) {
+          usersByDocument.set(documentNumber, snapshotDoc);
+        }
+
+        [
+          data.email,
+          data.location?.corporateEmail,
+          data.location?.personalEmail,
+        ].forEach((email) => {
+          const normalized = normalizeEmail(email);
+          if (normalized && !usersByEmail.has(normalized)) {
+            usersByEmail.set(normalized, snapshotDoc);
+          }
+        });
+      };
+
+      existingUsersSnap.docs.forEach(indexDoc);
+
+      const batches: any[] = [];
+      let batch = writeBatch(db);
+      let operationCount = 0;
+
+      const queueWrite = (write: (currentBatch: ReturnType<typeof writeBatch>) => void) => {
+        write(batch);
+        operationCount++;
+        if (operationCount >= 450) {
+          batches.push(batch);
+          batch = writeBatch(db);
+          operationCount = 0;
+        }
       };
 
       for (const userData of users) {
@@ -224,37 +329,71 @@ class UserService {
           const cedula = userData.personalData?.documentNumber;
           let existing: any = null;
 
-          if (cedula) {
-            const qCedula = query(
-              collection(db, this.collectionName),
-              where("personalData.documentNumber", "==", cedula)
-            );
-            const snapCedula = await getDocs(qCedula);
-            if (!snapCedula.empty) existing = snapCedula.docs[0];
-          }
-
-          if (!existing && userData.email) {
-            const qEmail = query(
-              collection(db, this.collectionName),
-              where("email", "==", userData.email)
-            );
-            const snapEmail = await getDocs(qEmail);
-            if (!snapEmail.empty) existing = snapEmail.docs[0];
-          }
+          if (cedula) existing = usersByDocument.get(String(cedula).trim()) || null;
+          if (!existing && userData.email) existing = usersByEmail.get(normalizeEmail(userData.email)) || null;
 
           if (existing) {
+            const existingData = existing.data();
+            const mergedUserDoc = {
+              ...userDoc,
+              personalData: userDoc.personalData
+                ? mergePlainObjects(existingData.personalData, userDoc.personalData)
+                : existingData.personalData,
+              location: userDoc.location
+                ? mergePlainObjects(existingData.location, userDoc.location)
+                : existingData.location,
+              contractInfo: userDoc.contractInfo
+                ? mergePlainObjects(existingData.contractInfo, userDoc.contractInfo)
+                : existingData.contractInfo,
+              salaryInfo: userDoc.salaryInfo
+                ? mergePlainObjects(existingData.salaryInfo, userDoc.salaryInfo)
+                : existingData.salaryInfo,
+              socialSecurity: userDoc.socialSecurity
+                ? mergePlainObjects(existingData.socialSecurity, userDoc.socialSecurity)
+                : existingData.socialSecurity,
+              bankingInfo: userDoc.bankingInfo
+                ? mergePlainObjects(existingData.bankingInfo, userDoc.bankingInfo)
+                : existingData.bankingInfo,
+              administrativeRecord: userDoc.administrativeRecord
+                ? mergePlainObjects(existingData.administrativeRecord, userDoc.administrativeRecord)
+                : existingData.administrativeRecord,
+              professionalProfile: userDoc.professionalProfile
+                ? mergePlainObjects(existingData.professionalProfile, userDoc.professionalProfile)
+                : existingData.professionalProfile,
+            };
+
             // Actualizar el usuario existente con los datos completos
-            await updateDoc(doc(db, this.collectionName, existing.id), userDoc);
+            queueWrite((currentBatch) => {
+              currentBatch.update(doc(db, this.collectionName, existing.id), mergedUserDoc);
+            });
             results.updated.push(userData.email);
+
+            indexDoc({
+              id: existing.id,
+              data: () => ({ ...existingData, ...mergedUserDoc }),
+            });
           } else {
             // Crear nuevo
             userDoc.createdAt = new Date();
-            await addDoc(collection(db, this.collectionName), userDoc);
+            const createdRef = doc(collection(db, this.collectionName));
+            queueWrite((currentBatch) => {
+              currentBatch.set(createdRef, userDoc);
+            });
             results.success.push(userData.email);
+
+            indexDoc({
+              id: createdRef.id,
+              data: () => userDoc,
+            });
           }
         } catch (error: any) {
           results.errors.push({ email: userData.email, error: error.message });
         }
+      }
+
+      if (operationCount > 0) batches.push(batch);
+      for (const pendingBatch of batches) {
+        await pendingBatch.commit();
       }
 
       return results;

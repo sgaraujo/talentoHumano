@@ -1,6 +1,6 @@
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
-  doc, query, where, serverTimestamp,
+  doc, query, where, serverTimestamp, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { Project } from '../models/types/Project';
@@ -115,6 +115,21 @@ class ProjectService {
     let inactivated = 0;
     let reactivated = 0;
 
+    let batch = writeBatch(db);
+    let operationCount = 0;
+    const queueProjectUpdate = async (projectId: string, status: 'activo' | 'inactivo') => {
+      batch.update(doc(db, this.col, projectId), {
+        status,
+        updatedAt: serverTimestamp(),
+      });
+      operationCount++;
+      if (operationCount >= 450) {
+        await batch.commit();
+        batch = writeBatch(db);
+        operationCount = 0;
+      }
+    };
+
     for (const project of allProjects) {
       const roles = projectRoles.get(project.id) || [];
       if (roles.length === 0) continue; // sin miembros registrados → no tocar
@@ -123,13 +138,15 @@ class ProjectService {
       const allExcol   = !hasActive;
 
       if (allExcol && project.status === 'activo') {
-        await this.update(project.id, { status: 'inactivo' });
+        await queueProjectUpdate(project.id, 'inactivo');
         inactivated++;
       } else if (hasActive && project.status === 'inactivo') {
-        await this.update(project.id, { status: 'activo' });
+        await queueProjectUpdate(project.id, 'activo');
         reactivated++;
       }
     }
+
+    if (operationCount > 0) await batch.commit();
 
     return { inactivated, reactivated };
   }

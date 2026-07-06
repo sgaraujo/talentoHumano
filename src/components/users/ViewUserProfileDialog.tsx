@@ -56,10 +56,18 @@ const fmt = (v: any): string => {
   return String(v);
 };
 
+const getTimestampSeconds = (v: any): number | null => {
+  if (typeof v?._seconds === 'number') return v._seconds;
+  if (typeof v?.seconds === 'number') return v.seconds;
+  return null;
+};
+
 const fmtDate = (date: any): string => {
   if (!date) return '—';
   let d: Date;
+  const timestampSeconds = getTimestampSeconds(date);
   if (date?.toDate) d = date.toDate();
+  else if (timestampSeconds !== null) d = new Date(timestampSeconds * 1000);
   else if (date instanceof Date) d = date;
   else if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date)) {
     const [y, m, day] = date.split('-').map(Number);
@@ -77,6 +85,8 @@ const fmtMoney = (v: any): string => {
 const toDateInput = (v: any): string => {
   if (!v) return '';
   if (v?.toDate) return v.toDate().toISOString().slice(0, 10);
+  const timestampSeconds = getTimestampSeconds(v);
+  if (timestampSeconds !== null) return new Date(timestampSeconds * 1000).toISOString().slice(0, 10);
   if (v instanceof Date) return v.toISOString().slice(0, 10);
   if (typeof v === 'string') return v.slice(0, 10);
   return '';

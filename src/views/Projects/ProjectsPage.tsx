@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,7 +13,7 @@ import {
 import {
   Loader2, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
   Users, UserMinus, FolderKanban, Crown, X, Check, Search,
-  Building2, MapPin,
+  Building2, MapPin, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { projectService } from '@/services/projectService';
@@ -307,6 +308,33 @@ export const ProjectsPage = () => {
     }
   };
 
+  const handleExport = () => {
+    const fmtDate = (d: any) => {
+      if (!d) return '';
+      try {
+        const dt = d?.toDate ? d.toDate() : new Date(d);
+        return dt.toLocaleDateString('es-CO');
+      } catch { return ''; }
+    };
+    const rows = filtered.map(p => ({
+      'Proyecto':     p.name,
+      'Empresa':      getCompanyName(p),
+      'Sede':         p.sede || '',
+      'Líder':        p.leaderName || '',
+      'Área':         p.area || '',
+      'Estado':       p.status,
+      'Prioridad':    p.priority,
+      'Headcount':    p.headcount ?? '',
+      'Presupuesto':  p.budget ?? '',
+      'Fecha inicio': fmtDate(p.startDate),
+      'Fecha fin':    fmtDate(p.endDate),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Proyectos');
+    XLSX.writeFile(wb, `proyectos_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
@@ -317,9 +345,14 @@ export const ProjectsPage = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Proyectos</h1>
           <p className="text-[#4A4A4A]/70 mt-1 text-sm">Gestión de proyectos por empresa</p>
         </div>
-        <Button onClick={openCreate} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
-          <Plus className="w-4 h-4 mr-2" /> Nuevo Proyecto
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleExport} variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+            <Download className="w-4 h-4 mr-2" /> Exportar
+          </Button>
+          <Button onClick={openCreate} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
+            <Plus className="w-4 h-4 mr-2" /> Nuevo Proyecto
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

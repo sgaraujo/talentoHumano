@@ -9,10 +9,18 @@
     }
   ],
   "compilerOptions": {
-    "lib": ["ES2015", "DOM", "ES2021"],
+    "lib": [
+      "ES2015",
+      "DOM",
+      "ES2021"
+    ],
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
-  }
+  },
+  "extends": "expo/tsconfig.base"
 }

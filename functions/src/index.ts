@@ -1087,25 +1087,76 @@ interface AlertRecipient {
   obligations: Array<TaxObligation & { daysLeft: number; threshold: number }>;
 }
 
-async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: number; skipped: number }> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().slice(0, 10);
+// Normaliza nombres de tipos de impuesto para comparación — evita duplicados por nombre distinto
+const TAX_TYPE_ALERT_ALIASES: Record<string, string> = {
+  "retención en la fuente":  "retención en la fuente",
+  "retencion en la fuente":  "retención en la fuente",
+  "retención de ica":        "reteica",
+  "retencion de ica":        "reteica",
+  "reteica":                 "reteica",
+  "impuesto a las ventas":   "iva",
+  "iva bimestral":           "iva",
+  "iva cuatrimestral":       "iva",
+};
+function normalizeTaxTypeAlert(t: string): string {
+  const k = (t ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  // Buscar alias sin tildes también
+  const noAccent = k.replace(/[áéíóú]/g, (c) => ({á:"a",é:"e",í:"i",ó:"o",ú:"u"}[c] ?? c));
+  return TAX_TYPE_ALERT_ALIASES[k] ?? TAX_TYPE_ALERT_ALIASES[noAccent] ?? k;
+}
 
-  // Load all non-completed obligations from Firestore
+async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promise<{ sent: number; skipped: number }> {
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+  const today = new Date(todayStr + "T00:00:00"); // medianoche Colombia para calcular días
+
+  // Única lectura de tax_obligations
   const snap = await db.collection("tax_obligations").get();
-  const firestoreObligations: TaxObligation[] = snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as TaxObligation))
-    .filter(o => !COMPLETED_STATUSES.has(o.status));
+  const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TaxObligation));
 
-  // Index completed obligations by nit+taxType+dueDate to skip calendar reminders for them
-  const completedSnap = await db.collection("tax_obligations").get();
-  const completedKeys = new Set(
-    completedSnap.docs
-      .map(d => d.data())
-      .filter(d => COMPLETED_STATUSES.has(d.status))
-      .map(d => `${d.nit}__${(d.taxType as string).toLowerCase().trim()}__${d.dueDate}`)
-  );
+  // Helpers de normalización para dedup robusto
+  const cNit  = (n: string) => (n ?? "").replace(/[^0-9]/g, "");
+  const cComp = (s: string) =>
+    (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[.\-,]/g, "").replace(/\s+/g, " ").trim();
+  // Genera claves por NIT (limpio) y por nombre de empresa como fallback
+  const oblKeys = (nit: string, company: string, taxType: string, dueDate: string): string[] => {
+    const suffix = `${normalizeTaxTypeAlert(taxType)}__${dueDate}`;
+    const nitC = cNit(nit);
+    const keys = [`name:${cComp(company)}__${suffix}`];
+    if (nitC) keys.push(`nit:${nitC}__${suffix}`);
+    return keys;
+  };
+  const hasAny = (set: Set<string>, keys: string[]) => keys.some(k => set.has(k));
+
+  const statusPriority = (s: string) => {
+    if (s === "Pagado")          return 5;
+    if (s === "Informe Enviado") return 4;
+    if (s === "Presentado")      return 3;
+    if (s === "Revisado")        return 2;
+    if (s === "No iniciado")     return 1;
+    return 0;
+  };
+
+  // Deduplicar — busca coincidencia por NIT limpio O nombre de empresa
+  const dedupMap = new Map<string, TaxObligation>();
+  for (const obl of allDocs.filter(o => !COMPLETED_STATUSES.has(o.status))) {
+    const keys = oblKeys(obl.nit, obl.company, obl.taxType, obl.dueDate);
+    const existingKey = keys.find(k => dedupMap.has(k));
+    const existing = existingKey ? dedupMap.get(existingKey) : undefined;
+    if (!existing || statusPriority(obl.status ?? "") > statusPriority(existing.status ?? "")) {
+      keys.forEach(k => dedupMap.set(k, obl));
+    }
+  }
+  const firestoreObligations = [...new Set(dedupMap.values())];
+
+  // Índice de TODAS las obligaciones Firestore — por NIT y por nombre de empresa
+  const firestoreKeys = new Set<string>();
+  const completedKeys = new Set<string>();
+  for (const o of allDocs) {
+    oblKeys(o.nit, o.company, o.taxType, o.dueDate).forEach(k => {
+      firestoreKeys.add(k);
+      if (COMPLETED_STATUSES.has(o.status)) completedKeys.add(k);
+    });
+  }
 
   // Load all contabilidad + admin users to always notify them
   const rolesSnap = await db.collection("platform_roles")
@@ -1118,8 +1169,8 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
 
   // Check which alerts were already sent today to avoid duplicates
   const logRef = db.collection("tax_alert_log");
-  const todayLogSnap = await logRef.where("sentDate", "==", todayStr).get();
-  const alreadySent = new Set(todayLogSnap.docs.map(d => d.data().key as string));
+  const todayLogSnap = force ? { docs: [] } : await logRef.where("sentDate", "==", todayStr).get();
+  const alreadySent = new Set((todayLogSnap as any).docs.map((d: any) => d.data().key as string));
 
   // Group obligations by recipient
   const recipientMap = new Map<string, AlertRecipient>();
@@ -1227,9 +1278,9 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
       const daysLeft = Math.round((due.getTime() - today.getTime()) / 86_400_000);
       if (!ALERT_THRESHOLDS.includes(daysLeft)) continue;
 
-      // Skip if already registered with a completed status in Firestore
-      const completedKey = `${nit}__${obl.taxType.toLowerCase().trim()}__${obl.dueDate}`;
-      if (completedKeys.has(completedKey)) { skipped++; continue; }
+      // Saltar si ya existe en Firestore (completada o pendiente) — evita duplicados
+      const autoKeys = oblKeys(nit, comp.name, obl.taxType, obl.dueDate);
+      if (hasAny(firestoreKeys, autoKeys) || hasAny(completedKeys, autoKeys)) { skipped++; continue; }
 
       const alertKey = `cal__${nit}__${obl.taxType}__${obl.dueDate}__${daysLeft}__${todayStr}`;
       if (alreadySent.has(alertKey)) { skipped++; continue; }
@@ -1246,6 +1297,149 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
 
   if (recipientMap.size === 0) return { sent: 0, skipped };
 
+  // ── Helpers de ordenación ────────────────────────────────────────────────
+  const COMPANY_ORDER = [
+    "inteegra",
+    "netcol",
+    "inversiones eon",
+    "itac colombia",
+    "consorcio scia",
+    "triangulum",
+    "netia",
+    "logistica empresarial",
+    "leti",
+    "newstar",
+    "newforce",
+    "union temporal tecnologia",
+    "union temporal fomento",
+    "union temporal internuqui",
+    "union temporal itac",
+    "plex de colombia",
+    "red empresarial",
+  ];
+  const normalizeCompany = (s: string) =>
+    s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+  const companyIdx = (name: string) => {
+    const n = normalizeCompany(name);
+    const idx = COMPANY_ORDER.findIndex(c => n.includes(c) || c.includes(n));
+    return idx === -1 ? COMPANY_ORDER.length : idx;
+  };
+
+  // ── Estado por empresa — agrupa variantes de nombre por índice canónico ──
+  const COMPANY_CANONICAL: Record<number, string> = {
+    0: "Inteegra SAS BIC", 1: "Netcol Ingeniería SAS BIC", 2: "Inversiones EON SAS",
+    3: "ITAC Colombia SAS", 4: "Consorcio SCIA Netcol", 5: "Triangulum BPO SAS",
+    6: "Netia SAS", 7: "Logística Empresarial de Transporte", 8: "LETI SAS",
+    9: "Newstar SAS", 10: "Newforce SAS", 11: "Unión Temporal Tecnología EIP",
+    12: "Unión Temporal Fomento TIC", 13: "Unión Temporal Internuqui",
+    14: "Unión Temporal Itac Colombia", 15: "Plex de Colombia SAS",
+    16: "Red Empresarial Americana SAS",
+  };
+
+  // Mapa: índice canónico → NIT limpio (para rellenar NITs vacíos en entradas manuales)
+  const canonicalNitMap = new Map<number, string>();
+  for (const d of companiesSnap.docs) {
+    const data = d.data();
+    const nitClean = cNit(data.nit ?? "");
+    if (!nitClean) continue;
+    const idx = companyIdx(data.name ?? "");
+    if (!canonicalNitMap.has(idx)) canonicalNitMap.set(idx, nitClean);
+  }
+
+  type CompanyStatus = { idx: number; name: string; overdue: number; urgentNoInit: number };
+  const companyStatusByIdx = new Map<string, CompanyStatus>();
+
+  // Obligaciones "gestionadas": no se cuentan como vencidas
+  const GRID_DONE = new Set(["Pagado", "No aplica", "Presentado", "Informe Enviado"]);
+  // Ventana de análisis: solo los próximos 60 días y los últimos 5 días
+  // Ignora obligaciones más antiguas que eso (evita ruido de meses cerrados)
+  const gridFrom = new Date(today); gridFrom.setDate(gridFrom.getDate() - 5);
+  const gridFromStr = gridFrom.toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+  const gridTo = new Date(today); gridTo.setDate(gridTo.getDate() + 60);
+  const gridToStr = gridTo.toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+
+  for (const obl of allDocs) {
+    if (!obl.company || GRID_DONE.has(obl.status ?? "")) continue;
+    if (!obl.dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(obl.dueDate)) continue;
+    if (obl.dueDate < gridFromStr || obl.dueDate > gridToStr) continue;
+
+    const idx = companyIdx(obl.company);
+    const key = idx < COMPANY_ORDER.length ? `idx_${idx}` : normalizeCompany(obl.company);
+    const name = COMPANY_CANONICAL[idx] ?? obl.company;
+
+    if (!companyStatusByIdx.has(key)) {
+      companyStatusByIdx.set(key, { idx, name, overdue: 0, urgentNoInit: 0 });
+    }
+    const cs = companyStatusByIdx.get(key)!;
+    const due = new Date(obl.dueDate + "T00:00:00");
+    const dl = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+
+    if (dl < 0) {
+      cs.overdue++;
+    } else if (dl <= 7 && (!obl.status || obl.status === "No iniciado")) {
+      cs.urgentNoInit++;
+    }
+  }
+
+  // Grid HTML de estado por empresa (3 columnas)
+  const sortedForStatus = Array.from(companyStatusByIdx.values())
+    .sort((a, b) => a.idx - b.idx);
+
+  const statusRows: string[] = [];
+  for (let i = 0; i < sortedForStatus.length; i += 3) {
+    const triple = sortedForStatus.slice(i, i + 3);
+    while (triple.length < 3) triple.push({ idx: 99, name: "", overdue: 0, urgentNoInit: 0 });
+    const cells = triple.map(cs => {
+      if (!cs.name) return `<td width="33%" style="padding:4px">&nbsp;</td>`;
+      let emoji: string, statusTxt: string, bg: string, fg: string, border: string;
+      if (cs.overdue > 0) {
+        emoji = "🔴"; bg = "#fff0f0"; fg = "#b91c1c"; border = "#fca5a5";
+        statusTxt = `${cs.overdue} vencida${cs.overdue !== 1 ? "s" : ""} sin gestionar`;
+      } else if (cs.urgentNoInit > 0) {
+        emoji = "🟡"; bg = "#fffbeb"; fg = "#b45309"; border = "#fcd34d";
+        statusTxt = `${cs.urgentNoInit} urgente${cs.urgentNoInit !== 1 ? "s" : ""} sin iniciar`;
+      } else {
+        emoji = "🟢"; bg = "#f0fdf4"; fg = "#15803d"; border = "#86efac";
+        statusTxt = "Al d&#xED;a";
+      }
+      return `<td width="33%" style="padding:4px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+          <tr><td bgcolor="${bg}" style="background-color:${bg};padding:9px 11px;border:1px solid ${border}">
+            <p style="margin:0 0 2px;font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;color:#374151;white-space:nowrap;overflow:hidden">${cs.name}</p>
+            <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;color:${fg}">${emoji} ${statusTxt}</p>
+          </td></tr>
+        </table>
+      </td>`;
+    });
+    statusRows.push(`<tr>${cells.join("")}</tr>`);
+  }
+  const companyStatusGrid = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${statusRows.join("")}</table>`;
+
+  // ── Normalizar nombres canónicos y dedup final ────────────────────────────
+  // Evita que "NETCOL INGENIERÍA S.A.S BIC" y "Netcol Ingeniería SAS BIC"
+  // aparezcan como dos empresas distintas en el correo.
+  for (const rec of recipientMap.values()) {
+    // Convertir al nombre canónico y rellenar NIT vacío desde el mapa de empresas
+    rec.obligations = rec.obligations.map(o => {
+      const idx = companyIdx(o.company);
+      return {
+        ...o,
+        company: COMPANY_CANONICAL[idx] ?? o.company,
+        nit: cNit(o.nit) || canonicalNitMap.get(idx) || o.nit,
+      };
+    });
+    // Dedup: quedarse con el de mayor prioridad de estado por empresa+taxType+fecha
+    const bestMap = new Map<string, typeof rec.obligations[0]>();
+    for (const o of rec.obligations) {
+      const key = `${o.company}__${normalizeTaxTypeAlert(o.taxType)}__${o.dueDate}`;
+      const existing = bestMap.get(key);
+      if (!existing || statusPriority(o.status ?? "") > statusPriority(existing.status ?? "")) {
+        bestMap.set(key, o);
+      }
+    }
+    rec.obligations = [...bestMap.values()];
+  }
+
   // Send emails
   const graphToken = await getGraphTokenInteegra();
   const sender = SENDER_EMAIL_2.value().trim();
@@ -1254,78 +1448,54 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
   for (const recipient of recipientMap.values()) {
     if (recipient.obligations.length === 0) continue;
 
-    // Orden oficial de empresas
-    const COMPANY_ORDER = [
-      "inteegra",
-      "netcol",
-      "inversiones eon",
-      "itac colombia",
-      "consorcio scia",
-      "triangulum",
-      "netia",
-      "logistica empresarial",
-      "leti",
-      "newstar",
-      "newforce",
-      "union temporal tecnologia",
-      "union temporal fomento",
-      "union temporal internuqui",
-      "union temporal itac",
-      "plex de colombia",
-      "red empresarial",
-    ];
-    const normalizeCompany = (s: string) =>
-      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
-    const companyIdx = (name: string) => {
-      const n = normalizeCompany(name);
-      const idx = COMPANY_ORDER.findIndex(c => n.includes(c) || c.includes(n));
-      return idx === -1 ? COMPANY_ORDER.length : idx;
-    };
-
-    // Sort: primero por empresa (orden oficial), luego por días asc
+    // Sort: primero por urgencia (días asc), luego por empresa, luego por tipo
     recipient.obligations.sort((a, b) => {
+      if (a.daysLeft !== b.daysLeft) return a.daysLeft - b.daysLeft;
       const cmp = companyIdx(a.company) - companyIdx(b.company);
-      return cmp !== 0 ? cmp : a.daysLeft - b.daysLeft;
+      return cmp !== 0 ? cmp : a.taxType.localeCompare(b.taxType, "es");
     });
 
     const rows = recipient.obligations.map(o => {
       const urgencyColor = o.daysLeft <= 1 ? "#dc2626" : o.daysLeft <= 3 ? "#ea580c" : o.daysLeft <= 7 ? "#d97706" : "#1d4ed8";
       const urgencyBg    = o.daysLeft <= 1 ? "#fef2f2" : o.daysLeft <= 3 ? "#fff7ed" : o.daysLeft <= 7 ? "#fffbeb" : "#eff6ff";
       const daysLabel    = o.daysLeft === 0 ? "HOY" : o.daysLeft === 1 ? "Ma&#xF1;ana" : `${o.daysLeft} d&#xED;as`;
+      const statusColor  = o.status === "No iniciado" ? "#6b7280" : o.status === "Revisado" ? "#3b82f6" : o.status === "Informe Enviado" ? "#0d9488" : o.status === "Presentado" ? "#7c3aed" : "#16a34a";
       return `
         <tr>
-          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1f2937;font-weight:600;border-bottom:1px solid #f3f4f6">${o.company}</td>
-          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6">${o.taxType}</td>
-          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6">${o.period}</td>
-          <td style="padding:11px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap">${o.dueDate.split("-").reverse().join("/")}</td>
-          <td align="center" bgcolor="${urgencyBg}" style="padding:11px 14px;background-color:${urgencyBg};border-bottom:1px solid #f3f4f6">
-            <span style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:${urgencyColor}">${daysLabel}</span>
+          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1f2937;font-weight:600;border-bottom:1px solid #f3f4f6">${o.company}${cNit(o.nit) ? `<br/><span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:400;color:#9ca3af">NIT: ${cNit(o.nit)}</span>` : ""}</td>
+          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;border-bottom:1px solid #f3f4f6">${o.taxType}</td>
+          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #f3f4f6">${o.period}</td>
+          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap">${o.dueDate.split("-").reverse().join("/")}</td>
+          <td align="center" style="padding:10px 12px;border-bottom:1px solid #f3f4f6">
+            <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;color:${statusColor}">${o.status || "Auto"}</span>
+          </td>
+          <td align="center" bgcolor="${urgencyBg}" style="padding:10px 12px;background-color:${urgencyBg};border-bottom:1px solid #f3f4f6;white-space:nowrap">
+            <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${urgencyColor}">${daysLabel}</span>
           </td>
         </tr>`;
     }).join("");
 
     const year = new Date().getFullYear();
-    const dateStr = new Date().toLocaleDateString("es-CO",{weekday:"long",day:"2-digit",month:"long",year:"numeric"});
+    const dateStr = new Date().toLocaleDateString("es-CO", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+    const urgentCount = recipient.obligations.filter(o => o.daysLeft <= 1).length;
     const html = `<!DOCTYPE html>
 <html lang="es" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<!--[if mso]>
-<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
-<![endif]-->
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
 </head>
 <body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#f3f4f6">
 <tr><td align="center" style="padding:24px 16px">
-<!--[if mso]><table role="presentation" width="620" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
-<table role="presentation" width="100%" style="max-width:620px" cellpadding="0" cellspacing="0">
+<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" style="max-width:640px" cellpadding="0" cellspacing="0">
 
   <!-- HEADER -->
   <tr><td bgcolor="#006C2F" style="background-color:#006C2F;padding:28px 32px;text-align:center">
     <p style="margin:0 0 2px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:#7BCB6A;letter-spacing:3px;text-transform:uppercase">CALENDARIO TRIBUTARIO</p>
     <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:26px;font-weight:800;color:#ffffff;letter-spacing:3px">INTEEGRADOS</p>
-    <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 0">
+    <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:10px auto 0">
       <tr><td bgcolor="#7BCB6A" style="background-color:#7BCB6A;height:3px;width:40px;font-size:0;line-height:0">&nbsp;</td></tr>
     </table>
     <p style="margin:14px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;color:#ffffff">Alertas de Vencimiento</p>
@@ -1335,23 +1505,31 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
   <!-- GREETING -->
   <tr><td bgcolor="#f0fdf4" style="background-color:#f0fdf4;padding:14px 32px;border-left:1px solid #d1fae5;border-right:1px solid #d1fae5">
     <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#166534">
-      Hola <strong>${recipient.name}</strong>, tienes <strong>${recipient.obligations.length}</strong> obligaci${recipient.obligations.length !== 1 ? "ones tributarias pr&#xF3;ximas" : "&#xF3;n tributaria pr&#xF3;xima"} a vencer:
+      Hola <strong>${recipient.name}</strong> &mdash; ${urgentCount > 0 ? `<strong style="color:#dc2626">${urgentCount} vence${urgentCount !== 1 ? "n" : ""} hoy o ma&#xF1;ana.</strong> ` : ""}Hay <strong>${recipient.obligations.length}</strong> obligaci${recipient.obligations.length !== 1 ? "ones tributarias pr&#xF3;ximas" : "&#xF3;n tributaria pr&#xF3;xima"} a vencer.
     </p>
   </td></tr>
 
-  <!-- TABLE WRAPPER -->
-  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
+  <!-- ══ SECCIÓN 1: VENCIMIENTOS ══ -->
+  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px 8px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
+    <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#128197; Vencimientos pr&#xF3;ximos</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb">
       <tr bgcolor="#f9fafb" style="background-color:#f9fafb">
-        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Empresa</th>
-        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Obligaci&#xF3;n</th>
-        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Per&#xED;odo</th>
-        <th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Vence</th>
-        <th align="center" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">D&#xED;as</th>
+        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Empresa</th>
+        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Obligaci&#xF3;n</th>
+        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Per&#xED;odo</th>
+        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Vence</th>
+        <th align="center" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Estado</th>
+        <th align="center" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">D&#xED;as</th>
       </tr>
       ${rows}
     </table>
-    <p style="margin:18px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9ca3af;text-align:center">
+  </td></tr>
+
+  <!-- ══ SECCIÓN 2: ESTADO POR EMPRESA ══ -->
+  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;border-top:1px solid #f3f4f6">
+    <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#127970; Estado por empresa</p>
+    ${companyStatusGrid}
+    <p style="margin:18px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#9ca3af;text-align:center">
       Ingresa a la plataforma para actualizar el estado de cada obligaci&#xF3;n.
     </p>
   </td></tr>
@@ -1376,7 +1554,11 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
         headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           message: {
-            subject: `⚠️ ${recipient.obligations.length} obligación${recipient.obligations.length !== 1 ? "es" : ""} tributaria${recipient.obligations.length !== 1 ? "s" : ""} próxima${recipient.obligations.length !== 1 ? "s" : ""} a vencer`,
+            subject: (() => {
+              const urgent = recipient.obligations.filter(o => o.daysLeft <= 1).length;
+              const prefix = urgent > 0 ? `🔴 ${urgent} vence${urgent > 1 ? "n" : ""} hoy/mañana — ` : "⚠️ ";
+              return `${prefix}${recipient.obligations.length} obligación${recipient.obligations.length !== 1 ? "es" : ""} tributaria${recipient.obligations.length !== 1 ? "s" : ""} próxima${recipient.obligations.length !== 1 ? "s" : ""} a vencer`;
+            })(),
             body: { contentType: "HTML", content: html },
             toRecipients: [{ emailAddress: { address: recipient.email } }],
           },
@@ -1396,7 +1578,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore): Promise<{ sent: numb
  */
 export const scheduledTaxAlerts = onSchedule(
   {
-    schedule: "0 10 * * *",
+    schedule: "0 9 * * *",
     timeZone: "America/Bogota",
     region: "us-central1",
     secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
@@ -1416,9 +1598,68 @@ export const triggerTaxAlerts = onCall(
     cors: true,
     secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
-  async () => {
-    const result = await runTaxAlerts(admin.firestore());
+  async (request) => {
+    const force = request.data?.force === true;
+    const result = await runTaxAlerts(admin.firestore(), force);
     return result;
+  }
+);
+
+/**
+ * Callable: find obligations duplicated between Firestore and auto-calendar
+ */
+export const findDuplicateAlerts = onCall(
+  { region: "us-central1", cors: true },
+  async () => {
+    const db = admin.firestore();
+    const snap = await db.collection("tax_obligations").get();
+    const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TaxObligation));
+
+    // Índice de todas las obligaciones Firestore
+    const firestoreIndex = new Map<string, TaxObligation>();
+    for (const o of allDocs) {
+      const key = `${o.nit}__${o.taxType.toLowerCase().trim()}__${o.dueDate}`;
+      firestoreIndex.set(key, o);
+    }
+
+    // Generar obligaciones del calendario auto
+    const companiesSnap = await db.collection("companies")
+      .where("active", "==", true)
+      .where("activeContabilidad", "==", true)
+      .get();
+
+    const duplicates: Array<{
+      key: string; company: string; nit: string;
+      taxType: string; dueDate: string;
+      firestoreStatus: string; firestoreId: string;
+    }> = [];
+
+    for (const compDoc of companiesSnap.docs) {
+      const comp = compDoc.data();
+      const nit: string = comp.nit || "";
+      if (!nit) continue;
+      const hidden = new Set<string>(comp.hiddenTaxTypes ?? []);
+      const dianObls = getDianObligationsByNit(nit).filter((o: any) => !hidden.has(o.taxType));
+      const bogotaObls = ALL_BOGOTA_2026.filter((o: any) => !hidden.has(o.taxType));
+
+      for (const calObl of [...dianObls, ...bogotaObls]) {
+        const key = `${nit}__${(calObl.taxType as string).toLowerCase().trim()}__${calObl.dueDate}`;
+        if (firestoreIndex.has(key)) {
+          const fs = firestoreIndex.get(key)!;
+          duplicates.push({
+            key,
+            company: comp.name || nit,
+            nit,
+            taxType: calObl.taxType as string,
+            dueDate: calObl.dueDate as string,
+            firestoreStatus: fs.status,
+            firestoreId: fs.id,
+          });
+        }
+      }
+    }
+
+    return { total: duplicates.length, duplicates };
   }
 );
 
@@ -1871,6 +2112,290 @@ export const notifyTaxStatusChange = onCall(
 
     return { ok: true };
   }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIGEST DIARIO — Resumen 5 PM de cambios en obligaciones tributarias
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface TaxDailyLogEntry {
+  date: string;
+  changedBy: string;
+  changedAt?: admin.firestore.Timestamp;
+  company: string;
+  nit?: string;
+  taxType: string;
+  period?: string;
+  dueDate?: string;
+  newStatus: string;
+  projected?: number | null;
+  obligationId?: string;
+}
+
+async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: number; entries: number }> {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+
+  // Solo filtra por fecha — orderBy en campo distinto requeriría índice compuesto
+  const logSnap = await db.collection("tax_daily_log")
+    .where("date", "==", today)
+    .get();
+
+  if (logSnap.empty) return { sent: 0, entries: 0 };
+
+  // Ordenar en memoria por hora de cambio
+  const entries: TaxDailyLogEntry[] = logSnap.docs
+    .map(d => d.data() as TaxDailyLogEntry)
+    .sort((a, b) => (a.changedAt?.toMillis() ?? 0) - (b.changedAt?.toMillis() ?? 0));
+
+  // Agrupar por persona
+  const byPerson = new Map<string, TaxDailyLogEntry[]>();
+  for (const e of entries) {
+    const key = e.changedBy || "Sistema";
+    if (!byPerson.has(key)) byPerson.set(key, []);
+    byPerson.get(key)!.push(e);
+  }
+
+  // Deduplicar por obligación — mantener solo el estado más reciente del día
+  // Clave por company+taxType+period (no por ID) para colapsar documentos duplicados
+  for (const [person, acts] of byPerson) {
+    const seen = new Map<string, TaxDailyLogEntry>();
+    for (const a of acts) {
+      const key = `${a.company}__${a.taxType}__${a.period ?? ""}`;
+      seen.set(key, a);
+    }
+    byPerson.set(person, Array.from(seen.values()));
+  }
+
+  // Destinatarios: contabilidad + financiera + admin
+  const rolesSnap = await db.collection("platform_roles")
+    .where("role", "in", ["contabilidad", "financiera", "admin"])
+    .get();
+  const recipients = rolesSnap.docs.map(d => ({
+    name: d.data().name || d.id,
+    email: (d.data().email || d.id) as string,
+  }));
+
+  if (recipients.length === 0) return { sent: 0, entries: entries.length };
+
+  // Enriquecer con datos de la obligación: projected, paid, stepOwners
+  const oblIds = [...new Set(entries.map(e => e.obligationId).filter(Boolean) as string[])];
+  const oblMap = new Map<string, { projected?: number; paid?: number; paidAt?: string; stepOwners?: Record<string, string> }>();
+  if (oblIds.length > 0) {
+    // Firestore no soporta 'in' con más de 30 — partir en chunks
+    for (let i = 0; i < oblIds.length; i += 30) {
+      const chunk = oblIds.slice(i, i + 30);
+      const snap = await db.collection("tax_obligations").where(admin.firestore.FieldPath.documentId(), "in", chunk).get();
+      snap.docs.forEach(d => oblMap.set(d.id, d.data() as any));
+    }
+  }
+
+  const STATUS_COLORS: Record<string, string> = {
+    "No iniciado":     "#6366f1",
+    "Revisado":        "#3b82f6",
+    "Informe Enviado": "#0d9488",
+    "Presentado":      "#7c3aed",
+    "Pagado":          "#16a34a",
+    "No aplica":       "#9ca3af",
+  };
+
+  const STEP_ORDER = ["No iniciado", "Revisado", "Informe Enviado", "Presentado", "Pagado"];
+
+  const fmtDate = (d?: string) => {
+    if (!d) return "&#8212;";
+    const [, m, dd] = d.split("-");
+    const months = ["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+    return `${parseInt(dd)} ${months[parseInt(m)] ?? m}`;
+  };
+
+  const fmtCOP = (v?: number | null) => {
+    if (v == null) return "&#8212;";
+    return "$" + v.toLocaleString("es-CO");
+  };
+
+  const shortName = (name: string) =>
+    name.includes("@") ? name.split("@")[0] : name.split(" ")[0];
+
+
+  // ── Detalle por persona ───────────────────────────────────────────────────
+  const personSections = Array.from(byPerson.entries()).map(([person, acts]) => {
+    const cards = acts.map(a => {
+      const obl    = a.obligationId ? oblMap.get(a.obligationId) : undefined;
+      const owners = obl?.stepOwners ?? {};
+      const color  = STATUS_COLORS[a.newStatus] ?? "#008C3C";
+
+      // Historial de pasos con quién hizo cada uno
+      const stepBadges = STEP_ORDER.map(step => {
+        const who   = owners[step];
+        const done  = !!who;
+        const isCur = step === a.newStatus;
+        const bg    = done ? (STATUS_COLORS[step] ?? "#008C3C") : "#e5e7eb";
+        const fg    = done ? "#ffffff" : "#9ca3af";
+        const label = step === "Informe Enviado" ? "Inf. Enviado" : step;
+        return `<span style="display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:${isCur ? "700" : "600"};color:${fg};background:${bg};padding:2px 8px;border-radius:20px;margin:2px 2px 2px 0;white-space:nowrap">${label}${done && who ? `&nbsp;(${shortName(who)})` : ""}</span>`;
+      }).join(`<span style="color:#d1d5db;font-size:10px;margin:0 1px">&#8250;</span>`);
+
+      const hasPaid = !!obl?.paid;
+      return `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb;margin-bottom:10px">
+          <!-- Info principal -->
+          <tr>
+            <td style="padding:11px 13px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#1f2937;width:35%;border-bottom:1px solid #f3f4f6">${a.company}</td>
+            <td style="padding:11px 13px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;width:25%;border-bottom:1px solid #f3f4f6">${a.taxType}</td>
+            <td style="padding:11px 13px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;width:16%;border-bottom:1px solid #f3f4f6">
+              ${a.period ?? "&#8212;"}<br/>
+              <span style="font-size:10px;color:#9ca3af">Vence: ${fmtDate(a.dueDate)}</span>
+            </td>
+            <td align="right" style="padding:11px 13px;width:24%;border-bottom:1px solid #f3f4f6">
+              <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;color:#fff;background:${color};padding:3px 9px;border-radius:20px;white-space:nowrap">${a.newStatus}</span>
+            </td>
+          </tr>
+          <!-- Valores proyectado / pagado -->
+          <tr bgcolor="#f9fafb" style="background-color:#f9fafb">
+            <td colspan="2" style="padding:9px 13px;border-bottom:1px solid #f3f4f6">
+              <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.8px">Proyectado</span><br/>
+              <span style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#1f2937">${fmtCOP(obl?.projected)}</span>
+            </td>
+            <td colspan="2" style="padding:9px 13px;border-bottom:1px solid #f3f4f6">
+              <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.8px">Pagado</span><br/>
+              <span style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:${hasPaid ? "#16a34a" : "#6b7280"}">${fmtCOP(obl?.paid)}</span>
+              ${obl?.paidAt ? `<br/><span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#9ca3af">Pagado el ${fmtDate(obl.paidAt)}</span>` : ""}
+            </td>
+          </tr>
+          <!-- Historial del proceso -->
+          <tr>
+            <td colspan="4" style="padding:9px 13px">
+              <p style="margin:0 0 5px;font-family:Arial,Helvetica,sans-serif;font-size:9px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:1px">Historial del proceso</p>
+              ${stepBadges}
+            </td>
+          </tr>
+        </table>`;
+    }).join("");
+
+    return `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:28px">
+        <tr><td bgcolor="#f9fafb" style="background-color:#f9fafb;padding:10px 14px;border-left:3px solid #006C2F">
+          <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#1f2937">
+            &#128100; ${person} &nbsp;<span style="font-weight:400;font-size:12px;color:#6b7280">${acts.length} cambio${acts.length !== 1 ? "s" : ""} hoy</span>
+          </p>
+        </td></tr>
+        <tr><td style="padding:12px 0 0">
+          ${cards}
+        </td></tr>
+      </table>`;
+  }).join("");
+
+  const year = new Date().getFullYear();
+  const dateStr = new Date().toLocaleDateString("es-CO", {
+    weekday: "long", day: "2-digit", month: "long", year: "numeric",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="es" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#f3f4f6">
+<tr><td align="center" style="padding:24px 16px">
+<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" style="max-width:640px" cellpadding="0" cellspacing="0">
+
+  <!-- HEADER -->
+  <tr><td bgcolor="#006C2F" style="background-color:#006C2F;padding:28px 32px;text-align:center">
+    <p style="margin:0 0 2px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:#7BCB6A;letter-spacing:3px;text-transform:uppercase">CALENDARIO TRIBUTARIO</p>
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:26px;font-weight:800;color:#ffffff;letter-spacing:3px">INTEEGRADOS</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:10px auto 0">
+      <tr><td bgcolor="#7BCB6A" style="background-color:#7BCB6A;height:3px;width:40px;font-size:0;line-height:0">&nbsp;</td></tr>
+    </table>
+    <p style="margin:14px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;color:#ffffff">Gesti&#xF3;n del D&#xED;a</p>
+    <p style="margin:4px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#a7f3d0">${dateStr}</p>
+  </td></tr>
+
+  <!-- DETALLE POR PERSONA -->
+  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:8px 32px 28px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;border-top:1px solid #f3f4f6">
+    <p style="margin:0 0 18px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#128196; Detalle por persona</p>
+    ${personSections}
+    <p style="margin:8px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#9ca3af;text-align:center">
+      Ingresa a la plataforma para ver el detalle completo.
+    </p>
+  </td></tr>
+
+  <!-- FOOTER -->
+  <tr><td bgcolor="#1f2937" style="background-color:#1f2937;padding:18px 32px;text-align:center">
+    <p style="margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;color:#ffffff">INTEEGRADOS</p>
+    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#6b7280">
+      Digest autom&#xE1;tico &middot; Calendario Tributario &middot; &copy; ${year}
+    </p>
+  </td></tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body></html>`;
+
+  const graphToken = await getGraphTokenInteegra();
+  const sender = SENDER_EMAIL_2.value().trim();
+  let sent = 0;
+
+  const seen = new Set<string>();
+  for (const r of recipients) {
+    const key = r.email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const res = await fetch(
+        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: {
+              subject: `[Resumen] Calendario tributario — ${entries.length} cambio${entries.length !== 1 ? "s" : ""} hoy`,
+              body: { contentType: "HTML", content: html },
+              toRecipients: [{ emailAddress: { address: r.email } }],
+            },
+            saveToSentItems: false,
+          }),
+        }
+      );
+      if (res.ok) sent++;
+      else console.error("dailyTaxDigest: failed for", r.email, await res.text());
+    } catch (e) {
+      console.error("dailyTaxDigest send error:", e);
+    }
+  }
+
+  return { sent, entries: entries.length };
+}
+
+export const dailyTaxDigest = onSchedule(
+  {
+    schedule: "0 17 * * *",
+    timeZone: "America/Bogota",
+    region: "us-central1",
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
+  },
+  async () => {
+    try {
+      const result = await sendDailyDigest(admin.firestore());
+      console.log(`dailyTaxDigest: sent=${result.sent} entries=${result.entries}`);
+    } catch (e) {
+      console.error("dailyTaxDigest ERROR:", e);
+      throw e;
+    }
+  }
+);
+
+export const triggerDailyTaxDigest = onCall(
+  {
+    region: "us-central1",
+    cors: true,
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
+  },
+  async () => sendDailyDigest(admin.firestore())
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

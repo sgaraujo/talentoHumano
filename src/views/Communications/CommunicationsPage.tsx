@@ -203,6 +203,93 @@ function generateEmailPreview(params: {
 </body></html>`;
 }
 
+// ── Charts panel (inside detail modal) ───────────────────────────────────────
+type BarItem = { name: string; Leídos: number; Pendientes: number };
+
+function ChartsPanel({
+  pieData, totalRead, pending, readRate, barByCompany, barByProject, hasProjects,
+}: {
+  pieData: { name: string; value: number; fill: string }[];
+  totalRead: number; pending: number; readRate: number;
+  barByCompany: BarItem[]; barByProject: BarItem[]; hasProjects: boolean;
+}) {
+  const [chartTab, setChartTab] = useState<'empresa' | 'proyecto'>('empresa');
+  const activeBar = chartTab === 'empresa' ? barByCompany : barByProject;
+  const barHeight = Math.max(80, activeBar.length * 30);
+
+  return (
+    <div className="px-4 sm:px-6 py-3 border-t border-gray-100 bg-gray-50/60 flex-shrink-0">
+      <div className="flex flex-col sm:flex-row gap-4">
+
+        {/* Donut */}
+        <div className="flex flex-col items-center flex-shrink-0">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">General</p>
+          <div className="relative">
+            <ResponsiveContainer width={140} height={130}>
+              <PieChart>
+                <Pie data={pieData} cx="50%" cy="50%" innerRadius={36} outerRadius={56}
+                  dataKey="value" strokeWidth={0}>
+                  {pieData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                </Pie>
+                <Tooltip formatter={(v) => v} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <p className="text-base font-bold text-gray-700">{readRate}%</p>
+                <p className="text-[9px] text-gray-400 leading-none">apertura</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3 mt-0.5">
+            <span className="flex items-center gap-1 text-[10px] text-gray-600">
+              <span className="w-2 h-2 rounded-full bg-[#008C3C] inline-block" />Leídos ({totalRead})
+            </span>
+            <span className="flex items-center gap-1 text-[10px] text-gray-600">
+              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />Pend. ({pending})
+            </span>
+          </div>
+        </div>
+
+        {/* Bar chart with empresa/proyecto tabs */}
+        {(barByCompany.length > 0 || barByProject.length > 0) && (
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                {chartTab === 'empresa' ? 'Por empresa' : 'Por proyecto'}
+              </p>
+              {hasProjects && (
+                <div className="flex rounded-md overflow-hidden border border-gray-200 text-[10px]">
+                  <button
+                    onClick={() => setChartTab('empresa')}
+                    className={`px-2 py-0.5 font-medium transition-colors ${chartTab === 'empresa' ? 'bg-[#008C3C] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                    Empresa
+                  </button>
+                  <button
+                    onClick={() => setChartTab('proyecto')}
+                    className={`px-2 py-0.5 font-medium transition-colors ${chartTab === 'proyecto' ? 'bg-[#008C3C] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                    Proyecto
+                  </button>
+                </div>
+              )}
+            </div>
+            <ResponsiveContainer width="100%" height={barHeight}>
+              <BarChart data={activeBar} layout="vertical" margin={{ top: 0, right: 8, left: 0, bottom: 0 }} barSize={9}>
+                <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={110} />
+                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                <Bar dataKey="Leídos" fill="#008C3C" radius={[0, 3, 3, 0]} />
+                <Bar dataKey="Pendientes" fill="#f97316" radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 export const CommunicationsPage = () => {
@@ -245,7 +332,7 @@ export const CommunicationsPage = () => {
   const [recStatus, setRecStatus] = useState('all');
   const [recCompany, setRecCompany] = useState('all');
   const [recPage, setRecPage] = useState(1);
-  const [showCharts, setShowCharts] = useState(false);
+  const [showCharts, setShowCharts] = useState(true);
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const load = async () => {
@@ -1226,64 +1313,44 @@ export const CommunicationsPage = () => {
           {showCharts && selected && (() => {
             const totalRead = recipients.filter(r => r.status === 'read').length;
             const pending = recipients.filter(r => r.status === 'pending').length;
+            const readRate = recipients.length > 0 ? Math.round((totalRead / recipients.length) * 100) : 0;
             const pieData = [
               { name: 'Leídos', value: totalRead, fill: '#008C3C' },
               { name: 'Pendientes', value: pending, fill: '#f97316' },
             ];
             const allCompanies = [...new Set(recipients.map(r => r.company).filter(Boolean))].sort();
-            const barData = allCompanies
+            const barByCompany = allCompanies
               .map(co => {
                 const coRecs = recipients.filter(r => r.company === co);
                 return {
-                  name: co.length > 14 ? co.slice(0, 13) + '…' : co,
+                  name: co.length > 18 ? co.slice(0, 17) + '…' : co,
                   Leídos: coRecs.filter(r => r.status === 'read').length,
                   Pendientes: coRecs.filter(r => r.status === 'pending').length,
                 };
               })
-              .sort((a, b) => b.Pendientes - a.Pendientes);
+              .sort((a, b) => (b.Leídos + b.Pendientes) - (a.Leídos + a.Pendientes));
+            const allProjects = [...new Set(recipients.map(r => r.project).filter(Boolean))].sort();
+            const barByProject = allProjects
+              .map(proj => {
+                const pRecs = recipients.filter(r => r.project === proj);
+                return {
+                  name: proj.length > 18 ? proj.slice(0, 17) + '…' : proj,
+                  Leídos: pRecs.filter(r => r.status === 'read').length,
+                  Pendientes: pRecs.filter(r => r.status === 'pending').length,
+                };
+              })
+              .sort((a, b) => (b.Leídos + b.Pendientes) - (a.Leídos + a.Pendientes));
+            const hasProjects = allProjects.length > 0;
             return (
-              <div className="px-4 sm:px-6 py-3 border-t border-gray-100 bg-gray-50/60 flex-shrink-0">
-                <div className="flex flex-col sm:flex-row gap-4">
-                  {/* Donut */}
-                  <div className="flex flex-col items-center">
-                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">General</p>
-                    <ResponsiveContainer width={160} height={140}>
-                      <PieChart>
-                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={38} outerRadius={58}
-                          dataKey="value" strokeWidth={0}>
-                          {pieData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                        </Pie>
-                        <Tooltip formatter={(v) => v} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="flex gap-3 mt-1">
-                      <span className="flex items-center gap-1 text-[10px] text-gray-600">
-                        <span className="w-2 h-2 rounded-full bg-[#008C3C] inline-block" />Leídos ({totalRead})
-                      </span>
-                      <span className="flex items-center gap-1 text-[10px] text-gray-600">
-                        <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />Pendientes ({pending})
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Bar by company */}
-                  {barData.length > 0 && (
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Por empresa</p>
-                      <ResponsiveContainer width="100%" height={Math.max(100, barData.length * 28)}>
-                        <BarChart data={barData} layout="vertical" margin={{ top: 0, right: 8, left: 0, bottom: 0 }} barSize={10}>
-                          <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
-                          <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} />
-                          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
-                          <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
-                          <Bar dataKey="Leídos" fill="#008C3C" radius={[0, 3, 3, 0]} />
-                          <Bar dataKey="Pendientes" fill="#f97316" radius={[0, 3, 3, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <ChartsPanel
+                pieData={pieData}
+                totalRead={totalRead}
+                pending={pending}
+                readRate={readRate}
+                barByCompany={barByCompany}
+                barByProject={barByProject}
+                hasProjects={hasProjects}
+              />
             );
           })()}
 

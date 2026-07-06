@@ -74,6 +74,19 @@ export interface EmailGlobalStats {
   topFailReason: string;
 }
 
+export interface NoProjectUserRow {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  role: string;
+  company: string;
+  assignments: number;
+  sent: number;
+  failed: number;
+  questionnaires: string[];
+  lastActivity: Date | null;
+}
+
 export function useEmailSendStats() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -85,6 +98,7 @@ export function useEmailSendStats() {
   const [byRole, setByRole] = useState<EmailRoleRow[]>([]);
   const [failures, setFailures] = useState<EmailFailRow[]>([]);
   const [timeline, setTimeline] = useState<EmailTimelinePoint[]>([]);
+  const [noProjectUsers, setNoProjectUsers] = useState<NoProjectUserRow[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -151,22 +165,18 @@ export function useEmailSendStats() {
 
       for (const a of assignments) {
         const user: any = userMap.get(a.userId);
-        const pids: string[] =
-          user?.projectIds?.length
-            ? user.projectIds
-            : user?.contractInfo?.assignment?.projectId
-            ? [user.contractInfo.assignment.projectId]
-            : ["sin-proyecto"];
+        const pid: string =
+          user?.contractInfo?.assignment?.projectId
+            ? user.contractInfo.assignment.projectId
+            : user?.projectIds?.[0] ?? "sin-proyecto";
 
-        for (const pid of pids) {
-          const name = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin proyecto" : pid);
-          if (!projAcc.has(pid)) projAcc.set(pid, { name, total: 0, sent: 0, failed: 0, noStatus: 0 });
-          const e = projAcc.get(pid)!;
-          e.total++;
-          if (isSent(a)) e.sent++;
-          else if (isFailed(a)) e.failed++;
-          else e.noStatus++;
-        }
+        const name = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin proyecto" : pid);
+        if (!projAcc.has(pid)) projAcc.set(pid, { name, total: 0, sent: 0, failed: 0, noStatus: 0 });
+        const e = projAcc.get(pid)!;
+        e.total++;
+        if (isSent(a)) e.sent++;
+        else if (isFailed(a)) e.failed++;
+        else e.noStatus++;
       }
 
       setByProject(
@@ -274,6 +284,44 @@ export function useEmailSendStats() {
       setTimeline(
         Array.from(days30.entries()).map(([date, v]) => ({ date, ...v }))
       );
+
+      // ── Usuarios sin proyecto ─────────────────────────────────────────────
+      const noProj = new Map<string, NoProjectUserRow>();
+      for (const a of assignments) {
+        const user: any = userMap.get(a.userId);
+        const pid: string =
+          user?.contractInfo?.assignment?.projectId
+            ? user.contractInfo.assignment.projectId
+            : user?.projectIds?.[0] ?? "sin-proyecto";
+        if (pid !== "sin-proyecto") continue;
+
+        if (!noProj.has(a.userId)) {
+          noProj.set(a.userId, {
+            userId: a.userId,
+            userName: a.userName || user?.fullName || "—",
+            userEmail: a.userEmail || user?.email || "—",
+            role: user?.role ?? "desconocido",
+            company: user?.contractInfo?.assignment?.company ?? "—",
+            assignments: 0,
+            sent: 0,
+            failed: 0,
+            questionnaires: [],
+            lastActivity: null,
+          });
+        }
+        const row = noProj.get(a.userId)!;
+        row.assignments++;
+        if (isSent(a)) row.sent++;
+        else if (isFailed(a)) row.failed++;
+        const qTitle: string = (qMap.get(a.questionnaireId) as any)?.title ?? "";
+        if (qTitle && !row.questionnaires.includes(qTitle)) row.questionnaires.push(qTitle);
+        const ref = a.lastEmailSentAt ?? a.assignedAt;
+        if (ref && (!row.lastActivity || ref > row.lastActivity)) row.lastActivity = ref;
+      }
+
+      setNoProjectUsers(
+        Array.from(noProj.values()).sort((a, b) => b.assignments - a.assignments)
+      );
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -285,6 +333,6 @@ export function useEmailSendStats() {
 
   return {
     loading, error, refresh: load,
-    globalStats, byProject, byQuestionnaire, byRole, failures, timeline,
+    globalStats, byProject, byQuestionnaire, byRole, failures, timeline, noProjectUsers,
   };
 }

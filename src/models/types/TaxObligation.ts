@@ -43,9 +43,11 @@ export interface TaxObligation {
   statusHistory?: StatusHistoryEntry[];
   projected?: number;
   paid?: number;
+  paidAt?: string;       // ISO date YYYY-MM-DD — fecha de pago registrada por financiera
   presentedAt?: string;  // ISO string — fecha real de presentación ante DIAN
   accountingUser?: string;  // contabilidad que diligenció el formulario
   financieraUser?: string;  // financiera que registró el pago
+  stepOwners?: Partial<Record<TaxStatus, string>>; // quién hizo cada paso
   updatedAt?: Date;
   createdAt?: Date;
 }

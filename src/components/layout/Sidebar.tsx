@@ -6,7 +6,7 @@ import {
   Users, FileText, Bell, Download, Archive, Settings, Send,
   BookOpen, LogOut, Bot, Search, Menu, X, ChevronLeft, Building2,
   LayoutDashboard, FolderKanban, MessageSquare, Calculator, Shield,
-  ChevronDown, BarChart2, Mail, MessageCircle,
+  ChevronDown, BarChart2, Mail, MessageCircle, Newspaper,
 } from 'lucide-react';
 import { ROLE_LABELS } from '@/models/types/AppRole';
 import { Link, useLocation } from 'react-router-dom';
@@ -27,6 +27,7 @@ const GROUPS: MenuGroup[] = [
       { icon: Building2,     label: 'Empresas',           path: '/empresas' },
       { icon: FolderKanban,  label: 'Proyectos',          path: '/proyectos' },
       { icon: MessageSquare, label: 'Comunicaciones',     path: '/comunicaciones' },
+      { icon: Newspaper,     label: 'Boletines',          path: '/boletines' },
       { icon: MessageCircle, label: 'WhatsApp',           path: '/whatsapp' },
       { icon: Bell,          label: 'Notificaciones',     path: '/notificaciones' },
       { icon: FileText,      label: 'Cuestionarios',      path: '/questionarios' },

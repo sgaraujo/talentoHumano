@@ -13,7 +13,7 @@ function toDate(v: any): Date | undefined {
   return new Date(v);
 }
 
-/** Convierte dueDate a string YYYY-MM-DD usando fecha LOCAL (no UTC) para evitar desfase de zona horaria */
+/** Convierte dueDate a string YYYY-MM-DD sin desplazar el día por zona horaria. */
 function normalizeDueDate(v: any): string | undefined {
   if (!v) return undefined;
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
@@ -21,9 +21,9 @@ function normalizeDueDate(v: any): string | undefined {
   if (v?.toDate) d = v.toDate();
   else if (v instanceof Date) d = v;
   else return String(v);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 

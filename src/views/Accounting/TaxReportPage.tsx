@@ -27,8 +27,49 @@ const COMPANY_ORDER = [
   'red empresarial',
 ];
 
+const TAX_TYPE_ALIASES: Record<string, string> = {
+  'retención en la fuente': 'Retención en la Fuente',
+  'retencion en la fuente': 'Retención en la Fuente',
+  'retención de ica':       'ReteICA',
+  'retencion de ica':       'ReteICA',
+  'reteica':                'ReteICA',
+};
+
+function normalizeTaxType(t: string): string {
+  return TAX_TYPE_ALIASES[t?.toLowerCase()] ?? t;
+}
+
 function normalizeCompany(s: string) {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+  return (s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bs\.?\s*a\.?\s*s\.?\b/g, 'sas')
+    .replace(/\bb\.?\s*i\.?\s*c\.?\b/g, 'bic')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanNit(nit?: string) {
+  return (nit ?? '').replace(/[^0-9]/g, '');
+}
+
+function rawCompanyKey(o: TaxObligation) {
+  const nit = cleanNit(o.nit);
+  return nit ? `nit:${nit}` : `name:${normalizeCompany(o.company)}`;
+}
+
+function isMostlyUpper(name: string) {
+  const letters = name.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, '');
+  return letters.length > 0 && letters === letters.toUpperCase();
+}
+
+function preferredCompanyName(current: string, incoming: string) {
+  if (!current) return incoming;
+  if (!incoming) return current;
+  if (isMostlyUpper(current) && !isMostlyUpper(incoming)) return incoming;
+  return current.length <= incoming.length ? current : incoming;
 }
 
 function companyIdx(name: string) {
@@ -57,13 +98,11 @@ function fmtCOP(v: number | undefined) {
 
 function fmtCOPShort(v: number | undefined) {
   if (!v) return '—';
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000)    return `$${(v / 1_000).toFixed(0)}K`;
-  return `$${v}`;
+  return v.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
 }
 
 interface Cell { projected: number; paid: number }
-type PivotRow = { company: string; cells: Record<string, Cell>; totalProj: number; totalPaid: number };
+type PivotRow = { key: string; company: string; cells: Record<string, Cell>; totalProj: number; totalPaid: number };
 
 // ── component ─────────────────────────────────────────────────────────────────
 export const TaxReportPage = () => {
@@ -97,7 +136,7 @@ export const TaxReportPage = () => {
     obligations
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
       .filter(o => o.obligationType !== 'Reportes')
-      .forEach(o => s.add(o.taxType));
+      .forEach(o => s.add(normalizeTaxType(o.taxType)));
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'es'));
   }, [obligations, filterYear]);
 
@@ -119,6 +158,19 @@ export const TaxReportPage = () => {
   const toggleAll   = () =>
     setSelectedTypes(allSelected ? new Set() : new Set(allTypes));
 
+  const companyKeyByName = useMemo(() => {
+    const map = new Map<string, string>();
+    obligations.forEach(o => {
+      const nameKey = normalizeCompany(o.company);
+      const nit = cleanNit(o.nit);
+      if (nameKey && nit && !map.has(nameKey)) map.set(nameKey, `nit:${nit}`);
+    });
+    return map;
+  }, [obligations]);
+
+  const getCompanyKey = (o: TaxObligation) =>
+    companyKeyByName.get(normalizeCompany(o.company)) ?? rawCompanyKey(o);
+
   // Pivot
   const { rows } = useMemo(() => {
     const byCompany = new Map<string, PivotRow>();
@@ -127,20 +179,21 @@ export const TaxReportPage = () => {
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
       .filter(o => filterMonth === 'all' || o.dueDate?.slice(0, 7) === filterMonth)
       .filter(o => o.obligationType !== 'Reportes')
-      .filter(o => selectedTypes.has(o.taxType))
+      .filter(o => selectedTypes.has(normalizeTaxType(o.taxType)))
       .filter(o => filterStatus === 'all' || (o.status || '') === filterStatus)
-      .filter(o => filterCompany === 'all' || normalizeCompany(o.company) === filterCompany)
+      .filter(o => filterCompany === 'all' || getCompanyKey(o) === filterCompany)
       .forEach(o => {
         const proj = o.projected ?? 0;
         const paid = o.paid ?? 0;
-        // Usar clave normalizada para agrupar variantes de mayúsculas del mismo nombre
-        const key = normalizeCompany(o.company);
+        const key = getCompanyKey(o);
+        const taxKey = normalizeTaxType(o.taxType);
         if (!byCompany.has(key))
-          byCompany.set(key, { company: o.company, cells: {}, totalProj: 0, totalPaid: 0 });
+          byCompany.set(key, { key, company: o.company, cells: {}, totalProj: 0, totalPaid: 0 });
         const row = byCompany.get(key)!;
-        if (!row.cells[o.taxType]) row.cells[o.taxType] = { projected: 0, paid: 0 };
-        row.cells[o.taxType].projected += proj;
-        row.cells[o.taxType].paid      += paid;
+        row.company = preferredCompanyName(row.company, o.company);
+        if (!row.cells[taxKey]) row.cells[taxKey] = { projected: 0, paid: 0 };
+        row.cells[taxKey].projected += proj;
+        row.cells[taxKey].paid      += paid;
         row.totalProj += proj;
         row.totalPaid += paid;
       });
@@ -149,7 +202,7 @@ export const TaxReportPage = () => {
       .sort((a, b) => companyIdx(a.company) - companyIdx(b.company));
 
     return { rows: sorted };
-  }, [obligations, filterYear, filterMonth, filterStatus, filterCompany, selectedTypes, visibleTypes]);
+  }, [obligations, filterYear, filterMonth, filterStatus, filterCompany, selectedTypes, visibleTypes, companyKeyByName]);
 
   const filteredRows = useMemo(() => {
     let r = rows;
@@ -182,16 +235,16 @@ export const TaxReportPage = () => {
     return { total, presentado, pagado, noAplica, enProceso, sinIniciar, done, pct };
   }, [obligations, filterYear, filterMonth]);
 
-  const toggleExpand = (company: string) =>
-    setExpanded(prev => { const n = new Set(prev); n.has(company) ? n.delete(company) : n.add(company); return n; });
+  const toggleExpand = (key: string) =>
+    setExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
-  const detailRows = (company: string) =>
+  const detailRows = (companyKey: string) =>
     obligations
-      .filter(o => normalizeCompany(o.company) === normalizeCompany(company) &&
+      .filter(o => getCompanyKey(o) === companyKey &&
         (o.year || o.dueDate?.slice(0, 4)) === filterYear &&
         (filterMonth === 'all' || o.dueDate?.slice(0, 7) === filterMonth) &&
         o.obligationType !== 'Reportes' &&
-        selectedTypes.has(o.taxType) &&
+        selectedTypes.has(normalizeTaxType(o.taxType)) &&
         (filterStatus === 'all' || (o.status || '') === filterStatus))
       .sort((a, b) => a.taxType.localeCompare(b.taxType));
 
@@ -200,20 +253,52 @@ export const TaxReportPage = () => {
     const s = new Map<string, string>();
     obligations
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
-      .forEach(o => { const k = normalizeCompany(o.company); if (!s.has(k)) s.set(k, o.company); });
+      .forEach(o => {
+        const k = getCompanyKey(o);
+        s.set(k, preferredCompanyName(s.get(k) ?? '', o.company));
+      });
     return Array.from(s.entries()).sort((a, b) => companyIdx(a[1]) - companyIdx(b[1]));
-  }, [obligations, filterYear]);
+  }, [obligations, filterYear, companyKeyByName]);
 
   // ── Excel export ──────────────────────────────────────────────────────────────
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
 
-    // Hoja 1: Pivote resumen
+    const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                         'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const monthLabel = filterMonth === 'all'
+      ? `Año ${filterYear} — Todos los meses`
+      : (() => {
+          const m = parseInt(filterMonth.split('-')[1]) - 1;
+          return `${MONTH_NAMES[m]} ${filterYear}`;
+        })();
+    const generatedAt = new Date().toLocaleString('es-CO', {
+      day: '2-digit', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
+    });
+
+    // Formato moneda Colombia sin símbolo para Excel (Excel agrega COP si está configurado)
+    const COP_FMT = '[$COP ]#,##0';
+
+    // Helper: aplica formato COP a todas las celdas numéricas de un rango de filas/columnas
+    const applyFmt = (ws: XLSX.WorkSheet, rowStart: number, rowEnd: number, cols: number[]) => {
+      for (let r = rowStart; r <= rowEnd; r++) {
+        for (const c of cols) {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if (ws[addr] && typeof ws[addr].v === 'number') ws[addr].z = COP_FMT;
+        }
+      }
+    };
+
+    // ── HOJA 1: RESUMEN PIVOT ─────────────────────────────────────────────────
+    const TITLE_ROWS = 4; // filas de cabecera antes de los encabezados de tabla
     const headerRow1: (string | null)[] = ['Empresa'];
     const headerRow2: string[] = [''];
     visibleTypes.forEach(t => { headerRow1.push(t, null); headerRow2.push('Proyectado', 'Pagado'); });
     headerRow1.push('Total', null);
     headerRow2.push('Proy. Total', 'Pag. Total');
+    const numCols = headerRow1.length;
+
     const dataRows = filteredRows.map(r => {
       const cells: (string | number)[] = [r.company];
       visibleTypes.forEach(t => { cells.push(r.cells[t]?.projected ?? 0, r.cells[t]?.paid ?? 0); });
@@ -231,40 +316,100 @@ export const TaxReportPage = () => {
       filteredRows.reduce((s, r) => s + r.totalProj, 0),
       filteredRows.reduce((s, r) => s + r.totalPaid, 0),
     );
-    const ws = XLSX.utils.aoa_to_sheet([headerRow1, headerRow2, ...dataRows, totalRow]);
-    ws['!merges'] = [];
-    let col = 1;
-    visibleTypes.forEach(() => { ws['!merges']!.push({ s: { r: 0, c: col }, e: { r: 0, c: col + 1 } }); col += 2; });
-    ws['!merges']!.push({ s: { r: 0, c: col }, e: { r: 0, c: col + 1 } });
-    const colWidths = [{ wch: 36 }];
-    visibleTypes.forEach(() => colWidths.push({ wch: 18 }, { wch: 18 }));
-    colWidths.push({ wch: 18 }, { wch: 18 });
-    ws['!cols'] = colWidths;
-    XLSX.utils.book_append_sheet(wb, ws, `Informe ${filterYear}`);
 
-    // Hoja 2: Detalle con responsables
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['INTEEGRADOS — Informe Tributario'],
+      [monthLabel],
+      [`Generado: ${generatedAt}`],
+      [],
+      headerRow1,
+      headerRow2,
+      ...dataRows,
+      totalRow,
+    ]);
+
+    // Formato moneda en columnas 1..numCols-1 de las filas de datos y total
+    const dataStart = TITLE_ROWS + 2; // 0-based: 4 título + 2 encabezados
+    applyFmt(ws, dataStart, dataStart + dataRows.length, Array.from({ length: numCols - 1 }, (_, i) => i + 1));
+
+    // Merges: título abarca todo el ancho, encabezados de tipo por pares
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const merges: any[] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: numCols - 1 } },
+    ];
+    let col = 1;
+    visibleTypes.forEach(() => {
+      merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + 1 } });
+      col += 2;
+    });
+    merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + 1 } });
+    ws['!merges'] = merges;
+
+    const colWidths = [{ wch: 38 }];
+    visibleTypes.forEach(() => colWidths.push({ wch: 20 }, { wch: 20 }));
+    colWidths.push({ wch: 20 }, { wch: 20 });
+    ws['!cols'] = colWidths;
+    ws['!rows'] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 14 }, { hpt: 6 }, { hpt: 20 }, { hpt: 16 }];
+
+    const sheetName1 = filterMonth === 'all' ? `Resumen ${filterYear}` : monthLabel.slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName1);
+
+    // ── HOJA 2: DETALLE ───────────────────────────────────────────────────────
     const detailObls = obligations
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
       .filter(o => filterMonth === 'all' || o.dueDate?.slice(0, 7) === filterMonth)
       .filter(o => o.obligationType !== 'Reportes')
-      .filter(o => selectedTypes.has(o.taxType))
+      .filter(o => selectedTypes.has(normalizeTaxType(o.taxType)))
       .filter(o => filterStatus === 'all' || (o.status || '') === filterStatus)
-      .filter(o => filterCompany === 'all' || normalizeCompany(o.company) === filterCompany)
+      .filter(o => filterCompany === 'all' || getCompanyKey(o) === filterCompany)
       .sort((a, b) => companyIdx(a.company) - companyIdx(b.company) || a.dueDate.localeCompare(b.dueDate));
-    const detailHeader = ['Empresa', 'NIT', 'Tipo de obligación', 'Período', 'Vencimiento', 'Estado', 'Proyectado', 'Pagado', 'Contabilidad', 'Financiera'];
-    const detailData = detailObls.map(o => [
-      o.company, o.nit ?? '', o.taxType, o.period ?? '', o.dueDate,
-      o.status || '', o.projected ?? 0, o.paid ?? 0,
-      o.accountingUser ?? '', o.financieraUser ?? '',
-    ]);
-    const ws2 = XLSX.utils.aoa_to_sheet([detailHeader, ...detailData]);
-    ws2['!cols'] = [
-      { wch: 36 }, { wch: 16 }, { wch: 28 }, { wch: 18 }, { wch: 14 },
-      { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 22 }, { wch: 22 },
+
+    const ACCOUNTING_STEPS = ['No iniciado', 'Revisado', 'Informe Enviado', 'Presentado'] as const;
+    const detailHeader = [
+      'Empresa', 'NIT', 'Tipo de obligación', 'Período', 'Vencimiento',
+      'Estado', 'Proyectado (COP)', 'Pagado (COP)', 'Contabilidad', 'Financiera',
     ];
+    const detailData = detailObls.map(o => {
+      const sw = (o as any).stepOwners ?? {};
+      const accounting = [...new Set(ACCOUNTING_STEPS.map(s => sw[s]).filter(Boolean) as string[])];
+      return [
+        o.company, o.nit ?? '', normalizeTaxType(o.taxType), o.period ?? '', o.dueDate,
+        o.status || '',
+        o.projected ?? 0,
+        o.paid ?? 0,
+        accounting.length ? accounting.join(', ') : (o.accountingUser ?? ''),
+        sw['Pagado'] || o.financieraUser || '',
+      ];
+    });
+
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ['INTEEGRADOS — Detalle de Obligaciones'],
+      [monthLabel],
+      [`Generado: ${generatedAt}`],
+      [],
+      detailHeader,
+      ...detailData,
+    ]);
+
+    // Formato moneda en columnas 6 y 7 (Proyectado / Pagado)
+    applyFmt(ws2, 5, 4 + detailData.length, [6, 7]);
+
+    ws2['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 9 } },
+    ];
+    ws2['!cols'] = [
+      { wch: 38 }, { wch: 16 }, { wch: 30 }, { wch: 18 }, { wch: 14 },
+      { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 30 },
+    ];
+    ws2['!rows'] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 14 }, { hpt: 6 }, { hpt: 20 }];
     XLSX.utils.book_append_sheet(wb, ws2, 'Detalle');
 
-    XLSX.writeFile(wb, `informe-tributario-${filterYear}.xlsx`);
+    const fileSuffix = filterMonth === 'all' ? filterYear : filterMonth;
+    XLSX.writeFile(wb, `informe-tributario-${fileSuffix}.xlsx`);
   };
 
   if (loading) {
@@ -550,13 +695,13 @@ export const TaxReportPage = () => {
 
               <tbody className="divide-y divide-gray-50">
                 {filteredRows.map(row => {
-                  const isExp  = expanded.has(row.company);
-                  const detail = isExp ? detailRows(row.company) : [];
+                  const isExp  = expanded.has(row.key);
+                  const detail = isExp ? detailRows(row.key) : [];
                   return (
                     <>
-                      <tr key={row.company}
+                      <tr key={row.key}
                         className="hover:bg-gray-50/70 cursor-pointer transition-colors"
-                        onClick={() => toggleExpand(row.company)}
+                        onClick={() => toggleExpand(row.key)}
                       >
                         <td className="px-4 py-3 font-medium text-[#4A4A4A] sticky left-0 bg-white z-10 flex items-center gap-1.5">
                           <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${isExp ? '' : '-rotate-90'}`} />

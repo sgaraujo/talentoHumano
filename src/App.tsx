@@ -27,13 +27,17 @@ import { QuestionnaireSendStatsPage } from './views/Questionnaires/Questionnaire
 import { PublicFormPage } from './views/Public/PublicFormPage';
 import { EmailSendStatsPage } from './views/Questionnaires/EmailSendStatsPage';
 import { WhatsAppPage } from './views/WhatsApp/WhatsAppPage';
+import { BulletinsPage } from './views/Bulletins/BulletinsPage';
+import { BulletinEditorPage } from './views/Bulletins/BulletinEditorPage';
+import { BulletinViewPage } from './views/Bulletins/BulletinViewPage';
+import { BulletinStatsPage } from './views/Bulletins/BulletinStatsPage';
 
 
 /** Redirects authenticated users to their role's home page */
 function HomeRedirect() {
   const { role, loading: roleLoading } = useAppRole();
   if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
-  return <Navigate to={role === 'contabilidad' ? '/contabilidad' : '/dashboard'} replace />;
+  return <Navigate to={role === 'contabilidad' || role === 'financiera' ? '/contabilidad' : '/dashboard'} replace />;
 }
 
 /** Renders children only if role can access; otherwise redirects to role home */
@@ -41,7 +45,15 @@ function RoleRoute({ children, path }: { children: React.ReactNode; path: string
   const { role, loading: roleLoading } = useAppRole();
   if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
   const contabilidadRoutes = ['/contabilidad', '/contabilidad/informe', '/contabilidad/mensajes'];
-  if (role === 'contabilidad' && !contabilidadRoutes.includes(path)) return <Navigate to="/contabilidad" replace />;
+  if ((role === 'contabilidad' || role === 'financiera') && !contabilidadRoutes.includes(path)) return <Navigate to="/contabilidad" replace />;
+  return <>{children}</>;
+}
+
+/** Admins y Talento Humano — resto redirigido a su home */
+function BulletinsRoute({ children }: { children: React.ReactNode }) {
+  const { role, loading: roleLoading } = useAppRole();
+  if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
+  if (role !== 'admin' && role !== 'talento_humano') return <Navigate to={role === 'contabilidad' || role === 'financiera' ? '/contabilidad' : '/dashboard'} replace />;
   return <>{children}</>;
 }
 
@@ -56,6 +68,7 @@ function App() {
         <Route path="/f/:questionnaireId"         element={<PublicFormPage />} />
         <Route path="/comunicado/:token"     element={<ReadCommunicationPage />} />
         <Route path="/comunicado/:token/cta" element={<CtaTrackingPage />} />
+        <Route path="/boletin/:id"           element={<BulletinViewPage />} />
 
         <Route
           path="/login"
@@ -237,6 +250,39 @@ function App() {
             loading ? null
             : isAuthenticated ? <MainLayout><WhatsAppPage /></MainLayout>
             : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/boletines"
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <BulletinsRoute><MainLayout><BulletinsPage /></MainLayout></BulletinsRoute>
+          }
+        />
+        <Route
+          path="/boletines/nuevo"
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <BulletinsRoute><MainLayout><BulletinEditorPage /></MainLayout></BulletinsRoute>
+          }
+        />
+        <Route
+          path="/boletines/:id/editar"
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <BulletinsRoute><MainLayout><BulletinEditorPage /></MainLayout></BulletinsRoute>
+          }
+        />
+        <Route
+          path="/boletines/:id/estadisticas"
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <BulletinsRoute><MainLayout><BulletinStatsPage /></MainLayout></BulletinsRoute>
           }
         />
 

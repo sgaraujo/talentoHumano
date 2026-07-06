@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes bulletin-fade-up {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+@keyframes bulletin-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes bulletin-slide-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0);     }
+}
+@keyframes bulletin-slide-left {
+  from { opacity: 0; transform: translateX(-32px); }
+  to   { opacity: 1; transform: translateX(0);     }
+}
+@keyframes bulletin-slide-right {
+  from { opacity: 0; transform: translateX(32px);  }
+  to   { opacity: 1; transform: translateX(0);     }
+}
+@keyframes bulletin-zoom {
+  from { opacity: 0; transform: scale(0.93); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

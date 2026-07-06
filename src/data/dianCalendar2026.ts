@@ -64,12 +64,12 @@ const RETEFUENTE_2026: Record<NitDigit, { period: string; dueDate: string }[]> =
     { period: 'Febrero',    dueDate: '2026-03-13' },
     { period: 'Marzo',      dueDate: '2026-04-16' },
     { period: 'Abril',      dueDate: '2026-05-15' },
-    { period: 'Mayo',       dueDate: '2026-06-15' },
+    { period: 'Mayo',       dueDate: '2026-06-16' },
     { period: 'Junio',      dueDate: '2026-07-14' },
-    { period: 'Julio',      dueDate: '2026-08-17' },
+    { period: 'Julio',      dueDate: '2026-08-18' },
     { period: 'Agosto',     dueDate: '2026-09-14' },
-    { period: 'Septiembre', dueDate: '2026-10-14' },
-    { period: 'Octubre',    dueDate: '2026-11-16' },
+    { period: 'Septiembre', dueDate: '2026-10-15' },
+    { period: 'Octubre',    dueDate: '2026-11-17' },
     { period: 'Noviembre',  dueDate: '2026-12-15' },
     { period: 'Diciembre',  dueDate: '2027-01-18' },
   ],
@@ -77,13 +77,13 @@ const RETEFUENTE_2026: Record<NitDigit, { period: string; dueDate: string }[]> =
     { period: 'Enero',      dueDate: '2026-02-16' },
     { period: 'Febrero',    dueDate: '2026-03-16' },
     { period: 'Marzo',      dueDate: '2026-04-17' },
-    { period: 'Abril',      dueDate: '2026-05-18' },
-    { period: 'Mayo',       dueDate: '2026-06-16' },
+    { period: 'Abril',      dueDate: '2026-05-19' },
+    { period: 'Mayo',       dueDate: '2026-06-17' },
     { period: 'Junio',      dueDate: '2026-07-15' },
-    { period: 'Julio',      dueDate: '2026-08-18' },
+    { period: 'Julio',      dueDate: '2026-08-19' },
     { period: 'Agosto',     dueDate: '2026-09-15' },
-    { period: 'Septiembre', dueDate: '2026-10-15' },
-    { period: 'Octubre',    dueDate: '2026-11-17' },
+    { period: 'Septiembre', dueDate: '2026-10-16' },
+    { period: 'Octubre',    dueDate: '2026-11-18' },
     { period: 'Noviembre',  dueDate: '2026-12-16' },
     { period: 'Diciembre',  dueDate: '2027-01-19' },
   ],
@@ -91,13 +91,13 @@ const RETEFUENTE_2026: Record<NitDigit, { period: string; dueDate: string }[]> =
     { period: 'Enero',      dueDate: '2026-02-17' },
     { period: 'Febrero',    dueDate: '2026-03-17' },
     { period: 'Marzo',      dueDate: '2026-04-20' },
-    { period: 'Abril',      dueDate: '2026-05-19' },
-    { period: 'Mayo',       dueDate: '2026-06-17' },
+    { period: 'Abril',      dueDate: '2026-05-20' },
+    { period: 'Mayo',       dueDate: '2026-06-18' },
     { period: 'Junio',      dueDate: '2026-07-16' },
-    { period: 'Julio',      dueDate: '2026-08-19' },
+    { period: 'Julio',      dueDate: '2026-08-20' },
     { period: 'Agosto',     dueDate: '2026-09-16' },
-    { period: 'Septiembre', dueDate: '2026-10-16' },
-    { period: 'Octubre',    dueDate: '2026-11-18' },
+    { period: 'Septiembre', dueDate: '2026-10-19' },
+    { period: 'Octubre',    dueDate: '2026-11-19' },
     { period: 'Noviembre',  dueDate: '2026-12-17' },
     { period: 'Diciembre',  dueDate: '2027-01-20' },
   ],
@@ -105,13 +105,13 @@ const RETEFUENTE_2026: Record<NitDigit, { period: string; dueDate: string }[]> =
     { period: 'Enero',      dueDate: '2026-02-18' },
     { period: 'Febrero',    dueDate: '2026-03-18' },
     { period: 'Marzo',      dueDate: '2026-04-21' },
-    { period: 'Abril',      dueDate: '2026-05-20' },
-    { period: 'Mayo',       dueDate: '2026-06-18' },
+    { period: 'Abril',      dueDate: '2026-05-21' },
+    { period: 'Mayo',       dueDate: '2026-06-19' },
     { period: 'Junio',      dueDate: '2026-07-17' },
-    { period: 'Julio',      dueDate: '2026-08-20' },
+    { period: 'Julio',      dueDate: '2026-08-21' },
     { period: 'Agosto',     dueDate: '2026-09-17' },
-    { period: 'Septiembre', dueDate: '2026-10-19' },
-    { period: 'Octubre',    dueDate: '2026-11-19' },
+    { period: 'Septiembre', dueDate: '2026-10-20' },
+    { period: 'Octubre',    dueDate: '2026-11-20' },
     { period: 'Noviembre',  dueDate: '2026-12-18' },
     { period: 'Diciembre',  dueDate: '2027-01-21' },
   ],
@@ -119,13 +119,13 @@ const RETEFUENTE_2026: Record<NitDigit, { period: string; dueDate: string }[]> =
     { period: 'Enero',      dueDate: '2026-02-19' },
     { period: 'Febrero',    dueDate: '2026-03-19' },
     { period: 'Marzo',      dueDate: '2026-04-22' },
-    { period: 'Abril',      dueDate: '2026-05-21' },
-    { period: 'Mayo',       dueDate: '2026-06-19' },
-    { period: 'Junio',      dueDate: '2026-07-20' },
-    { period: 'Julio',      dueDate: '2026-08-21' },
+    { period: 'Abril',      dueDate: '2026-05-22' },
+    { period: 'Mayo',       dueDate: '2026-06-22' },
+    { period: 'Junio',      dueDate: '2026-07-21' },
+    { period: 'Julio',      dueDate: '2026-08-24' },
     { period: 'Agosto',     dueDate: '2026-09-18' },
-    { period: 'Septiembre', dueDate: '2026-10-20' },
-    { period: 'Octubre',    dueDate: '2026-11-20' },
+    { period: 'Septiembre', dueDate: '2026-10-21' },
+    { period: 'Octubre',    dueDate: '2026-11-23' },
     { period: 'Noviembre',  dueDate: '2026-12-21' },
     { period: 'Diciembre',  dueDate: '2027-01-22' },
   ],
@@ -133,27 +133,27 @@ const RETEFUENTE_2026: Record<NitDigit, { period: string; dueDate: string }[]> =
     { period: 'Enero',      dueDate: '2026-02-20' },
     { period: 'Febrero',    dueDate: '2026-03-20' },
     { period: 'Marzo',      dueDate: '2026-04-23' },
-    { period: 'Abril',      dueDate: '2026-05-22' },
-    { period: 'Mayo',       dueDate: '2026-06-22' },
-    { period: 'Junio',      dueDate: '2026-07-21' },
-    { period: 'Julio',      dueDate: '2026-08-24' },
+    { period: 'Abril',      dueDate: '2026-05-25' },
+    { period: 'Mayo',       dueDate: '2026-06-23' },
+    { period: 'Junio',      dueDate: '2026-07-22' },
+    { period: 'Julio',      dueDate: '2026-08-25' },
     { period: 'Agosto',     dueDate: '2026-09-21' },
-    { period: 'Septiembre', dueDate: '2026-10-21' },
-    { period: 'Octubre',    dueDate: '2026-11-23' },
+    { period: 'Septiembre', dueDate: '2026-10-22' },
+    { period: 'Octubre',    dueDate: '2026-11-24' },
     { period: 'Noviembre',  dueDate: '2026-12-22' },
     { period: 'Diciembre',  dueDate: '2027-01-25' },
   ],
   0: [
     { period: 'Enero',      dueDate: '2026-02-23' },
-    { period: 'Febrero',    dueDate: '2026-03-23' },
+    { period: 'Febrero',    dueDate: '2026-03-24' },
     { period: 'Marzo',      dueDate: '2026-04-24' },
-    { period: 'Abril',      dueDate: '2026-05-25' },
-    { period: 'Mayo',       dueDate: '2026-06-23' },
-    { period: 'Junio',      dueDate: '2026-07-22' },
-    { period: 'Julio',      dueDate: '2026-08-25' },
+    { period: 'Abril',      dueDate: '2026-05-26' },
+    { period: 'Mayo',       dueDate: '2026-06-24' },
+    { period: 'Junio',      dueDate: '2026-07-23' },
+    { period: 'Julio',      dueDate: '2026-08-26' },
     { period: 'Agosto',     dueDate: '2026-09-22' },
-    { period: 'Septiembre', dueDate: '2026-10-22' },
-    { period: 'Octubre',    dueDate: '2026-11-24' },
+    { period: 'Septiembre', dueDate: '2026-10-23' },
+    { period: 'Octubre',    dueDate: '2026-11-25' },
     { period: 'Noviembre',  dueDate: '2026-12-23' },
     { period: 'Diciembre',  dueDate: '2027-01-26' },
   ],
@@ -399,7 +399,14 @@ const EXOGENA_PJ_RANGES_2026: { from: number; to: number; dueDate: string }[] = 
 // Ej: "901193667-1" → 7  |  "900550189-5" → 9  |  "901193667" → 7
 export function extractVerificationDigit(nit: string): NitDigit | null {
   if (!nit) return null;
-  const nitBase = nit.split('-')[0].trim().replace(/\D/g, '');
+  const trimmed = nit.trim();
+  const hasExplicitDv = trimmed.includes('-');
+  const digits = trimmed.replace(/\D/g, '');
+  const nitBase = hasExplicitDv
+    ? trimmed.split('-')[0].replace(/\D/g, '')
+    : digits.length > 9
+      ? digits.slice(0, -1)
+      : digits;
   if (!nitBase) return null;
   return Number(nitBase[nitBase.length - 1]) as NitDigit;
 }
@@ -472,7 +479,13 @@ export function getDianObligations2026(digit: NitDigit): DianObligation[] {
 
 // ── Exógena PJ/naturales por últimos 2 dígitos del NIT ───────────────────────
 function getExogenaPJDueDate(nit: string): string | null {
-  const base = nit.split('-')[0].replace(/\D/g, '');
+  const trimmed = nit.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  const base = trimmed.includes('-')
+    ? trimmed.split('-')[0].replace(/\D/g, '')
+    : digits.length > 9
+      ? digits.slice(0, -1)
+      : digits;
   if (!base) return null;
   const last2 = parseInt(base.slice(-2), 10); // "00" → 0
   if (last2 === 0) return '2026-06-13'; // grupo "96-00"

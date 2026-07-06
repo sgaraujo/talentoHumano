@@ -4,11 +4,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   CheckCircle2, Calendar, Search, X,
   FileText, Loader2, Paperclip, History,
-  ExternalLink, Trash2, Plus, Edit2, Upload, Building2, SlidersHorizontal, BarChart3, Download, UserCheck, Send,
+  ExternalLink, Trash2, Plus, Edit2, Upload, Building2, SlidersHorizontal, BarChart3, Download, UserCheck, Send, ChevronsUpDown, Save,
 } from 'lucide-react';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
-import { storage, functions } from '@/config/firebase';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { storage, functions, db } from '@/config/firebase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,6 +20,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { taxCalendarService } from '@/services/taxCalendarService';
 import { rolesService } from '@/services/rolesService';
@@ -28,7 +30,7 @@ import type { AppRole } from '@/models/types/AppRole';
 import type { TaxObligation, TaxStatus, TaxAttachment, StatusHistoryEntry } from '@/models/types/TaxObligation';
 import type { Company } from '@/models/types/Company';
 import {
-  extractVerificationDigit, getUpcomingObligationsByNit,
+  extractVerificationDigit, getUpcomingObligationsByNit, getDianObligationsByNit,
   type DianObligation, type NitDigit,
 } from '@/data/dianCalendar2026';
 
@@ -43,6 +45,16 @@ const STATUS_CFG: Record<string, { label: string; color: string; bg: string; dot
   'No aplica':      { label: 'No aplica',        color: 'text-gray-400',   bg: 'bg-gray-50',     dot: 'bg-gray-300' },
   'Pagado':         { label: 'Pagado',           color: 'text-green-700',  bg: 'bg-green-50',    dot: 'bg-green-500' },
 };
+
+const PERIOD_OPTIONS = [
+  'Mensual-1', 'Mensual-2', 'Mensual-3', 'Mensual-4', 'Mensual-5', 'Mensual-6',
+  'Mensual-7', 'Mensual-8', 'Mensual-9', 'Mensual-10', 'Mensual-11', 'Mensual-12',
+  'Bim 1', 'Bim 2', 'Bim 3', 'Bim 4', 'Bim 5', 'Bim 6',
+  'Cuatrim 1', 'Cuatrim 2', 'Cuatrim 3',
+  'Trimestre-1', 'Trimestre-2', 'Trimestre-3', 'Trimestre-4',
+  'Cuota 1', 'Cuota 2',
+  'Anual',
+];
 
 
 
@@ -63,9 +75,145 @@ function fmtDate(d: string) {
   return `${dd}/${m}/${y}`;
 }
 
+function sameAutoDueDate(savedDate: string, currentAutoDate: string): boolean {
+  if (savedDate === currentAutoDate) return true;
+  if (!isValidDate(savedDate) || !isValidDate(currentAutoDate)) return false;
+
+  const [savedYear, savedMonth, savedDay] = savedDate.split('-').map(Number);
+  const [autoYear, autoMonth, autoDay] = currentAutoDate.split('-').map(Number);
+  const saved = Date.UTC(savedYear, savedMonth - 1, savedDay);
+  const current = Date.UTC(autoYear, autoMonth - 1, autoDay);
+  return Math.abs(current - saved) <= 3 * 86_400_000;
+}
+
 function safeDaysUntil(dateStr: string): number | null {
   if (!isValidDate(dateStr)) return null;
   return daysUntil(dateStr);
+}
+
+/** Fecha de hoy en formato YYYY-MM-DD. Sirve como corte: no mostramos fechas pasadas. */
+function getCalendarCutoff(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+// ── TaxTypeCombobox ───────────────────────────────────────────────────────────
+
+function TaxTypeCombobox({
+  value, onChange, options, placeholder = 'Seleccionar o escribir…',
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+}) {
+  const [open,  setOpen]  = useState(false);
+  const [query, setQuery] = useState('');
+
+  const q = query.trim().toLowerCase();
+  const filtered = options.filter(o => o.toLowerCase().includes(q));
+  const exactMatch = options.some(o => o.toLowerCase() === q);
+  const showCreate = q.length > 0 && !exactMatch;
+
+  const select = (v: string) => { onChange(v); setOpen(false); setQuery(''); };
+
+  return (
+    <Popover open={open} onOpenChange={o => { setOpen(o); if (!o) setQuery(''); }}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span className={value ? 'text-foreground' : 'text-muted-foreground'}>
+            {value || placeholder}
+          </span>
+          <ChevronsUpDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <div className="p-2 border-b">
+          <input
+            autoFocus
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Buscar tipo…"
+            className="w-full text-sm outline-none bg-transparent placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-52 overflow-y-auto">
+          {filtered.length === 0 && !showCreate && (
+            <p className="py-3 text-center text-xs text-muted-foreground">Sin resultados</p>
+          )}
+          {filtered.map(opt => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => select(opt)}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors ${opt === value ? 'bg-accent font-medium' : ''}`}
+            >
+              {opt}
+            </button>
+          ))}
+          {showCreate && (
+            <button
+              type="button"
+              onClick={() => select(query.trim())}
+              className="w-full text-left px-3 py-2 text-sm text-green-700 font-medium hover:bg-green-50 transition-colors border-t"
+            >
+              + Crear "<span className="font-semibold">{query.trim()}</span>"
+            </button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ── AdminEmailButtons ─────────────────────────────────────────────────────────
+function AdminEmailButtons() {
+  const [sending9, setSending9] = useState<'idle'|'loading'|'ok'|'err'>('idle');
+  const [sending5, setSending5] = useState<'idle'|'loading'|'ok'|'err'>('idle');
+
+  const trigger9am = async () => {
+    setSending9('loading');
+    try {
+      const fn = httpsCallable(functions, 'triggerTaxAlerts');
+      await fn({ force: true });
+      setSending9('ok');
+      setTimeout(() => setSending9('idle'), 4000);
+    } catch { setSending9('err'); setTimeout(() => setSending9('idle'), 4000); }
+  };
+
+  const trigger5pm = async () => {
+    setSending5('loading');
+    try {
+      const fn = httpsCallable(functions, 'triggerDailyTaxDigest');
+      await fn({});
+      setSending5('ok');
+      setTimeout(() => setSending5('idle'), 4000);
+    } catch { setSending5('err'); setTimeout(() => setSending5('idle'), 4000); }
+  };
+
+  const btnClass = (state: typeof sending9) =>
+    `flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border transition-colors ${
+      state === 'loading' ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-wait' :
+      state === 'ok'      ? 'border-green-200 bg-green-50 text-green-700' :
+      state === 'err'     ? 'border-red-200 bg-red-50 text-red-600' :
+      'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+    }`;
+
+  return (
+    <>
+      <button onClick={trigger9am} disabled={sending9 === 'loading'} className={btnClass(sending9)}>
+        {sending9 === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+        {sending9 === 'ok' ? 'Enviado ✓' : sending9 === 'err' ? 'Error' : 'Correo 9am'}
+      </button>
+      <button onClick={trigger5pm} disabled={sending5 === 'loading'} className={btnClass(sending5)}>
+        {sending5 === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+        {sending5 === 'ok' ? 'Enviado ✓' : sending5 === 'err' ? 'Error' : 'Correo 5pm'}
+      </button>
+    </>
+  );
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -127,6 +275,7 @@ export const TaxCalendarPage = () => {
   const attachFileRef = useRef<HTMLInputElement>(null);
   const [formProjected,  setFormProjected]  = useState('');
   const [formPaid,       setFormPaid]       = useState('');
+  const [formPaidAt,     setFormPaidAt]     = useState('');
 
   // ── Load ────────────────────────────────────────────────────────────────────
 
@@ -205,6 +354,21 @@ export const TaxCalendarPage = () => {
     'Vehículos',
   ];
 
+  // Combina tipos predefinidos + los que ya existen en Firestore (sin duplicados)
+  const taxTypeOptions = useMemo(() => {
+    const fromObls = obligations.map(o => o.taxType).filter(Boolean);
+    const all = [...ALL_TAX_TYPES, ...fromObls];
+    const seen = new Set<string>();
+    return all.filter(t => { const k = t.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  }, [obligations]);
+
+  const periodOptions = useMemo(() => {
+    const fromObls = obligations.map(o => o.period).filter(Boolean);
+    const all = [...PERIOD_OPTIONS, ...fromObls];
+    const seen = new Set<string>();
+    return all.filter(p => { const k = p.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  }, [obligations]);
+
   const saveHiddenTaxTypes = async (company: Company, hidden: string[]) => {
     setSavingHidden(true);
     try {
@@ -243,6 +407,7 @@ export const TaxCalendarPage = () => {
     setUploadProgress(0);
     setFormProjected(obl.projected != null ? String(obl.projected) : '');
     setFormPaid(obl.paid != null ? String(obl.paid) : '');
+    setFormPaidAt(obl.paidAt ?? '');
   };
 
   const openNew = () => {
@@ -253,6 +418,7 @@ export const TaxCalendarPage = () => {
     setUploadProgress(0);
     setFormProjected('');
     setFormPaid('');
+    setFormPaidAt('');
   };
 
   const closeDialog = () => { setEditObl(null); setIsNew(false); setQuickEditMode(false); };
@@ -266,23 +432,31 @@ export const TaxCalendarPage = () => {
     try {
       const projNum = formProjected !== '' ? parseFloat(formProjected) : undefined;
       const presentedAt = newStatus === 'Presentado' ? new Date().toISOString() : undefined;
+      const actor = currentUserName || user?.email || 'Sistema';
       const updatePayload: Record<string, unknown> = { status: newStatus };
       if (projNum     != null && !isNaN(projNum)) updatePayload.projected   = projNum;
       if (presentedAt != null)                    updatePayload.presentedAt = presentedAt;
+      // Registrar quién hizo este paso específico
+      updatePayload[`stepOwners.${newStatus}`] = actor;
       // Auto-registrar quién diligenció / quién registró el pago
-      if (newStatus === 'Pagado' && currentUserName) updatePayload.financieraUser = currentUserName;
+      if (newStatus === 'Pagado') updatePayload.financieraUser = actor;
+      if (newStatus === 'Pagado' && formPaidAt) updatePayload.paidAt = formPaidAt;
       if (!isFinanciera && currentUserName && !(editObl as TaxObligation).accountingUser)
-        updatePayload.accountingUser = currentUserName;
+        updatePayload.accountingUser = actor;
       await taxCalendarService.update(editObl.id, updatePayload as any);
       // Actualizar editObl y la lista local para que prevStatus sea correcto en el siguiente clic
       const prevStatus = (editObl as TaxObligation).status ?? '';
-      const changedBy = form.advisor || user?.email || 'Sistema';
-      const localUpdate: Partial<TaxObligation> = { status: newStatus };
+      const changedBy = actor;
+      const localUpdate: Partial<TaxObligation> = {
+        status: newStatus,
+        stepOwners: { ...(editObl as TaxObligation).stepOwners, [newStatus]: actor },
+      };
       if (projNum     != null && !isNaN(projNum)) localUpdate.projected   = projNum;
       if (presentedAt != null)                    localUpdate.presentedAt = presentedAt;
-      if (newStatus === 'Pagado' && currentUserName) localUpdate.financieraUser = currentUserName;
+      if (newStatus === 'Pagado') localUpdate.financieraUser = actor;
+      if (newStatus === 'Pagado' && formPaidAt) localUpdate.paidAt = formPaidAt;
       if (!isFinanciera && currentUserName && !(editObl as TaxObligation).accountingUser)
-        localUpdate.accountingUser = currentUserName;
+        localUpdate.accountingUser = actor;
       setEditObl(prev => prev ? { ...prev, ...localUpdate } : prev);
       setObligations(prev => prev.map(o => o.id === editObl.id ? { ...o, ...localUpdate } : o));
       toast.success(STATUS_CFG[newStatus]?.label ?? newStatus);
@@ -298,40 +472,22 @@ export const TaxCalendarPage = () => {
           statusHistory: [...(prev.statusHistory ?? []), historyEntry],
         } : prev))
         .catch(() => {});
-      // Enviar correo solo si el estado realmente cambió
+      // Registrar en log diario — el digest se envía a las 5 PM
       if (newStatus && newStatus !== prevStatus) {
-        const notifyFn  = httpsCallable(functions, 'notifyTaxStatusChange');
-        const isPresentado = newStatus === 'Presentado';
-        const isPagado     = newStatus === 'Pagado';
-        const oblId = editObl.id;
-        if (accountingUsers.length > 0) {
-          notifyFn({
-            companyName: editObl.company, nit: editObl.nit,
-            taxType: editObl.taxType, period: editObl.period,
-            dueDate: editObl.dueDate, newStatus, changedBy,
-            recipients: accountingUsers,
-            projectedAmount: formProjected || null,
-            obligationId: oblId,
-          }).catch(err => toast.error('Error al notificar contabilidad', { description: err?.message ?? String(err) }));
-        }
-        if (isPresentado || isPagado) {
-          const pureFinanciera = financieraUsers.filter(u => !accountingUsers.some(a => a.email === u.email));
-          if (pureFinanciera.length > 0) {
-            notifyFn({
-              companyName: editObl.company, nit: editObl.nit,
-              taxType: editObl.taxType, period: editObl.period,
-              dueDate: editObl.dueDate, newStatus, changedBy,
-              recipients: pureFinanciera,
-              projectedAmount: formProjected || null,
-              forFinanciera: true,
-              obligationId: oblId,
-            }).catch(err => toast.error('Error al notificar financiera', { description: err?.message ?? String(err) }));
-          } else {
-            toast.warning('Sin destinatarios financiera', {
-              description: 'Asigna el rol Financiera en la página de Roles.',
-            });
-          }
-        }
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+        addDoc(collection(db, 'tax_daily_log'), {
+          date: today,
+          changedBy,
+          changedAt: serverTimestamp(),
+          company: (editObl as TaxObligation).company,
+          nit: (editObl as TaxObligation).nit,
+          taxType: (editObl as TaxObligation).taxType,
+          period: (editObl as TaxObligation).period,
+          dueDate: (editObl as TaxObligation).dueDate,
+          newStatus,
+          projected: formProjected ? parseFloat(formProjected) : null,
+          obligationId: editObl.id,
+        }).catch(() => {});
       }
     } catch (e: any) {
       toast.error('Error al guardar estado', { description: e.message });
@@ -351,6 +507,7 @@ export const TaxCalendarPage = () => {
         ...form, attachments,
         ...(projected != null && !isNaN(projected) ? { projected } : {}),
         ...(paid      != null && !isNaN(paid)      ? { paid }      : {}),
+        ...(formPaidAt ? { paidAt: formPaidAt } : {}),
       };
       if (isNew) {
         if (currentUserName && !isFinanciera) (data as any).accountingUser = currentUserName;
@@ -364,54 +521,24 @@ export const TaxCalendarPage = () => {
         toast.success('Guardado');
       }
 
-      // Notificar por correo en cualquier cambio de estado
+      // Registrar en log diario — el digest se envía a las 5 PM
       const prevStatus = isNew ? '' : (editObl?.status ?? '');
       const savedOblId = isNew ? '' : (editObl?.id ?? '');
       if (form.status && form.status !== prevStatus) {
-        const notifyFn = httpsCallable(functions, 'notifyTaxStatusChange');
-        const isPresentado = form.status === 'Presentado';
-        const isPagado     = form.status === 'Pagado';
-
-        notifyFn({
-          companyName:     form.company,
-          nit:             form.nit,
-          taxType:         form.taxType,
-          period:          form.period,
-          dueDate:         form.dueDate,
-          newStatus:       form.status,
-          changedBy:       form.advisor || 'Sistema',
-          recipients:      accountingUsers,
-          projectedAmount: formProjected || null,
-          obligationId:    savedOblId,
-        }).catch(err => console.warn('notifyTaxStatusChange:', err));
-
-        if (isPresentado || isPagado) {
-          const pureFinanciera = financieraUsers.filter(u =>
-            !accountingUsers.some(a => a.email === u.email)
-          );
-          if (pureFinanciera.length === 0) {
-            toast.warning('Sin destinatarios financiera', {
-              description: 'No hay usuarios con rol Financiera asignados en el sistema.',
-            });
-          } else {
-            notifyFn({
-              companyName:     form.company,
-              nit:             form.nit,
-              taxType:         form.taxType,
-              period:          form.period,
-              dueDate:         form.dueDate,
-              newStatus:       form.status,
-              changedBy:       form.advisor || 'Sistema',
-              recipients:      pureFinanciera,
-              projectedAmount: formProjected || null,
-              forFinanciera:   true,
-              obligationId:    savedOblId,
-            }).catch(err => {
-              console.error('notifyTaxStatusChange financiera:', err);
-              toast.error('Error al notificar a Financiera', { description: err?.message ?? String(err) });
-            });
-          }
-        }
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+        addDoc(collection(db, 'tax_daily_log'), {
+          date: today,
+          changedBy: form.advisor || currentUserName || 'Sistema',
+          changedAt: serverTimestamp(),
+          company: form.company,
+          nit: form.nit,
+          taxType: form.taxType,
+          period: form.period,
+          dueDate: form.dueDate,
+          newStatus: form.status,
+          projected: formProjected ? parseFloat(formProjected) : null,
+          obligationId: savedOblId,
+        }).catch(() => {});
       }
 
       closeDialog();
@@ -426,30 +553,40 @@ export const TaxCalendarPage = () => {
 
   const [isDragging, setIsDragging] = useState(false);
 
-  const uploadFile = (file: File) => {
-    if (!file || !editObl) return;
-    if (file.size > 20 * 1024 * 1024) { toast.error('El archivo supera los 20 MB'); return; }
-    if (attachments.length >= 5) { toast.error('Máximo 5 archivos por obligación'); return; }
-    setUploading(true); setUploadProgress(0);
-    const path = `tax_obligations/${editObl.id}/${Date.now()}_${file.name}`;
-    const ref  = storageRef(storage, path);
-    const task = uploadBytesResumable(ref, file);
-    task.on('state_changed',
-      snap => setUploadProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
-      err  => { toast.error(`Error subiendo ${file.name}`, { description: err.message }); setUploading(false); },
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        setAttachments(prev => [...prev, { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() }]);
-        setUploading(false); setUploadProgress(0);
-        toast.success(`${file.name} subido`);
-      }
-    );
+  const uploadFile = (file: File): Promise<void> => {
+    return new Promise(resolve => {
+      if (!file || !editObl) { resolve(); return; }
+      if (file.size > 20 * 1024 * 1024) { toast.error(`${file.name}: supera los 20 MB`); resolve(); return; }
+      const path = `tax_obligations/${editObl.id}/${Date.now()}_${file.name}`;
+      const ref  = storageRef(storage, path);
+      const task = uploadBytesResumable(ref, file);
+      task.on('state_changed',
+        snap => setUploadProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+        err  => { toast.error(`Error subiendo ${file.name}`, { description: err.message }); resolve(); },
+        async () => {
+          const url = await getDownloadURL(task.snapshot.ref);
+          setAttachments(prev => [...prev, { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() }]);
+          setUploadProgress(0);
+          toast.success(`${file.name} subido`);
+          resolve();
+        }
+      );
+    });
   };
 
-  const handleAttachFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) uploadFile(file);
+  const handleAttachFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
+    if (!files.length) return;
+    const remaining = 5 - attachments.length;
+    if (remaining <= 0) { toast.error('Máximo 5 archivos por obligación'); return; }
+    const toUpload = files.slice(0, remaining);
+    if (files.length > remaining)
+      toast.warning(`Solo se subirán ${remaining} archivo${remaining !== 1 ? 's' : ''} — límite 5`);
+    setUploading(true);
+    setUploadProgress(0);
+    for (const file of toUpload) await uploadFile(file);
+    setUploading(false);
   };
 
   const handleDeleteAttachment = async (att: TaxAttachment) => {
@@ -491,15 +628,14 @@ export const TaxCalendarPage = () => {
     }
   };
 
-  const saveProjectedNow = async () => {
-    if (isNew || !editObl || editObl.id === '__new__') return;
-    const num = formProjected !== '' ? parseFloat(formProjected) : null;
-    if (num === null || isNaN(num)) return;
+  const savePaidAtNow = async (value: string) => {
+    if (isNew || !editObl || editObl.id === '__new__' || !value) return;
     try {
-      await taxCalendarService.update(editObl.id, { projected: num } as any);
-      setObligations(prev => prev.map(o => o.id === editObl.id ? { ...o, projected: num } : o));
+      await taxCalendarService.update(editObl.id, { paidAt: value } as any);
+      setEditObl(prev => prev ? { ...prev, paidAt: value } : prev);
+      setObligations(prev => prev.map(o => o.id === editObl.id ? { ...o, paidAt: value } : o));
     } catch (e: any) {
-      toast.error('Error al guardar proyectado', { description: e.message });
+      toast.error('Error al guardar fecha de pago', { description: e.message });
     }
   };
 
@@ -509,6 +645,7 @@ export const TaxCalendarPage = () => {
     company: Company;
     digit: NitDigit | null;
     upcoming: DianObligation[];
+    allDianObls: DianObligation[];
     nextDue: DianObligation | null;
   }
 
@@ -533,7 +670,26 @@ export const TaxCalendarPage = () => {
   ];
 
   const normalize = (s: string) =>
-    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[.\-,]/g, '').replace(/\s+/g, ' ').trim();
+
+  const cleanNit = (nit?: string) => (nit ?? '').replace(/[^0-9]/g, '');
+
+  // Canonical aliases so manual ("Retención de ICA") matches calendar ("ReteICA")
+  const TAX_ALIASES: Record<string, string> = {
+    'reteica':                   'reteica',
+    'retencion de ica':          'reteica',
+    'retencion ica':             'reteica',
+    'impuesto de industria y comercio': 'reteica',
+    'ica':                       'reteica',
+    'iva bimestral':             'iva',
+    'iva cuatrimestral':         'iva',
+    'impuesto a las ventas':     'iva',
+    'iva':                       'iva',
+    'retencion en la fuente':    'retencion en la fuente',
+    'retencion fuente':          'retencion en la fuente',
+    'retefuente':                'retencion en la fuente',
+  };
+  const normTax = (t: string) => { const n = normalize(t); return TAX_ALIASES[n] ?? n; };
 
   const companyOrderIndex = (name: string) => {
     const n = normalize(name);
@@ -542,6 +698,55 @@ export const TaxCalendarPage = () => {
     );
     return idx === -1 ? COMPANY_ORDER.length : idx;
   };
+
+  const calendarCompanies = useMemo<Company[]>(() => {
+    const byNit = new Map<string, Company>();
+    const byName = new Map<string, Company>();
+    const unique: Company[] = [];
+
+    const mergeCompany = (base: Company, incoming: Company): Company => {
+      const hiddenTaxTypes = Array.from(new Set([
+        ...(base.hiddenTaxTypes ?? []),
+        ...(incoming.hiddenTaxTypes ?? []),
+      ]));
+
+      return {
+        ...base,
+        name: base.name?.trim() || incoming.name?.trim() || '',
+        nit: base.nit?.trim() || incoming.nit?.trim() || '',
+        active: Boolean(base.active || incoming.active),
+        activeTH: Boolean(base.activeTH || incoming.activeTH),
+        activeContabilidad: Boolean(base.activeContabilidad || incoming.activeContabilidad),
+        hiddenTaxTypes,
+      };
+    };
+
+    for (const company of firestoreCompanies) {
+      const nameKey = normalize(company.name ?? '');
+      const nitKey = cleanNit(company.nit);
+      if (!nameKey && !nitKey) continue;
+
+      const existing = (nitKey ? byNit.get(nitKey) : undefined) ?? byName.get(nameKey);
+      if (existing) {
+        const merged = mergeCompany(existing, company);
+        Object.assign(existing, merged);
+        if (nitKey) byNit.set(nitKey, existing);
+        if (nameKey) byName.set(nameKey, existing);
+        continue;
+      }
+
+      const normalizedCompany = {
+        ...company,
+        name: company.name?.trim() ?? '',
+        nit: company.nit?.trim() ?? '',
+      };
+      unique.push(normalizedCompany);
+      if (nitKey) byNit.set(nitKey, normalizedCompany);
+      if (nameKey) byName.set(nameKey, normalizedCompany);
+    }
+
+    return unique;
+  }, [firestoreCompanies]);
 
   function dianUrgency(dueDate: string): 'overdue' | 'urgent' | 'soon' | 'ok' {
     const d = safeDaysUntil(dueDate);
@@ -555,11 +760,11 @@ export const TaxCalendarPage = () => {
   // All periods available across upcoming DIAN obligations
   const allPeriods = useMemo(() => {
     const set = new Set<string>();
-    firestoreCompanies
+    calendarCompanies
       .filter(c => c.active && c.activeContabilidad && c.nit)
       .forEach(c => getUpcomingObligationsByNit(c.nit, dianDays).forEach(o => set.add(o.period)));
     return [...set].sort();
-  }, [firestoreCompanies, dianDays]);
+  }, [calendarCompanies, dianDays]);
 
   const dianRows = useMemo<CompanyDianRow[]>(() => {
     // Para filtro por mes usamos todos los vencimientos del año (sin límite de días)
@@ -571,7 +776,7 @@ export const TaxCalendarPage = () => {
       ...obligations.map(o => o.company.toLowerCase().trim()),
     ]);
 
-    return firestoreCompanies
+    return calendarCompanies
       .filter(c => c.active && (
         c.activeContabilidad ||
         companiesWithObls.has(c.nit) ||
@@ -582,8 +787,11 @@ export const TaxCalendarPage = () => {
       .map(c => {
         const digit    = extractVerificationDigit(c.nit);
         const hidden   = new Set(c.hiddenTaxTypes ?? []);
+        const cutoff = getCalendarCutoff();
         const allUpcoming = (c.nit ? getUpcomingObligationsByNit(c.nit, effectiveDays) : [])
-          .filter(o => !hidden.has(o.taxType));
+          .filter(o => !hidden.has(o.taxType))
+          // Excluir fechas anteriores al mes actual (salvo filtro de mes activo)
+          .filter(o => filterMonth !== 'all' || o.dueDate >= cutoff);
         // Para el filtro de mes filtramos las obligaciones que muestran, pero nextDue usa días reales
         const upcoming = filterMonth !== 'all'
           ? allUpcoming.filter(o => o.dueDate.slice(0, 7) === filterMonth)
@@ -591,10 +799,27 @@ export const TaxCalendarPage = () => {
         const upcomingForNext = c.nit
           ? (getUpcomingObligationsByNit(c.nit, dianDays)).filter(o => !hidden.has(o.taxType))
           : [];
-        const nextDue  = filterMonth !== 'all'
-          ? (upcoming.length > 0 ? upcoming[0] : null)
-          : (upcomingForNext.length > 0 ? upcomingForNext[0] : null);
-        return { company: c, digit, upcoming, nextDue };
+
+        // Helper para buscar el estado registrado de una obligación DIAN
+        const cNitC2 = (c.nit ?? '').replace(/[^0-9]/g, '');
+        const cNameN2 = normalize(c.name);
+        const isDoneStatus = (s?: string) => s === 'Presentado' || s === 'Pagado' || s === 'No aplica';
+        const matchedStatus = (dianObl: DianObligation) => {
+          const m = obligations.find(o => {
+            const oNitC = (o.nit ?? '').replace(/[^0-9]/g, '');
+            return ((cNitC2 && oNitC && cNitC2 === oNitC) || normalize(o.company) === cNameN2) &&
+              normTax(o.taxType) === normTax(dianObl.taxType) &&
+              sameAutoDueDate(o.dueDate, dianObl.dueDate);
+          });
+          return m?.status;
+        };
+
+        // nextDue = primera obligación pendiente (no completada)
+        const pool = filterMonth !== 'all' ? upcoming : upcomingForNext;
+        const nextDue = pool.find(o => !isDoneStatus(matchedStatus(o))) ?? null;
+
+        const allDianObls = c.nit ? getDianObligationsByNit(c.nit) : [];
+        return { company: c, digit, upcoming, allDianObls, nextDue };
       })
       .filter(row => {
         const cNit  = row.company.nit;
@@ -619,7 +844,7 @@ export const TaxCalendarPage = () => {
           const m = obligations.find(o =>
             sameCompany(o) &&
             normalize(o.taxType) === normalize(dianObl.taxType) &&
-            o.dueDate === dianObl.dueDate
+            sameAutoDueDate(o.dueDate, dianObl.dueDate)
           );
           return { dueDate: dianObl.dueDate, period: dianObl.period, status: m?.status ?? '' };
         });
@@ -627,8 +852,8 @@ export const TaxCalendarPage = () => {
         const manualObls = obligations.filter(o =>
           sameCompany(o) &&
           !row.upcoming.some(u =>
-            normalize(u.taxType) === normalize(o.taxType) &&
-            u.dueDate === o.dueDate
+            normTax(u.taxType) === normTax(o.taxType) &&
+            sameAutoDueDate(o.dueDate, u.dueDate)
           )
         ).map(o => ({ dueDate: o.dueDate, period: o.period ?? '', status: o.status ?? '' }));
 
@@ -666,7 +891,7 @@ export const TaxCalendarPage = () => {
         return true;
       })
       .sort((a, b) => companyOrderIndex(a.company.name) - companyOrderIndex(b.company.name));
-  }, [firestoreCompanies, dianSearch, dianDays, filterDigit, filterUrgency, filterPeriod, filterStatus, filterCompany, filterMonth, obligations]);
+  }, [calendarCompanies, dianSearch, dianDays, filterDigit, filterUrgency, filterPeriod, filterStatus, filterCompany, filterMonth, obligations]);
 
   const URGENCY_BADGE: Record<string, string> = {
     overdue: 'bg-red-100 text-red-700',
@@ -700,7 +925,7 @@ export const TaxCalendarPage = () => {
         const fs = obligations.find(o =>
           match(o) &&
           normalize(o.taxType) === normalize(dianObl.taxType) &&
-          o.dueDate === dianObl.dueDate
+          sameAutoDueDate(o.dueDate, dianObl.dueDate)
         );
         exRows.push({
           Empresa:              company.name,
@@ -709,8 +934,12 @@ export const TaxCalendarPage = () => {
           Período:              dianObl.period,
           Vencimiento:          dianObl.dueDate,
           Estado:               fs?.status ?? '',
-          Contabilidad:         fs?.accountingUser ?? '',
-          Financiera:           fs?.financieraUser ?? '',
+          Contabilidad:         (() => {
+            const s = fs?.stepOwners ?? {};
+            const names = [...new Set(['No iniciado','Revisado','Informe Enviado','Presentado'].map(k => s[k as TaxStatus]).filter(Boolean) as string[])];
+            return names.length ? names.join(', ') : (fs?.accountingUser ?? '');
+          })(),
+          Financiera:           fs?.stepOwners?.['Pagado'] || (fs?.financieraUser ?? ''),
           Proyectado:           fs?.projected ?? '',
           Pagado:               fs?.paid ?? '',
           Observación:          fs?.observation ?? '',
@@ -720,7 +949,7 @@ export const TaxCalendarPage = () => {
       // Obligaciones legales / manuales (no están en upcoming)
       obligations
         .filter(o => match(o) && !upcoming.some(u =>
-          normalize(u.taxType) === normalize(o.taxType) && u.dueDate === o.dueDate
+          normalize(u.taxType) === normalize(o.taxType) && sameAutoDueDate(o.dueDate, u.dueDate)
         ))
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
         .forEach(o => {
@@ -731,8 +960,12 @@ export const TaxCalendarPage = () => {
             Período:              o.period ?? '',
             Vencimiento:          o.dueDate,
             Estado:               o.status ?? '',
-            Contabilidad:         o.accountingUser ?? '',
-            Financiera:           o.financieraUser ?? '',
+            Contabilidad:         (() => {
+              const s = o.stepOwners ?? {};
+              const names = [...new Set(['No iniciado','Revisado','Informe Enviado','Presentado'].map(k => s[k as TaxStatus]).filter(Boolean) as string[])];
+              return names.length ? names.join(', ') : (o.accountingUser ?? '');
+            })(),
+            Financiera:           o.stepOwners?.['Pagado'] || (o.financieraUser ?? ''),
             Proyectado:           o.projected ?? '',
             Pagado:               o.paid ?? '',
             Observación:          o.observation ?? '',
@@ -764,7 +997,7 @@ export const TaxCalendarPage = () => {
             Calendario DIAN
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Vencimientos de retención por dígito del NIT · {dianRows.length} de {firestoreCompanies.filter(c => c.active && c.activeContabilidad).length} empresa{dianRows.length !== 1 ? 's' : ''}
+            Vencimientos de retención por dígito del NIT · {dianRows.length} de {calendarCompanies.filter(c => c.active && c.activeContabilidad).length} empresa{dianRows.length !== 1 ? 's' : ''}
           </p>
           {/* Tabs */}
           <div className="flex gap-1 mt-3">
@@ -782,6 +1015,7 @@ export const TaxCalendarPage = () => {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
+          {isAdmin && <AdminEmailButtons />}
           <button
             onClick={handleExportCalendar}
             disabled={dianRows.length === 0}
@@ -789,9 +1023,11 @@ export const TaxCalendarPage = () => {
           >
             <Download className="w-3.5 h-3.5" /> Exportar Excel
           </button>
-          <Button onClick={openNew} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
-            <Plus className="w-4 h-4 mr-2" /> Nuevo vencimiento
-          </Button>
+          {!isFinanciera && (
+            <Button onClick={openNew} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
+              <Plus className="w-4 h-4 mr-2" /> Nuevo vencimiento
+            </Button>
+          )}
         </div>
       </div>
 
@@ -902,7 +1138,7 @@ export const TaxCalendarPage = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todas las empresas</SelectItem>
-                    {firestoreCompanies
+                    {calendarCompanies
                       .filter(c => c.active && c.activeContabilidad)
                       .sort((a, b) => companyOrderIndex(a.name) - companyOrderIndex(b.name))
                       .map(c => (
@@ -965,7 +1201,7 @@ export const TaxCalendarPage = () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {dianRows.map(({ company, digit, upcoming, nextDue }) => {
+          {dianRows.map(({ company, digit, upcoming, allDianObls, nextDue }) => {
             const noDigit = digit === null;
             const urgency = nextDue ? dianUrgency(nextDue.dueDate) : 'ok';
             const days    = nextDue ? safeDaysUntil(nextDue.dueDate) : null;
@@ -1032,6 +1268,8 @@ export const TaxCalendarPage = () => {
                 {!noDigit && upcoming.length > 0 && (
                   <div className="divide-y divide-gray-50">
                     {upcoming.map((dianObl, i) => {
+                      // Ocultar fechas anteriores al inicio del mes actual (salvo que haya filtro de mes activo)
+                      if (filterMonth === 'all' && dianObl.dueDate < getCalendarCutoff()) return null;
                       const d = safeDaysUntil(dianObl.dueDate);
                       const _mNitC = (company.nit ?? '').replace(/[^0-9]/g, '');
                       const _mNameN = normalize(company.name);
@@ -1039,11 +1277,12 @@ export const TaxCalendarPage = () => {
                         const oNitC = (o.nit ?? '').replace(/[^0-9]/g, '');
                         const nitMatch = _mNitC && oNitC && _mNitC === oNitC;
                         const nameMatch = normalize(o.company) === _mNameN;
-                        return (nitMatch || nameMatch) &&
-                          normalize(o.taxType) === normalize(dianObl.taxType) &&
-                          o.dueDate === dianObl.dueDate;
-                      });
-                      const doneStatus = matched?.status === 'Presentado' || matched?.status === 'Pagado' || matched?.status === 'No aplica';
+        return (nitMatch || nameMatch) &&
+          normTax(o.taxType) === normTax(dianObl.taxType) &&
+          sameAutoDueDate(o.dueDate, dianObl.dueDate);
+      });
+                      if (matched?.status === 'No aplica') return null;
+                      const doneStatus = matched?.status === 'Presentado' || matched?.status === 'Pagado';
                       const u = doneStatus ? 'ok' : dianUrgency(dianObl.dueDate);
                       const cfg = matched?.status ? STATUS_CFG[matched.status] : null;
                       const handleDianClick = () => {
@@ -1148,7 +1387,7 @@ export const TaxCalendarPage = () => {
                             {matched?.presentedAt && (
                               <span className="text-[10px] text-purple-600 flex items-center gap-0.5">
                                 <CheckCircle2 className="w-3 h-3" />
-                                {new Date(matched.presentedAt).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                {new Date(matched.presentedAt).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'America/Bogota' })}
                               </span>
                             )}
                           </div>
@@ -1171,12 +1410,20 @@ export const TaxCalendarPage = () => {
                       return (_cNitC && oNitC && _cNitC === oNitC) ||
                         normalize(o.company) === _cNameN;
                     })
-                    // Excluir las que ya aparecen como entradas del calendario DIAN automático
-                    .filter(o => !upcoming.some(u =>
+                    // Excluir las que pertenecen al calendario DIAN (todo el año, no solo el rango próximo)
+                    .filter(o => !allDianObls.some(u =>
                       u.taxType.toLowerCase().trim() === o.taxType.toLowerCase().trim() &&
-                      u.dueDate === o.dueDate
+                      sameAutoDueDate(o.dueDate, u.dueDate)
                     ))
+                    .filter(o => o.status !== 'No aplica')
+                    // Ocultar fechas anteriores al inicio del mes actual, salvo filtro de mes activo
+                    .filter(o => filterMonth !== 'all' || o.dueDate >= getCalendarCutoff())
                     .filter(o => filterMonth === 'all' || o.dueDate.slice(0, 7) === filterMonth)
+                    .reduce<TaxObligation[]>((acc, o) => {
+                      const k = `${o.taxType}||${o.period ?? ''}||${o.dueDate}`;
+                      if (!acc.some(x => `${x.taxType}||${x.period ?? ''}||${x.dueDate}` === k)) acc.push(o);
+                      return acc;
+                    }, [])
                     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
                   if (legalObls.length === 0) return null;
                   return (
@@ -1258,7 +1505,7 @@ export const TaxCalendarPage = () => {
                     <Select
                       value={form.company}
                       onValueChange={v => {
-                        const c = firestoreCompanies.find(c => c.name === v);
+                        const c = calendarCompanies.find(c => c.name === v);
                         setF('company', v);
                         if (c?.nit) setF('nit', c.nit);
                       }}
@@ -1267,7 +1514,7 @@ export const TaxCalendarPage = () => {
                         <SelectValue placeholder="Selecciona una empresa..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {firestoreCompanies
+                        {calendarCompanies
                           .filter(c => c.active)
                           .sort((a, b) => a.name.localeCompare(b.name, 'es'))
                           .map(c => (
@@ -1312,22 +1559,20 @@ export const TaxCalendarPage = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2 space-y-1">
                     <Label className="text-xs text-gray-500">Tipo de impuesto / obligación *</Label>
-                    <Input value={form.taxType} onChange={e => setF('taxType', e.target.value)} placeholder="Ej: Retención en la fuente" />
+                    <TaxTypeCombobox
+                      value={form.taxType}
+                      onChange={v => setF('taxType', v)}
+                      options={taxTypeOptions}
+                    />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Categoría</Label>
-                    <Select value={form.obligationType} onValueChange={v => setF('obligationType', v)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Impuestos">Impuestos</SelectItem>
-                        <SelectItem value="Información Exógena">Información Exógena</SelectItem>
-                        <SelectItem value="Reportes">Reportes</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Periodo</Label>
-                    <Input value={form.period} onChange={e => setF('period', e.target.value)} placeholder="Ej: Mensual-1, Bim 1, Anual" />
+                  <div className="col-span-2 space-y-1">
+                    <Label className="text-xs text-gray-500">Período</Label>
+                    <TaxTypeCombobox
+                      value={form.period}
+                      onChange={v => setF('period', v)}
+                      options={periodOptions}
+                      placeholder="Seleccionar o escribir período…"
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-gray-500">Fecha de vencimiento *</Label>
@@ -1335,6 +1580,7 @@ export const TaxCalendarPage = () => {
                       type="date"
                       value={form.dueDate}
                       onChange={e => { const v = e.target.value; setF('dueDate', v); if (v) setF('year', v.slice(0, 4)); }}
+                      disabled={isFinanciera}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1343,6 +1589,18 @@ export const TaxCalendarPage = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Fecha editable en quickEdit — solo contabilidad/admin */}
+              {quickEditMode && !isFinanciera && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-500">Fecha de vencimiento</Label>
+                  <Input
+                    type="date"
+                    value={form.dueDate}
+                    onChange={e => { const v = e.target.value; setF('dueDate', v); if (v) setF('year', v.slice(0, 4)); }}
+                  />
+                </div>
+              )}
 
               {/* Proceso — oculto solo al crear desde "Nuevo vencimiento" */}
               <div className={isNew && !quickEditMode ? 'hidden' : ''}>
@@ -1395,8 +1653,15 @@ export const TaxCalendarPage = () => {
                       {/* ── Stepper visual (todos lo ven, read-only para financiera) ── */}
                       <div className="flex items-start mb-5">
                         {STEPS.map((step, i) => {
-                          const done   = curIdx >= i;
-                          const isNext = i === nextIdx && canStepper;
+                          const done     = curIdx >= i;
+                          const isNext   = i === nextIdx && canStepper;
+                          const stepOwner = (editObl as TaxObligation)?.stepOwners?.[step.status];
+                          // Nombre corto: primer nombre solamente
+                          const shortName = stepOwner
+                            ? stepOwner.includes('@')
+                              ? stepOwner.split('@')[0]
+                              : stepOwner.split(' ')[0]
+                            : null;
                           return (
                             <Fragment key={step.status}>
                               {i > 0 && (
@@ -1415,6 +1680,11 @@ export const TaxCalendarPage = () => {
                                   ${done ? 'text-green-600 font-semibold' : isNext ? 'text-blue-500 font-medium' : 'text-gray-300'}`}>
                                   {step.label}
                                 </span>
+                                {shortName && (
+                                  <span className="text-[8px] text-center text-gray-400 leading-tight truncate w-full px-0.5" title={stepOwner ?? ''}>
+                                    {shortName}
+                                  </span>
+                                )}
                               </div>
                             </Fragment>
                           );
@@ -1432,7 +1702,11 @@ export const TaxCalendarPage = () => {
                           )}
 
                           {/* Botón de siguiente paso */}
-                          {curIdx < 3 && nextStep ? (
+                          {form.status === 'No aplica' ? (
+                            <div className="text-center py-3 bg-gray-50 rounded-xl border border-gray-200">
+                              <p className="text-sm font-semibold text-gray-400">✕ No aplica este período</p>
+                            </div>
+                          ) : curIdx < 3 && nextStep ? (
                             <button
                               type="button"
                               disabled={!canNext}
@@ -1467,6 +1741,25 @@ export const TaxCalendarPage = () => {
                                   title="Solo un administrador puede revertir el proceso">
                                   🔒 {curIdx === 0 ? 'Revertir proceso' : 'Paso anterior'}
                                 </div>
+                              )
+                            )}
+                            {!isFinanciera && (
+                              form.status === 'No aplica' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => saveStatusNow('No iniciado' as TaxStatus)}
+                                  className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border text-xs font-medium bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 transition-all"
+                                >
+                                  ↩ Reactivar obligación
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => saveStatusNow('No aplica')}
+                                  className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border text-xs font-medium bg-white border-gray-200 text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-all"
+                                >
+                                  ✕ No aplica este período
+                                </button>
                               )
                             )}
                           </div>
@@ -1505,39 +1798,64 @@ export const TaxCalendarPage = () => {
                     <span className="text-xs text-purple-700 font-medium">Presentado ante DIAN el&nbsp;
                       <span className="font-semibold">
                         {new Date((editObl as TaxObligation).presentedAt!).toLocaleDateString('es-CO', {
-                          day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                          day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
                         })}
                       </span>
                     </span>
                   </div>
                 )}
 
-                {/* Responsables */}
-                {(!isNew && ((editObl as TaxObligation).accountingUser || (editObl as TaxObligation).financieraUser)) && (
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    {(editObl as TaxObligation).accountingUser && (
-                      <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg">
-                        <UserCheck className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-[10px] text-blue-400 font-medium uppercase tracking-wide">Contabilidad</p>
-                          <p className="text-xs text-blue-700 font-semibold truncate">{(editObl as TaxObligation).accountingUser}</p>
+                {/* Responsables por paso */}
+                {!isNew && (() => {
+                  const obl = editObl as TaxObligation;
+                  const stepOwners = obl.stepOwners ?? {};
+                  // Personas únicas de contabilidad (todos los pasos excepto Pagado)
+                  const ACCOUNTING_STEPS: TaxStatus[] = ['No iniciado', 'Revisado', 'Informe Enviado', 'Presentado'];
+                  const accountingContribs = [...new Set(
+                    ACCOUNTING_STEPS.map(s => stepOwners[s]).filter(Boolean) as string[]
+                  )];
+                  const financieraUser = stepOwners['Pagado'] || obl.financieraUser;
+                  // Fallback a los campos legacy si no hay stepOwners aún
+                  const accLegacy = obl.accountingUser;
+                  const showAcc = accountingContribs.length > 0 || accLegacy;
+                  const showFin = !!financieraUser;
+                  if (!showAcc && !showFin) return null;
+                  return (
+                    <div className="mt-3 space-y-2">
+                      {showAcc && (
+                        <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg">
+                          <UserCheck className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] text-blue-400 font-medium uppercase tracking-wide mb-1">Contabilidad</p>
+                            {accountingContribs.length > 0
+                              ? accountingContribs.map(name => (
+                                  <p key={name} className="text-xs text-blue-700 font-semibold truncate">{name}</p>
+                                ))
+                              : <p className="text-xs text-blue-700 font-semibold truncate">{accLegacy}</p>
+                            }
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {(editObl as TaxObligation).financieraUser && (
-                      <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-100 rounded-lg">
-                        <UserCheck className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-[10px] text-green-400 font-medium uppercase tracking-wide">Financiera</p>
-                          <p className="text-xs text-green-700 font-semibold truncate">{(editObl as TaxObligation).financieraUser}</p>
+                      )}
+                      {showFin && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-100 rounded-lg">
+                          <UserCheck className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] text-green-400 font-medium uppercase tracking-wide">Financiera</p>
+                            <p className="text-xs text-green-700 font-semibold truncate">{financieraUser}</p>
+                            {obl.paidAt && (
+                              <p className="text-[10px] text-green-500 mt-0.5">
+                                Pago: {new Date(obl.paidAt + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  );
+                })()}
 
-                {/* Valor proyectado — OBLIGATORIO */}
-                <div className="mt-4 grid grid-cols-2 gap-3">
+                {/* Valores proyectado / pagado / fecha de pago */}
+                <div className="mt-4 grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <Label className="text-xs font-semibold text-gray-700">
                       Valor proyectado
@@ -1546,7 +1864,6 @@ export const TaxCalendarPage = () => {
                       type="number" min="0"
                       value={formProjected}
                       onChange={e => setFormProjected(e.target.value)}
-                      onBlur={saveProjectedNow}
                       placeholder="Opcional"
                       className="text-sm"
                     />
@@ -1559,6 +1876,21 @@ export const TaxCalendarPage = () => {
                       onChange={e => setFormPaid(e.target.value)}
                       placeholder="0"
                       className="text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-500">Fecha de pago</Label>
+                    <Input
+                      type="date"
+                      value={formPaidAt}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setFormPaidAt(v);
+                        savePaidAtNow(v);
+                      }}
+                      onBlur={e => savePaidAtNow(e.target.value)}
+                      className="text-sm"
+                      disabled={!canMarkPaid}
                     />
                   </div>
                 </div>
@@ -1596,8 +1928,8 @@ export const TaxCalendarPage = () => {
                           diffMin < 60 ? `hace ${diffMin}min` :
                           diffH   < 24 ? `hace ${diffH}h` :
                           diffD   < 2  ? 'ayer' :
-                          d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
-                        const timeExact = d.toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+                          d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined, timeZone: 'America/Bogota' });
+                        const timeExact = d.toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' });
                         return (
                           <div key={i} className="flex items-center gap-2 text-xs">
                             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg?.dot ?? 'bg-gray-300'}`} />
@@ -1617,7 +1949,7 @@ export const TaxCalendarPage = () => {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                    <Paperclip className="w-3 h-3" /> Documentos adjuntos ({attachments.length}/1)
+                    <Paperclip className="w-3 h-3" /> Documentos adjuntos ({attachments.length}/5)
                   </p>
                   <label className={`flex items-center gap-1 text-xs cursor-pointer px-2.5 py-1 rounded-lg border transition-colors
                     ${uploading || attachments.length >= 5
@@ -1625,7 +1957,7 @@ export const TaxCalendarPage = () => {
                       : 'border-[#008C3C] text-[#008C3C] hover:bg-[#008C3C]/5'}`}>
                     {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
                     Subir archivo
-                    <input ref={attachFileRef} type="file" className="hidden"
+                    <input ref={attachFileRef} type="file" multiple className="hidden"
                       accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
                       onChange={handleAttachFile} disabled={uploading || attachments.length >= 5} />
                   </label>
@@ -1639,8 +1971,14 @@ export const TaxCalendarPage = () => {
                   onDrop={e => {
                     e.preventDefault();
                     setIsDragging(false);
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) uploadFile(file);
+                    const files = Array.from(e.dataTransfer.files);
+                    if (!files.length) return;
+                    const remaining = 5 - attachments.length;
+                    if (remaining <= 0) { toast.error('Máximo 5 archivos por obligación'); return; }
+                    const toUpload = files.slice(0, remaining);
+                    setUploading(true);
+                    setUploadProgress(0);
+                    (async () => { for (const f of toUpload) await uploadFile(f); setUploading(false); })();
                   }}
                   className={`flex flex-col items-center justify-center gap-1.5 w-full rounded-xl border-2 border-dashed py-4 mb-2 cursor-pointer transition-all
                     ${uploading || attachments.length >= 5
@@ -1649,7 +1987,7 @@ export const TaxCalendarPage = () => {
                         ? 'border-[#008C3C] bg-[#008C3C]/5 scale-[1.01]'
                         : 'border-gray-200 hover:border-[#008C3C]/50 hover:bg-gray-50'}`}
                 >
-                  <input type="file" className="hidden"
+                  <input type="file" multiple className="hidden"
                     accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
                     onChange={handleAttachFile} disabled={uploading || attachments.length >= 5} />
                   {uploading
@@ -1703,10 +2041,20 @@ export const TaxCalendarPage = () => {
           {editObl && (
             <div className="flex gap-2 px-5 py-4 border-t border-gray-100 flex-shrink-0 bg-white">
               {!isNew && quickEditMode ? (
-                // Obligación existente abierta desde calendario DIAN — estados se auto-guardan
-                <Button variant="outline" className="flex-1" onClick={closeDialog}>
-                  Cerrar
-                </Button>
+                // Obligación existente abierta desde calendario DIAN
+                <>
+                  <Button variant="outline" className="flex-1" onClick={closeDialog} disabled={saving}>
+                    Cerrar
+                  </Button>
+                  <Button
+                    onClick={handleSave}
+                    disabled={saving || uploading || !form.company.trim() || !form.taxType.trim() || !form.dueDate}
+                    className="flex-1 bg-[#008C3C] hover:bg-[#006C2F] text-white"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
+                    Guardar cambios
+                  </Button>
+                </>
               ) : isNew && !quickEditMode ? (
                 // Nuevo vencimiento desde "+Nuevo": Cancelar + Crear
                 <>

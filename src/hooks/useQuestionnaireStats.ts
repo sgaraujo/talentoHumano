@@ -25,7 +25,31 @@ interface RawUser {
   id: string;
   role: string;
   projectIds?: string[];
-  contractInfo?: { assignment?: { projectId?: string } };
+  contractInfo?: { assignment?: { projectId?: string; company?: string } };
+}
+
+export interface QuestionnaireCompanyRow {
+  company: string;
+  assigned: number;
+  completed: number;
+  pending: number;
+  rate: number;
+}
+
+export interface QuestionnaireRecipientRow {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  company: string;
+  status: 'completed' | 'pending';
+  assignedAt: Date | null;
+  completedAt: Date | null;
+}
+
+export interface QuestionnaireDetail {
+  byCompany: QuestionnaireCompanyRow[];
+  byProject: ProjectStatRow[];
+  recipients: QuestionnaireRecipientRow[];
 }
 
 export interface QuestionnaireStatRow {
@@ -102,6 +126,7 @@ export function useQuestionnaireStats() {
   const [byProject, setByProject] = useState<ProjectStatRow[]>([]);
   const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
   const [pendingAlerts, setPendingAlerts] = useState<PendingAlert[]>([]);
+  const [questionnaireDetails, setQuestionnaireDetails] = useState<Map<string, QuestionnaireDetail>>(new Map());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -193,6 +218,76 @@ export function useQuestionnaireStats() {
         })
         .sort((a, b) => b.assigned - a.assigned);
       setByQuestionnaire(byQ);
+
+      // ── Detalle por cuestionario: empresa + proyecto + destinatarios ───────
+      const detailMap = new Map<string, QuestionnaireDetail>();
+      for (const q of questionnaires) {
+        const qa = assignments.filter(a => a.questionnaireId === q.id);
+
+        // Por empresa
+        const compAcc = new Map<string, { assigned: number; completed: number }>();
+        // Por proyecto (dentro del cuestionario)
+        const projAcc2 = new Map<string, { name: string; assigned: number; completed: number }>();
+        const recipients: QuestionnaireRecipientRow[] = [];
+
+        for (const a of qa) {
+          const user = userMap.get(a.userId) as any;
+          const company: string = user?.contractInfo?.assignment?.company ?? "Sin empresa";
+          const done = realCompleted(a);
+
+          // Por empresa
+          if (!compAcc.has(company)) compAcc.set(company, { assigned: 0, completed: 0 });
+          const ce = compAcc.get(company)!;
+          ce.assigned++;
+          if (done) ce.completed++;
+
+          // Por proyecto
+          const pid: string =
+            user?.contractInfo?.assignment?.projectId
+              ? user.contractInfo.assignment.projectId
+              : user?.projectIds?.[0] ?? "sin-proyecto";
+          const pname = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin proyecto" : pid);
+          if (!projAcc2.has(pid)) projAcc2.set(pid, { name: pname, assigned: 0, completed: 0 });
+          const pe = projAcc2.get(pid)!;
+          pe.assigned++;
+          if (done) pe.completed++;
+
+          recipients.push({
+            userId: a.userId,
+            userName: a.userName,
+            userEmail: a.userEmail,
+            company,
+            status: done ? 'completed' : 'pending',
+            assignedAt: a.assignedAt,
+            completedAt: a.completedAt,
+          });
+        }
+
+        detailMap.set(q.id, {
+          byCompany: Array.from(compAcc.entries())
+            .map(([company, v]) => ({
+              company,
+              assigned: v.assigned,
+              completed: v.completed,
+              pending: v.assigned - v.completed,
+              rate: v.assigned > 0 ? Math.round((v.completed / v.assigned) * 100) : 0,
+            }))
+            .sort((a, b) => b.assigned - a.assigned),
+          byProject: Array.from(projAcc2.entries())
+            .map(([projectId, v]) => ({
+              projectId,
+              projectName: v.name,
+              assigned: v.assigned,
+              completed: v.completed,
+              rate: v.assigned > 0 ? Math.round((v.completed / v.assigned) * 100) : 0,
+            }))
+            .sort((a, b) => b.assigned - a.assigned),
+          recipients: recipients.sort((a, b) =>
+            a.status === b.status ? 0 : a.status === 'pending' ? -1 : 1
+          ),
+        });
+      }
+      setQuestionnaireDetails(detailMap);
 
       // ── Por rol ───────────────────────────────────────────────────────────
       const roleAcc = new Map<string, { assigned: number; completed: number }>();
@@ -333,6 +428,7 @@ export function useQuestionnaireStats() {
     byProject,
     timeline,
     pendingAlerts,
+    questionnaireDetails,
     refresh: load,
   };
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { companyService } from '@/services/companyService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import {
 import {
   Building2, Plus, Pencil, Trash2, Phone,
   Mail, MapPin, Search, Loader2, BarChart2, PowerOff, Power,
-  Users, Calculator, Upload,
+  Users, Calculator, Upload, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -140,6 +141,25 @@ export const CompaniesPage = () => {
     load();
   };
 
+  const handleExport = () => {
+    const rows = filtered.map(c => ({
+      'Nombre':           c.name,
+      'NIT':              c.nit,
+      'Estado':           c.active ? 'Activa' : 'Inactiva',
+      'Talento Humano':   c.activeTH ? 'Sí' : 'No',
+      'Contabilidad':     c.activeContabilidad ? 'Sí' : 'No',
+      'Regional':         c.regional || '',
+      'Base de Operación':c.baseDeOperacion || '',
+      'Dirección':        c.address || '',
+      'Teléfono':         c.phone || '',
+      'Email':            c.email || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Empresas');
+    XLSX.writeFile(wb, `empresas_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
   return (
     <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
 
@@ -150,6 +170,9 @@ export const CompaniesPage = () => {
           <p className="text-[#4A4A4A]/70 mt-1 text-sm">Gestión de perfiles de empresa</p>
         </div>
         <div className="flex gap-2">
+          <Button onClick={handleExport} variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+            <Download className="w-4 h-4 mr-2" /> Exportar
+          </Button>
           <Button onClick={handleImport} disabled={importing} variant="outline" className="border-blue-200 text-blue-600 hover:bg-blue-50">
             {importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
             Importar lista

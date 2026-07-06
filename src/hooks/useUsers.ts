@@ -5,60 +5,123 @@ import { companyService } from '../services/companyService';
 import { projectService } from '../services/projectService';
 import type { MovementRecord } from '../models/types/Analytics';
 
+type ImportProgress = {
+    percent: number;
+    label: string;
+};
+
+const FORCE_EXCOLABORADOR_EMAILS = [
+    'shuertasmartin@gmail.com',
+    'jgutierrez@qualitrolcorp.com',
+    'paula.acosta@asp.com',
+    'saidy.gomez@asp.com',
+    'ricardo.perea@asp.com',
+    'frank.narvaez@asp.com',
+    'marlon.amaya@asp.com',
+    'natalia.garnica@asp.com',
+    'ssantamaria@qualitrolcorp.com',
+    'ricardo.quiroz@asp.com',
+    'armando.varela@fluke.com',
+    'manuel.deangulo@asp.com',
+    'gerardo.valencia@asp.com',
+    'carlos.arguello@asp.com',
+    'rodriguezvane800@gmail.com',
+    'paola.palacios@asp.com',
+    'elizabeth.gutierrez@asp.com',
+    'leidy.delgado@asp.com',
+    'isabel.aguirre@asp.com',
+    'michael.talerorodriguez@asp.com',
+    'sara.ossa@asp.com',
+    'nohora.campo@asp.com',
+    'paola.barragan@asp.com',
+    'maritza.swann@asp.com',
+    'kurtude1@gmail.com',
+    'dherran@inteegra.net.co',
+    'c.avellaneda7@gmail.com',
+    'edna.acosta@asp.com',
+    'rafael.arango@asp.com',
+    'gisela.guarin@asp.com',
+    'sandra.rodriguez@asp.com',
+    'jessica.bermudez@asp.com',
+    'lina.beltran@asp.com',
+    'david.ramirez@asp.com',
+    'yineth.cerquera@asp.com',
+    'est.laura.amado@unimilitar.edu.co',
+    'i.sabella.0605@hotmail.com',
+    'blanca.hernandez@asp.com',
+    'nicolas.ocampo@asp.com',
+    'paola.revelo@asp.com',
+    'johan.aragonez@asp.com',
+    'maria.ruiz@fluke.com',
+    'julieth.criollo@asp.com',
+    'yaneth.munoz@asp.com',
+    'alejandro.moreno@asp.com',
+    'luz.castellon@fluke.com',
+    'pilar.nino@asp.com',
+    'darwin.linares@asp.com',
+    'argenis.sandoval@asp.com',
+];
+
 // ========== Helpers para parsear datos del Excel ==========
 
 /** Convierte número serial de Excel, Date o string a Date (medianoche local) */
-function parseExcelDate(val: any): Date | undefined {
+function parseExcelDate(
+  val: any,
+  opts: { minYear?: number; maxYear?: number } = {}
+): Date | undefined {
   if (!val) return undefined;
+  let parsed: Date | undefined;
+  const fromParts = (year: number, month: number, day: number) => {
+    const dt = new Date(year, month - 1, day);
+    if (
+      dt.getFullYear() !== year ||
+      dt.getMonth() !== month - 1 ||
+      dt.getDate() !== day
+    ) return undefined;
+    return dt;
+  };
 
   if (val instanceof Date) {
     if (isNaN(val.getTime())) return undefined;
     // Re-construir en zona local para evitar desfase UTC
-    return new Date(val.getFullYear(), val.getMonth(), val.getDate());
-  }
-
-  if (typeof val === 'number') {
+    parsed = new Date(val.getFullYear(), val.getMonth(), val.getDate());
+  } else if (typeof val === 'number') {
     if (val <= 0) return undefined;
     const excelEpoch = new Date(1899, 11, 30);
-    const tmp = new Date(excelEpoch.getTime() + val * 86400000);
+    const tmp = new Date(excelEpoch.getTime() + Math.floor(val) * 86400000);
     if (isNaN(tmp.getTime())) return undefined;
-    return new Date(tmp.getFullYear(), tmp.getMonth(), tmp.getDate());
+    parsed = new Date(tmp.getFullYear(), tmp.getMonth(), tmp.getDate());
+  } else if (typeof val === 'string') {
+    const s = val.trim().split(/\s+/)[0];
+    if (!s) return undefined;
+
+    // YYYYMMDD
+    if (/^\d{8}$/.test(s)) {
+      const y = Number(s.slice(0, 4));
+      const m = Number(s.slice(4, 6));
+      const d = Number(s.slice(6, 8));
+      parsed = fromParts(y, m, d);
+    }
+
+    const parts = s.split(/[\/\-.]/).map(Number);
+    if (!parsed && parts.length === 3 && parts.every(Number.isFinite)) {
+      let [a, b, c] = parts;
+      if (a > 999) {
+        parsed = fromParts(a, b, c);
+      } else {
+        const year = c < 100 ? (c < 50 ? 2000 + c : 1900 + c) : c;
+        // Colombia: preferir dia/mes/anio. Si no es valido y mes/dia si lo es,
+        // aceptar el formato alterno.
+        parsed = fromParts(year, b, a) || fromParts(year, a, b);
+      }
+    }
   }
 
-  if (typeof val === 'string') {
-    const s = val.trim();
-    if (!s) return undefined;
-    // YYYY-MM-DD
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-      const [y, m, d] = s.split('-').map(Number);
-      return new Date(y, m - 1, d);
-    }
-    // DD/MM/YYYY or D/M/YYYY (Colombia standard)
-    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
-      const [d, m, y] = s.split('/').map(Number);
-      const dt = new Date(y, m - 1, d);
-      return isNaN(dt.getTime()) ? undefined : dt;
-    }
-    // DD-MM-YYYY
-    if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
-      const [d, m, y] = s.split('-').map(Number);
-      const dt = new Date(y, m - 1, d);
-      return isNaN(dt.getTime()) ? undefined : dt;
-    }
-    // DD/MM/YY
-    if (/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(s)) {
-      const [d, m, yy] = s.split('/').map(Number);
-      const y = yy < 50 ? 2000 + yy : 1900 + yy;
-      return new Date(y, m - 1, d);
-    }
-    // YYYY/MM/DD
-    if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) {
-      const [y, m, d] = s.split('/').map(Number);
-      return new Date(y, m - 1, d);
-    }
-    return undefined;
-  }
-  return undefined;
+  if (!parsed || isNaN(parsed.getTime())) return undefined;
+  const minYear = opts.minYear ?? 1900;
+  const maxYear = opts.maxYear ?? new Date().getFullYear() + 10;
+  if (parsed.getFullYear() < minYear || parsed.getFullYear() > maxYear) return undefined;
+  return parsed;
 }
 
 /** Normaliza SI/NO/X/1/TRUE a boolean */
@@ -81,6 +144,104 @@ function parseNumber(val: any): number | undefined {
     return isNaN(num) ? undefined : num;
   }
   return undefined;
+}
+
+function cleanText(val: any): string {
+  return (val ?? '').toString().replace(/\uFEFF/g, '').replace(/[\r\n\t]/g, ' ').trim();
+}
+
+function cleanEmail(val: any): string {
+  return cleanText(val).replace(/^"+|"+$/g, '').replace(/\s+/g, '').toLowerCase();
+}
+
+function cleanDocument(val: any): string {
+  return cleanText(val).replace(/[.\s]/g, '').replace(/,/g, '');
+}
+
+function normalizeGender(val: any): string | undefined {
+  const gender = cleanText(val)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (!gender) return undefined;
+  if (['m', 'masculino', 'hombre', 'male'].includes(gender)) return 'Masculino';
+  if (['f', 'femenino', 'mujer', 'female'].includes(gender)) return 'Femenino';
+  return 'Otro';
+}
+
+function normalizeProperText(val: any): string | undefined {
+  const text = cleanText(val).replace(/\s+/g, ' ');
+  return text || undefined;
+}
+
+function normalizeHeader(val: string): string {
+  return cleanText(val)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function getRowValue(row: any, names: string[]): any {
+  for (const name of names) {
+    if (row[name] !== undefined) return row[name];
+  }
+
+  const wanted = new Set(names.map(normalizeHeader));
+  const match = Object.keys(row).find(key => wanted.has(normalizeHeader(key)));
+  return match ? row[match] : undefined;
+}
+
+function isRetiredStatus(val: any): boolean {
+  const estado = cleanText(val).toLowerCase();
+  return estado.includes('retirad')
+    || estado.includes('anulad')
+    || estado.includes('terminad')
+    || estado.includes('finalizad')
+    || estado.includes('cancelad')
+    || estado.includes('inactiv');
+}
+
+function hasNameTokens(fullName: string, tokens: string[]): boolean {
+  const normalized = fullName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return tokens.every(token => normalized.includes(token));
+}
+
+function resolvePrimaryEmail(row: any, fullName: string): string {
+  const corporateEmail = cleanEmail(row['CORREO CORPORATIVO']);
+  const personalEmail = cleanEmail(row['CORREO ELECTRONICO PERSONAL']);
+  const fallbackEmail = cleanEmail(row['Email'] || row['email'] || row['Correo']);
+
+  // Daniela comparte el correo corporativo dherran@inteegra.net.co con otro registro
+  // histórico. Usar su correo personal evita actualizar a Jhon Sebastian por error.
+  if (
+    corporateEmail === 'dherran@inteegra.net.co'
+    && personalEmail
+    && hasNameTokens(fullName, ['herran', 'pulido', 'daniela'])
+  ) {
+    return personalEmail;
+  }
+
+  return corporateEmail || personalEmail || fallbackEmail;
+}
+
+function mustStayExcolaborador(row: any, email: string): boolean {
+  const forced = new Set(FORCE_EXCOLABORADOR_EMAILS);
+  return [
+    email,
+    cleanEmail(row['CORREO CORPORATIVO']),
+    cleanEmail(row['CORREO ELECTRONICO PERSONAL']),
+    cleanEmail(row['Email'] || row['email'] || row['Correo']),
+  ].some(candidate => candidate && forced.has(candidate));
+}
+
+function getUserImportKey(user: any): string {
+  const documentNumber = user.personalData?.documentNumber;
+  if (documentNumber) return `doc:${documentNumber}`;
+  return `email:${cleanEmail(user.email)}`;
 }
 
 
@@ -154,6 +315,14 @@ export const useUsers = () => {
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+
+    const updateImportProgress = (percent: number, label: string) => {
+        setImportProgress({
+            percent: Math.max(0, Math.min(100, Math.round(percent))),
+            label,
+        });
+    };
 
     // Actualizar usuario
     const updateUser = async (userId: string, data: any) => {
@@ -215,6 +384,7 @@ export const useUsers = () => {
         try {
             setLoading(true);
             setError(null);
+            updateImportProgress(1, 'Leyendo archivo');
 
             // Leer archivo Excel
             const XLSX = await import('xlsx');
@@ -222,6 +392,7 @@ export const useUsers = () => {
             const workbook = XLSX.read(data);
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(worksheet);
+            updateImportProgress(8, 'Analizando filas del Excel');
 
             // Debug: mostrar columnas del Excel en consola
             if (jsonData.length > 0) {
@@ -233,27 +404,34 @@ export const useUsers = () => {
             const usersToCreate: any[] = [];
             const movementsMap = new Map<string, Omit<MovementRecord, 'id' | 'createdAt'>>();
 
-            for (const row of jsonData as any[]) {
+            for (const [index, row] of (jsonData as any[]).entries()) {
+                if (index % 100 === 0 && jsonData.length > 0) {
+                    updateImportProgress(8 + (index / jsonData.length) * 22, 'Normalizando datos');
+                }
+
                 // --- Determinar email y nombre ---
-                const email = (row['CORREO CORPORATIVO'] || row['CORREO ELECTRONICO PERSONAL'] || row['Email'] || row['email'] || row['Correo'] || '').toString().trim();
-                const fullName = (row['APELLIDOS Y NOMBRES'] || row['Nombre Completo'] || row['Nombre'] || '').toString().trim();
+                const fullName = cleanText(row['APELLIDOS Y NOMBRES'] || row['Nombre Completo'] || row['Nombre']);
+                const email = resolvePrimaryEmail(row, fullName);
 
                 if (!email) continue; // Sin email no se puede crear usuario
 
                 // --- Determinar role ---
-                // ESTADO es la fuente de verdad. La fecha de retiro solo se guarda
-                // como dato histórico pero no determina el rol.
-                const estado = (row['ESTADO'] || '').toString().trim().toUpperCase();
                 const fechaRetiro = parseExcelDate(row['FECHA RETIRO']);
-                const isRetirado = estado === 'ANULADO'
-                  || estado === 'ANULADA'
-                  || estado === 'RETIRADO'
-                  || estado === 'RETIRADA';
+                const isRetirado = isRetiredStatus(row['ESTADO']) || mustStayExcolaborador(row, email);
                 const role = isRetirado ? 'excolaborador' : 'colaborador';
 
                 // --- Fechas ---
-                const fechaIngreso = parseExcelDate(row['FECHA DE INGRESO']);
-                const fechaNacimiento = parseExcelDate(row['FECHA DE NACIMIENTO']);
+                const fechaIngreso = parseExcelDate(row['FECHA DE INGRESO'], { minYear: 1950 });
+                const fechaNacimientoRaw = getRowValue(row, [
+                  'FECHA DE NACIMIENTO',
+                  'FECHA NACIMIENTO',
+                  'F. NACIMIENTO',
+                  'NACIMIENTO',
+                ]);
+                const fechaNacimiento = parseExcelDate(fechaNacimientoRaw, {
+                  minYear: 1900,
+                  maxYear: new Date().getFullYear(),
+                });
 
                 // --- Números ---
                 const sueldo = parseNumber(row['Sueldo']);
@@ -281,62 +459,62 @@ export const useUsers = () => {
                     completedOnboardings: [],
 
                     personalData: {
-                        documentType:          row['TIPO DOCUMENTO'] || undefined,
-                        documentNumber:        row['CEDULA'] ? String(row['CEDULA']) : undefined,
+                        documentType:          normalizeProperText(row['TIPO DOCUMENTO']),
+                        documentNumber:        row['CEDULA'] ? cleanDocument(row['CEDULA']) : undefined,
                         documentExpeditionDate: parseExcelDate(row['FECHA EXPEDICION']) || undefined,
                         fullName:              fullName || undefined,
-                        gender:                row['GENERO'] || undefined,
+                        gender:                normalizeGender(row['GENERO']),
                         birthDate:             fechaNacimiento || undefined,
                         age:                   edad || undefined,
-                        ageRange:              row['RANGO DE EDAD'] || undefined,
-                        bloodType:             row['RH'] ? String(row['RH']).trim() : undefined,
-                        maritalStatus:         row['ESTADO CIVIL'] || undefined,
-                        nationality:           row['PAIS - NACIONALIDAD'] ? String(row['PAIS - NACIONALIDAD']).trim() : undefined,
-                        position:              row['CARGO'] || undefined,
+                        ageRange:              normalizeProperText(row['RANGO DE EDAD']),
+                        bloodType:             normalizeProperText(row['RH']),
+                        maritalStatus:         normalizeProperText(row['ESTADO CIVIL']),
+                        nationality:           normalizeProperText(row['PAIS - NACIONALIDAD']),
+                        position:              normalizeProperText(row['CARGO']),
                         phone:                 row['TELEFONO PERSONAL'] ? String(row['TELEFONO PERSONAL']) : undefined,
                     },
 
                     location: {
-                        country: row['PAIS - NACIONALIDAD'] || undefined,
-                        state: row['DEPARTAMENTO DE RESIDENCIA'] || undefined,
-                        department: row['DEPARTAMENTO DE RESIDENCIA'] || undefined,
-                        city: row['CIUDAD DE RESIDENCIA'] || undefined,
-                        address: row['DIRECCION VIVIENDA'] || undefined,
-                        personalEmail: row['CORREO ELECTRONICO PERSONAL'] || undefined,
-                        corporateEmail: row['CORREO CORPORATIVO'] || undefined,
+                        country: normalizeProperText(row['PAIS - NACIONALIDAD']),
+                        state: normalizeProperText(row['DEPARTAMENTO DE RESIDENCIA']),
+                        department: normalizeProperText(row['DEPARTAMENTO DE RESIDENCIA']),
+                        city: normalizeProperText(row['CIUDAD DE RESIDENCIA']),
+                        address: normalizeProperText(row['DIRECCION VIVIENDA']),
+                        personalEmail: cleanEmail(row['CORREO ELECTRONICO PERSONAL']) || undefined,
+                        corporateEmail: cleanEmail(row['CORREO CORPORATIVO']) || undefined,
                         corporatePhone: row['TELEFONO CORPORATIVO'] ? String(row['TELEFONO CORPORATIVO']) : undefined,
                     },
 
                     contractInfo: {
                         contract: {
-                            contractType:      row['TIPO DE CONTRATO'] || undefined,
+                            contractType:      normalizeProperText(row['TIPO DE CONTRATO']),
                             startDate:         fechaIngreso || undefined,
-                            entryJustification: row['JUSTIFICACIÓN DE INGRESO'] || row['JUSTIFICACION DE INGRESO'] || undefined,
+                            entryJustification: normalizeProperText(row['JUSTIFICACIÓN DE INGRESO'] || row['JUSTIFICACION DE INGRESO']),
                         },
                         workConditions: {
-                            workday:              row['JORNADA'] || undefined,
-                            workModality:         row['MODALIDAD'] || undefined,
+                            workday:              normalizeProperText(row['JORNADA']),
+                            workModality:         normalizeProperText(row['MODALIDAD']),
                             baseSalary:           sueldo || undefined,
                             productiveStartDate:  iniciaProductiva || undefined,
                             productiveEndDate:    finProductiva || undefined,
                         },
                         assignment: {
-                            company: row['EMPRESA'] ? String(row['EMPRESA']).trim() : undefined,
-                            project: row['PROYECTO'] ? String(row['PROYECTO']).trim() : undefined,
-                            analyticalAccount: row['CUENTA ANALITICA'] ? String(row['CUENTA ANALITICA']) : undefined,
-                            regional: row['REGIONAL'] || undefined,
-                            sede: row['BASE DE OPERACION'] || undefined,
-                            area: row['DEPARTAMENTO'] || undefined,
-                            directSupervisor: row['JEFE INMEDIATO'] || undefined,
-                            accountingProfile: row['PERFIL CONTABLE'] || undefined,
-                            profile: row['PERFIL'] || undefined,
-                            position: row['CARGO'] || undefined,
-                            clientApplicationStatus: row['ESTADO APLICATIVO CLIENTE'] || undefined,
+                            company: normalizeProperText(row['EMPRESA']),
+                            project: normalizeProperText(row['PROYECTO']),
+                            analyticalAccount: normalizeProperText(row['CUENTA ANALITICA']),
+                            regional: normalizeProperText(row['REGIONAL']),
+                            sede: normalizeProperText(row['BASE DE OPERACION']),
+                            area: normalizeProperText(row['DEPARTAMENTO']),
+                            directSupervisor: normalizeProperText(row['JEFE INMEDIATO']),
+                            accountingProfile: normalizeProperText(row['PERFIL CONTABLE']),
+                            profile: normalizeProperText(row['PERFIL']),
+                            position: normalizeProperText(row['CARGO']),
+                            clientApplicationStatus: normalizeProperText(row['ESTADO APLICATIVO CLIENTE']),
                         },
                     },
 
                     salaryInfo: {
-                        salaryType:            row['TIPO DE SALARIO'] || undefined,
+                        salaryType:            normalizeProperText(row['TIPO DE SALARIO']),
                         baseSalary:            sueldo || undefined,
                         baseSalary2022:        salario2022 || undefined,
                         baseSalary2023:        salario2023 || undefined,
@@ -349,29 +527,29 @@ export const useUsers = () => {
                         toolsAllowance:        auxHerramientas || undefined,
                         communicationAllowance: auxComunicacion || undefined,
                         salaryKpi:             kpiSalarial || undefined,
-                        discountRecord:        row['Acta de Descuento'] || undefined,
+                        discountRecord:        normalizeProperText(row['Acta de Descuento']),
                     },
 
                     socialSecurity: {
-                        eps: row['EPS'] || undefined,
-                        afp: row['AFP'] || undefined,
-                        ccf: row['CCF'] || undefined,
-                        severanceFund: row['CESANTIAS'] || undefined,
+                        eps: normalizeProperText(row['EPS']),
+                        afp: normalizeProperText(row['AFP']),
+                        ccf: normalizeProperText(row['CCF']),
+                        severanceFund: normalizeProperText(row['CESANTIAS']),
                         arlRiskLevel: row['RIESGO ARL'] ? String(row['RIESGO ARL']) : undefined,
                     },
 
                     bankingInfo: {
-                        bankName: row['ENTIDAD BANCARIA'] || undefined,
-                        accountType: row['TIPO DE CUENTA'] || undefined,
+                        bankName: normalizeProperText(row['ENTIDAD BANCARIA']),
+                        accountType: normalizeProperText(row['TIPO DE CUENTA']),
                         accountNumber: row['NUMERO DE CUENTA'] ? String(row['NUMERO DE CUENTA']) : undefined,
                     },
 
                     administrativeRecord: {
                         terminationDate:          fechaRetiro || undefined,
-                        terminationReason:        row['MOTIVO'] || undefined,
-                        terminationJustification: row['JUSTIFICACIÓN RETIRO'] || row['JUSTIFICACION RETIRO'] || undefined,
-                        entryJustification:       row['JUSTIFICACIÓN DE INGRESO'] || row['JUSTIFICACION DE INGRESO'] || undefined,
-                        lifeInsuranceStatus:      row['ESTADO SEGURO DE VIDA'] || undefined,
+                        terminationReason:        normalizeProperText(row['MOTIVO']),
+                        terminationJustification: normalizeProperText(row['JUSTIFICACIÓN RETIRO'] || row['JUSTIFICACION RETIRO']),
+                        entryJustification:       normalizeProperText(row['JUSTIFICACIÓN DE INGRESO'] || row['JUSTIFICACION DE INGRESO']),
+                        lifeInsuranceStatus:      normalizeProperText(row['ESTADO SEGURO DE VIDA']),
                         isMother:                 parseBool(row['MADRE']),
                         isPregnant:               parseBool(row['EMBARAZO']),
                         disciplinaryActions:      parseNumber(row['LLAMADOS DE ATENCION']) !== undefined
@@ -380,9 +558,9 @@ export const useUsers = () => {
                     },
 
                     professionalProfile: {
-                        academicLevel:        row['NIVEL ACADEMICA'] || row['NIVEL ACADEMICO'] || undefined,
-                        degree:               row['PROFESION'] || undefined,
-                        professionalLicense:  row['COPNIA/CPNI'] ? String(row['COPNIA/CPNI']).trim() : undefined,
+                        academicLevel:        normalizeProperText(row['NIVEL ACADEMICA'] || row['NIVEL ACADEMICO']),
+                        degree:               normalizeProperText(row['PROFESION']),
+                        professionalLicense:  normalizeProperText(row['COPNIA/CPNI']),
                     },
                 };
 
@@ -445,6 +623,12 @@ export const useUsers = () => {
                 }
             }
 
+            const usersToImport = Array.from(
+                new Map(usersToCreate.map(user => [getUserImportKey(user), user])).values()
+            );
+            const duplicateRowsMerged = usersToCreate.length - usersToImport.length;
+            updateImportProgress(32, 'Preparando empresas y proyectos');
+
             // ── Auto-crear empresas y proyectos desde el Excel ──────────────
 
             // 1. Recolectar empresas únicas (con NIT) y pares empresa::proyecto
@@ -475,6 +659,7 @@ export const useUsers = () => {
             }
 
             // 3. Crear proyectos que no existan, mapear "empresa::proyecto" → id
+            updateImportProgress(42, 'Validando proyectos');
             const existingProjects = await projectService.getAll();
             const projectKeyToId = new Map<string, string>();
             for (const p of existingProjects) {
@@ -499,7 +684,7 @@ export const useUsers = () => {
             }
 
             // 4. Inyectar companyId y projectId en cada usuario
-            for (const user of usersToCreate) {
+            for (const user of usersToImport) {
                 const empresa = user.contractInfo?.assignment?.company;
                 const proyecto = user.contractInfo?.assignment?.project;
                 const companyId = empresa ? companyNameToId.get(empresa) : undefined;
@@ -519,9 +704,14 @@ export const useUsers = () => {
             // ────────────────────────────────────────────────────────────────
 
             // Crear/actualizar usuarios en batch
-            const results = await userService.createBatch(usersToCreate);
+            updateImportProgress(55, 'Guardando usuarios');
+            const results = await userService.createBatch(usersToImport);
+
+            updateImportProgress(68, 'Asegurando excolaboradores');
+            const forcedExcolaboradores = await userService.markEmailsAsExcolaborador(FORCE_EXCOLABORADOR_EMAILS);
 
             // Limpiar movements previos de import antes de crear nuevos
+            updateImportProgress(72, 'Actualizando movimientos');
             await analyticsService.deleteMovementsBySource('import-excel');
 
             // Solo crear movements para usuarios que fueron creados o actualizados exitosamente
@@ -540,14 +730,19 @@ export const useUsers = () => {
             }
 
             // Recargar datos
+            updateImportProgress(84, 'Recargando usuarios');
             await loadUsers();
             await loadStats();
 
             // Auto-sincronizar estados de proyectos
+            updateImportProgress(92, 'Sincronizando proyectos');
             const syncResult = await projectService.syncStatuses();
+            updateImportProgress(100, 'Importación completada');
 
             return {
                 ...results,
+                duplicateRowsMerged,
+                forcedExcolaboradores,
                 movements: movementResults,
                 projectsInactivated: syncResult.inactivated,
             };
@@ -556,6 +751,7 @@ export const useUsers = () => {
             throw err;
         } finally {
             setLoading(false);
+            setTimeout(() => setImportProgress(null), 1200);
         }
     };
 
@@ -595,6 +791,7 @@ export const useUsers = () => {
         stats,
         loading,
         error,
+        importProgress,
         importUsersFromExcel,
         refreshUsers: loadUsers,
         updateUser,
