@@ -524,6 +524,35 @@ export function getUpcomingObligations(digit: NitDigit, daysAhead = 60): DianObl
   });
 }
 
+// ── Obligaciones pasadas — por NIT completo (incluye Bogotá) ─────────────────
+export function getAllObligationsByNit(nit: string): DianObligation[] {
+  const nacional = getDianObligationsByNit(nit);
+  const bogota: DianObligation[] = ALL_BOGOTA_2026.map(o => ({
+    taxType: o.taxType,
+    category: 'ICA' as const,
+    period: o.period,
+    dueDate: o.dueDate,
+    scope: 'Distrital' as const,
+  }));
+  return [...nacional, ...bogota].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+}
+
+export function getPastObligationsByNit(nit: string): DianObligation[] {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const nacional = getDianObligationsByNit(nit);
+  const bogota: DianObligation[] = ALL_BOGOTA_2026.map(o => ({
+    taxType: o.taxType,
+    category: 'ICA' as const,
+    period: o.period,
+    dueDate: o.dueDate,
+    scope: 'Distrital' as const,
+  }));
+  return [...nacional, ...bogota]
+    .filter(o => o.dueDate < todayStr)
+    .sort((a, b) => b.dueDate.localeCompare(a.dueDate)); // más reciente primero
+}
+
 // ── Solo obligaciones próximas — por NIT completo (incluye Exógena PJ + Bogotá) ─
 export function getUpcomingObligationsByNit(nit: string, daysAhead = 60): DianObligation[] {
   const today = new Date(); today.setHours(0, 0, 0, 0);

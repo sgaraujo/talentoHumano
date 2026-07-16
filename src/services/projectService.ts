@@ -3,10 +3,11 @@ import {
   doc, query, where, serverTimestamp, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { Project } from '../models/types/Project';
 
 class ProjectService {
-  private col = 'projects';
+  private col = FIRESTORE_COLLECTIONS.projects;
 
   async getAll(): Promise<Project[]> {
     const snap = await getDocs(collection(db, this.col));
@@ -63,7 +64,7 @@ class ProjectService {
   /** Usuarios que tienen este proyecto en su projectIds[] */
   async getMembers(projectId: string): Promise<any[]> {
     const snap = await getDocs(
-      query(collection(db, 'users'), where('projectIds', 'array-contains', projectId))
+      query(collection(db, FIRESTORE_COLLECTIONS.users), where('projectIds', 'array-contains', projectId))
     );
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
@@ -93,7 +94,7 @@ class ProjectService {
   async syncStatuses(): Promise<{ inactivated: number; reactivated: number }> {
     const [allProjects, usersSnap] = await Promise.all([
       this.getAll(),
-      getDocs(collection(db, 'users')),
+      getDocs(collection(db, FIRESTORE_COLLECTIONS.users)),
     ]);
 
     const ACTIVE_ROLES = new Set(['colaborador', 'lider', 'aspirante']);

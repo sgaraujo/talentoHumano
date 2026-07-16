@@ -8,8 +8,7 @@ import {
 } from 'lucide-react';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { storage, functions, db } from '@/config/firebase';
+import { storage, functions } from '@/config/firebase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,9 +29,13 @@ import type { AppRole } from '@/models/types/AppRole';
 import type { TaxObligation, TaxStatus, TaxAttachment, StatusHistoryEntry } from '@/models/types/TaxObligation';
 import type { Company } from '@/models/types/Company';
 import {
-  extractVerificationDigit, getUpcomingObligationsByNit, getDianObligationsByNit,
+  extractVerificationDigit, getUpcomingObligationsByNit, getDianObligationsByNit, getAllObligationsByNit,
   type DianObligation, type NitDigit,
 } from '@/data/dianCalendar2026';
+import {
+  cleanNit, displayTax, normalize, normTax, sameAutoDueDate,
+  sameCompany as belongsToCompany, sameDianObligation,
+} from '@/domain/tax/taxIdentity';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -73,17 +76,6 @@ function fmtDate(d: string) {
   if (!isValidDate(d)) return d || '—';
   const [y, m, dd] = d.split('-');
   return `${dd}/${m}/${y}`;
-}
-
-function sameAutoDueDate(savedDate: string, currentAutoDate: string): boolean {
-  if (savedDate === currentAutoDate) return true;
-  if (!isValidDate(savedDate) || !isValidDate(currentAutoDate)) return false;
-
-  const [savedYear, savedMonth, savedDay] = savedDate.split('-').map(Number);
-  const [autoYear, autoMonth, autoDay] = currentAutoDate.split('-').map(Number);
-  const saved = Date.UTC(savedYear, savedMonth - 1, savedDay);
-  const current = Date.UTC(autoYear, autoMonth - 1, autoDay);
-  return Math.abs(current - saved) <= 3 * 86_400_000;
 }
 
 function safeDaysUntil(dateStr: string): number | null {
@@ -224,7 +216,8 @@ export const TaxCalendarPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [currentRole, setCurrentRole]           = useState<AppRole | null>(null);
   const [currentUserName, setCurrentUserName]   = useState<string>('');
-  const [firestoreCompanies, setFirestoreCompanies] = useState<Company[]>([]);
+  type CalendarCompany = Company & { excludedTaxTypes: string[] };
+  const [firestoreCompanies, setFirestoreCompanies] = useState<CalendarCompany[]>([]);
   const [obligations, setObligations]           = useState<TaxObligation[]>([]);
   const [accountingUsers,  setAccountingUsers]  = useState<{ name: string; email: string }[]>([]);
   const [financieraUsers,  setFinancieraUsers]  = useState<{ name: string; email: string }[]>([]);
@@ -232,18 +225,20 @@ export const TaxCalendarPage = () => {
   const [dianSearch, setDianSearch]             = useState('');
   const [dianDays, setDianDays]                 = useState(60);
   const [filterUrgency, setFilterUrgency]       = useState<'all'|'overdue'|'urgent'|'soon'|'ok'>('all');
-  const [filterStatus,  setFilterStatus]        = useState('all');
-  const [filterDigit,   setFilterDigit]         = useState('all');
-  const [filterPeriod,  setFilterPeriod]        = useState('all');
-  const [filterCompany, setFilterCompany]       = useState('all');
+  const filterStatus  = 'all';
+  const filterDigit   = 'all';
+  const filterPeriod  = 'all';
+  const filterCompany = 'all';
   const [filterMonth,   setFilterMonth]         = useState('all');
+  const [viewMode,      setViewMode]            = useState<'upcoming' | 'past' | 'paid'>('upcoming');
+  const [vencidosFrom,  setVencidosFrom]        = useState('2026-06-01');
 
   const [editingAmount, setEditingAmount] = useState<{
     key: string; field: 'projected' | 'paid'; value: string;
   } | null>(null);
 
   // Modal para ocultar tipos de impuesto por empresa
-  const [managingTaxTypes, setManagingTaxTypes] = useState<Company | null>(null);
+  const [managingTaxTypes, setManagingTaxTypes] = useState<CalendarCompany | null>(null);
   const [savingHidden, setSavingHidden] = useState(false);
 
   // Diálogo mensaje contabilidad
@@ -260,7 +255,7 @@ export const TaxCalendarPage = () => {
   const [saving,         setSaving]         = useState(false);
 
   const EMPTY_FORM = {
-    company: '', nit: '', city: 'Bogotá', scope: 'Nacional',
+    companyId: '', company: '', nit: '', city: 'Bogotá', scope: 'Nacional',
     taxType: '', obligationType: 'Impuestos',
     period: '', dueDate: '', year: String(new Date().getFullYear()),
     advisor: '', status: '' as TaxStatus, observation: '',
@@ -282,13 +277,17 @@ export const TaxCalendarPage = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [data, allRoleUsers, allCompanies] = await Promise.all([
+      const [data, allRoleUsers, allCompanies, companyTaxSettings] = await Promise.all([
         taxCalendarService.getAll(),
         rolesService.getAll(),
         companyService.getAll(),
+        taxCalendarService.getCompanyTaxSettings(),
       ]);
       setObligations(data);
-      setFirestoreCompanies(allCompanies);
+      setFirestoreCompanies(allCompanies.map(company => ({
+        ...company,
+        excludedTaxTypes: companyTaxSettings[company.id] ?? [],
+      })));
       setAccountingUsers(
         allRoleUsers
           .filter(u => u.role === 'contabilidad' || u.role === 'admin')
@@ -369,12 +368,12 @@ export const TaxCalendarPage = () => {
     return all.filter(p => { const k = p.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
   }, [obligations]);
 
-  const saveHiddenTaxTypes = async (company: Company, hidden: string[]) => {
+  const saveHiddenTaxTypes = async (company: CalendarCompany, hidden: string[]) => {
     setSavingHidden(true);
     try {
-      await companyService.update(company.id, { hiddenTaxTypes: hidden } as any);
+      await taxCalendarService.updateCompanyTaxSettings(company.id, hidden);
       setFirestoreCompanies(prev =>
-        prev.map(c => c.id === company.id ? { ...c, hiddenTaxTypes: hidden } : c)
+        prev.map(c => c.id === company.id ? { ...c, excludedTaxTypes: hidden } : c)
       );
       toast.success('Tipos de obligación actualizados');
       setManagingTaxTypes(null);
@@ -390,6 +389,7 @@ export const TaxCalendarPage = () => {
     setQuickEditMode(quick);
     setEditObl(obl);
     setForm({
+      companyId:      obl.companyId || '',
       company:        obl.company,
       nit:            obl.nit,
       city:           obl.city,
@@ -474,11 +474,8 @@ export const TaxCalendarPage = () => {
         .catch(() => {});
       // Registrar en log diario — el digest se envía a las 5 PM
       if (newStatus && newStatus !== prevStatus) {
-        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-        addDoc(collection(db, 'tax_daily_log'), {
-          date: today,
+        taxCalendarService.recordDailyActivity({
           changedBy,
-          changedAt: serverTimestamp(),
           company: (editObl as TaxObligation).company,
           nit: (editObl as TaxObligation).nit,
           taxType: (editObl as TaxObligation).taxType,
@@ -525,11 +522,8 @@ export const TaxCalendarPage = () => {
       const prevStatus = isNew ? '' : (editObl?.status ?? '');
       const savedOblId = isNew ? '' : (editObl?.id ?? '');
       if (form.status && form.status !== prevStatus) {
-        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-        addDoc(collection(db, 'tax_daily_log'), {
-          date: today,
+        taxCalendarService.recordDailyActivity({
           changedBy: form.advisor || currentUserName || 'Sistema',
-          changedAt: serverTimestamp(),
           company: form.company,
           nit: form.nit,
           taxType: form.taxType,
@@ -642,7 +636,7 @@ export const TaxCalendarPage = () => {
   // ── DIAN rows ────────────────────────────────────────────────────────────────
 
   interface CompanyDianRow {
-    company: Company;
+    company: CalendarCompany;
     digit: NitDigit | null;
     upcoming: DianObligation[];
     allDianObls: DianObligation[];
@@ -669,28 +663,6 @@ export const TaxCalendarPage = () => {
     ['red empresarial'],
   ];
 
-  const normalize = (s: string) =>
-    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[.\-,]/g, '').replace(/\s+/g, ' ').trim();
-
-  const cleanNit = (nit?: string) => (nit ?? '').replace(/[^0-9]/g, '');
-
-  // Canonical aliases so manual ("Retención de ICA") matches calendar ("ReteICA")
-  const TAX_ALIASES: Record<string, string> = {
-    'reteica':                   'reteica',
-    'retencion de ica':          'reteica',
-    'retencion ica':             'reteica',
-    'impuesto de industria y comercio': 'reteica',
-    'ica':                       'reteica',
-    'iva bimestral':             'iva',
-    'iva cuatrimestral':         'iva',
-    'impuesto a las ventas':     'iva',
-    'iva':                       'iva',
-    'retencion en la fuente':    'retencion en la fuente',
-    'retencion fuente':          'retencion en la fuente',
-    'retefuente':                'retencion en la fuente',
-  };
-  const normTax = (t: string) => { const n = normalize(t); return TAX_ALIASES[n] ?? n; };
-
   const companyOrderIndex = (name: string) => {
     const n = normalize(name);
     const idx = COMPANY_ORDER.findIndex(keys =>
@@ -699,15 +671,15 @@ export const TaxCalendarPage = () => {
     return idx === -1 ? COMPANY_ORDER.length : idx;
   };
 
-  const calendarCompanies = useMemo<Company[]>(() => {
-    const byNit = new Map<string, Company>();
-    const byName = new Map<string, Company>();
-    const unique: Company[] = [];
+  const calendarCompanies = useMemo<CalendarCompany[]>(() => {
+    const byNit = new Map<string, CalendarCompany>();
+    const byName = new Map<string, CalendarCompany>();
+    const unique: CalendarCompany[] = [];
 
-    const mergeCompany = (base: Company, incoming: Company): Company => {
-      const hiddenTaxTypes = Array.from(new Set([
-        ...(base.hiddenTaxTypes ?? []),
-        ...(incoming.hiddenTaxTypes ?? []),
+    const mergeCompany = (base: CalendarCompany, incoming: CalendarCompany): CalendarCompany => {
+      const excludedTaxTypes = Array.from(new Set([
+        ...base.excludedTaxTypes,
+        ...incoming.excludedTaxTypes,
       ]));
 
       return {
@@ -717,7 +689,7 @@ export const TaxCalendarPage = () => {
         active: Boolean(base.active || incoming.active),
         activeTH: Boolean(base.activeTH || incoming.activeTH),
         activeContabilidad: Boolean(base.activeContabilidad || incoming.activeContabilidad),
-        hiddenTaxTypes,
+        excludedTaxTypes,
       };
     };
 
@@ -757,14 +729,7 @@ export const TaxCalendarPage = () => {
     return 'ok';
   }
 
-  // All periods available across upcoming DIAN obligations
-  const allPeriods = useMemo(() => {
-    const set = new Set<string>();
-    calendarCompanies
-      .filter(c => c.active && c.activeContabilidad && c.nit)
-      .forEach(c => getUpcomingObligationsByNit(c.nit, dianDays).forEach(o => set.add(o.period)));
-    return [...set].sort();
-  }, [calendarCompanies, dianDays]);
+
 
   const dianRows = useMemo<CompanyDianRow[]>(() => {
     // Para filtro por mes usamos todos los vencimientos del año (sin límite de días)
@@ -782,34 +747,50 @@ export const TaxCalendarPage = () => {
         companiesWithObls.has(c.nit) ||
         companiesWithObls.has(c.name.toLowerCase().trim())
       ))
-      .filter(c => !dianSearch || c.name.toLowerCase().includes(dianSearch.toLowerCase()) || c.nit?.toLowerCase().includes(dianSearch.toLowerCase()))
+      .filter(c => {
+        if (!dianSearch) return true;
+        const q = dianSearch.toLowerCase();
+        if (c.name.toLowerCase().includes(q) || c.nit?.toLowerCase().includes(q)) return true;
+        const oblsForCompany = c.nit ? getDianObligationsByNit(c.nit) : [];
+        return oblsForCompany.some(o => displayTax(o.taxType).toLowerCase().includes(q) || o.taxType.toLowerCase().includes(q));
+      })
       .filter(c => filterCompany === 'all' || c.id === filterCompany)
       .map(c => {
         const digit    = extractVerificationDigit(c.nit);
-        const hidden   = new Set(c.hiddenTaxTypes ?? []);
+        const hidden = new Set(c.excludedTaxTypes);
         const cutoff = getCalendarCutoff();
-        const allUpcoming = (c.nit ? getUpcomingObligationsByNit(c.nit, effectiveDays) : [])
-          .filter(o => !hidden.has(o.taxType))
-          // Excluir fechas anteriores al mes actual (salvo filtro de mes activo)
-          .filter(o => filterMonth !== 'all' || o.dueDate >= cutoff);
+        const savedForCompany = obligations.filter(o => belongsToCompany(o, c));
+        const effectiveDueDate = (automatic: DianObligation) =>
+          savedForCompany.find(saved => sameDianObligation(saved, automatic))?.dueDate || automatic.dueDate;
+        const rangeEnd = (() => {
+          const end = new Date();
+          end.setHours(0, 0, 0, 0);
+          end.setDate(end.getDate() + effectiveDays);
+          return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+        })();
+        const allCalendarObligations = (c.nit ? getAllObligationsByNit(c.nit) : [])
+          .filter(o => !hidden.has(o.taxType));
+        const allUpcoming = viewMode === 'past'
+          ? allCalendarObligations.filter(o => effectiveDueDate(o) < cutoff && effectiveDueDate(o) >= vencidosFrom)
+          : viewMode === 'paid'
+          ? allCalendarObligations
+          : allCalendarObligations.filter(o => {
+              const date = effectiveDueDate(o);
+              return date >= cutoff && date <= rangeEnd;
+            });
         // Para el filtro de mes filtramos las obligaciones que muestran, pero nextDue usa días reales
         const upcoming = filterMonth !== 'all'
-          ? allUpcoming.filter(o => o.dueDate.slice(0, 7) === filterMonth)
+          ? allUpcoming.filter(o => effectiveDueDate(o).slice(0, 7) === filterMonth)
           : allUpcoming;
         const upcomingForNext = c.nit
           ? (getUpcomingObligationsByNit(c.nit, dianDays)).filter(o => !hidden.has(o.taxType))
           : [];
 
         // Helper para buscar el estado registrado de una obligación DIAN
-        const cNitC2 = (c.nit ?? '').replace(/[^0-9]/g, '');
-        const cNameN2 = normalize(c.name);
         const isDoneStatus = (s?: string) => s === 'Presentado' || s === 'Pagado' || s === 'No aplica';
         const matchedStatus = (dianObl: DianObligation) => {
           const m = obligations.find(o => {
-            const oNitC = (o.nit ?? '').replace(/[^0-9]/g, '');
-            return ((cNitC2 && oNitC && cNitC2 === oNitC) || normalize(o.company) === cNameN2) &&
-              normTax(o.taxType) === normTax(dianObl.taxType) &&
-              sameAutoDueDate(o.dueDate, dianObl.dueDate);
+            return belongsToCompany(o, c) && sameDianObligation(o, dianObl);
           });
           return m?.status;
         };
@@ -822,15 +803,43 @@ export const TaxCalendarPage = () => {
         return { company: c, digit, upcoming, allDianObls, nextDue };
       })
       .filter(row => {
-        const cNit  = row.company.nit;
-        const cName = normalize(row.company.name);
-        const cleanNit = (n: string) => (n ?? '').replace(/[^0-9]/g, '');
-        const cNitClean = cleanNit(cNit ?? '');
-        const sameCompany = (o: TaxObligation) => {
-          const oNitClean = cleanNit(o.nit ?? '');
-          return (cNitClean && oNitClean && cNitClean === oNitClean) ||
-            normalize(o.company) === cName;
-        };
+        const sameCompany = (o: TaxObligation) => belongsToCompany(o, row.company);
+
+        const isComplete = (s?: string) => s === 'Presentado' || s === 'Pagado';
+
+        // ── Al día: solo empresas con al menos una obligación completada ────
+        if (viewMode === 'paid') {
+          const hasDone = obligations.some(o => sameCompany(o) && isComplete(o.status));
+          if (!hasDone) return false;
+        }
+
+        // ── Próximos/Vencidos: ocultar empresa si no tiene ninguna obligación pendiente ──
+        if (viewMode !== 'paid') {
+          const today = new Date().toISOString().slice(0, 10);
+          // Pendientes en calendario DIAN
+          const hasDianPending = row.upcoming.some(dianObl => {
+            const m = obligations.find(o =>
+              sameCompany(o) &&
+              normTax(o.taxType) === normTax(dianObl.taxType) &&
+              sameAutoDueDate(o.dueDate, dianObl.dueDate)
+            );
+            if (!m) return true; // sin registro = pendiente
+            return !isComplete(m.status) && m.status !== 'No aplica';
+          });
+          // Pendientes manuales de Firestore (no están en el calendario DIAN)
+          const hasManualPending = obligations.some(o =>
+            sameCompany(o) &&
+            !isComplete(o.status ?? '') &&
+            o.status !== 'No aplica' &&
+            (o.dueDate ?? '') < today &&
+            (o.dueDate ?? '') >= vencidosFrom &&
+            !row.upcoming.some(u =>
+              normTax(u.taxType) === normTax(o.taxType) &&
+              sameAutoDueDate(o.dueDate, u.dueDate)
+            )
+          );
+          if (!hasDianPending && !hasManualPending) return false;
+        }
 
         // ── Digit filter ────────────────────────────────────────────────────
         if (filterDigit !== 'all' && String(row.digit) !== filterDigit) return false;
@@ -891,7 +900,7 @@ export const TaxCalendarPage = () => {
         return true;
       })
       .sort((a, b) => companyOrderIndex(a.company.name) - companyOrderIndex(b.company.name));
-  }, [calendarCompanies, dianSearch, dianDays, filterDigit, filterUrgency, filterPeriod, filterStatus, filterCompany, filterMonth, obligations]);
+  }, [calendarCompanies, dianSearch, dianDays, filterDigit, filterUrgency, filterPeriod, filterStatus, filterCompany, filterMonth, obligations, viewMode, vencidosFrom]);
 
   const URGENCY_BADGE: Record<string, string> = {
     overdue: 'bg-red-100 text-red-700',
@@ -930,7 +939,7 @@ export const TaxCalendarPage = () => {
         exRows.push({
           Empresa:              company.name,
           NIT:                  company.nit ?? '',
-          'Tipo de obligación': dianObl.taxType,
+          'Tipo de obligación': displayTax(dianObl.taxType),
           Período:              dianObl.period,
           Vencimiento:          dianObl.dueDate,
           Estado:               fs?.status ?? '',
@@ -956,7 +965,7 @@ export const TaxCalendarPage = () => {
           exRows.push({
             Empresa:              company.name,
             NIT:                  company.nit ?? '',
-            'Tipo de obligación': o.taxType,
+            'Tipo de obligación': displayTax(o.taxType),
             Período:              o.period ?? '',
             Vencimiento:          o.dueDate,
             Estado:               o.status ?? '',
@@ -1033,8 +1042,8 @@ export const TaxCalendarPage = () => {
 
       {/* Filter panel */}
       {(() => {
-        const hasFilters = dianSearch || filterUrgency !== 'all' || filterStatus !== 'all' || filterDigit !== 'all' || filterPeriod !== 'all' || filterCompany !== 'all' || filterMonth !== 'all';
-        const resetAll = () => { setDianSearch(''); setFilterUrgency('all'); setFilterStatus('all'); setFilterDigit('all'); setFilterPeriod('all'); setFilterCompany('all'); setFilterMonth('all'); };
+        const hasFilters = dianSearch || filterUrgency !== 'all' || filterStatus !== 'all' || filterDigit !== 'all' || filterPeriod !== 'all' || filterCompany !== 'all' || filterMonth !== 'all' || viewMode !== 'upcoming';
+
         return (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-4 space-y-3">
             {/* Row 1: search + days */}
@@ -1048,136 +1057,50 @@ export const TaxCalendarPage = () => {
                   className="pl-9 h-8 text-sm border-gray-200"
                 />
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-400 whitespace-nowrap">Próximos:</span>
-                {[30, 60, 90].map(d => (
-                  <button key={d} onClick={() => setDianDays(d)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors
-                      ${dianDays === d ? 'bg-[#008C3C] text-white border-[#008C3C]' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
-                    {d}d
-                  </button>
-                ))}
+              {/* Modo: Próximos / Vencidos / Al día */}
+              <div className="flex items-center gap-1 rounded-lg border border-gray-200 overflow-hidden">
+                <button onClick={() => { setViewMode('upcoming'); setFilterMonth('all'); }}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors flex items-center gap-1.5
+                    ${viewMode === 'upcoming' ? 'bg-[#008C3C] text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                  <Calendar className="w-3 h-3" /> Próximos
+                </button>
+                <button onClick={() => { setViewMode('past'); setFilterMonth('all'); }}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors flex items-center gap-1.5
+                    ${viewMode === 'past' ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                  <History className="w-3 h-3" /> Vencidos
+                </button>
+                <button onClick={() => { setViewMode('paid'); setFilterMonth('all'); }}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors flex items-center gap-1.5
+                    ${viewMode === 'paid' ? 'bg-blue-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                  <CheckCircle2 className="w-3 h-3" /> Al día
+                </button>
               </div>
-            </div>
 
-            {/* Row 2: filter chips */}
-            <div className="flex flex-wrap gap-3 items-end">
-              {/* Urgency */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Urgencia</p>
-                <div className="flex gap-1">
-                  {([
-                    { key: 'all',     label: 'Todas',       cls: 'border-gray-200 text-gray-500 hover:bg-gray-50' },
-                    { key: 'overdue', label: 'Vencidas',    cls: 'border-red-200 text-red-600 hover:bg-red-50' },
-                    { key: 'urgent',  label: 'Urgentes ≤7d',cls: 'border-orange-200 text-orange-600 hover:bg-orange-50' },
-                    { key: 'soon',    label: 'Próximas ≤15d',cls: 'border-yellow-200 text-yellow-700 hover:bg-yellow-50' },
-                    { key: 'ok',      label: 'Al día',      cls: 'border-green-200 text-green-700 hover:bg-green-50' },
-                  ] as const).map(({ key, label, cls }) => (
-                    <button key={key} onClick={() => setFilterUrgency(key)}
-                      className={`px-2 py-1 rounded-lg text-xs font-medium border transition-colors
-                        ${filterUrgency === key ? 'bg-[#008C3C] text-white border-[#008C3C]' : cls}`}>
-                      {label}
+              {viewMode === 'upcoming' && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400 whitespace-nowrap">Rango:</span>
+                  {[30, 60, 90].map(d => (
+                    <button key={d} onClick={() => setDianDays(d)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors
+                        ${dianDays === d ? 'bg-[#008C3C] text-white border-[#008C3C]' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                      {d}d
                     </button>
                   ))}
                 </div>
-              </div>
-
-              {/* Status */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Estado</p>
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="h-8 text-xs border-gray-200 w-44">
-                    <SelectValue placeholder="Todos los estados" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos los estados</SelectItem>
-                    <SelectItem value="__none">Sin registrar</SelectItem>
-                    {(['No iniciado','Revisado','Presentado','Informe Enviado','No aplica','Pagado'] as TaxStatus[]).map(s => (
-                      <SelectItem key={s} value={s}>{STATUS_CFG[s]?.label ?? s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Period */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Período</p>
-                <Select value={filterPeriod} onValueChange={setFilterPeriod}>
-                  <SelectTrigger className="h-8 text-xs border-gray-200 w-44">
-                    <SelectValue placeholder="Todos los períodos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos los períodos</SelectItem>
-                    {allPeriods.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Digit */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Dígito NIT</p>
-                <Select value={filterDigit} onValueChange={setFilterDigit}>
-                  <SelectTrigger className="h-8 text-xs border-gray-200 w-32">
-                    <SelectValue placeholder="Todos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    {[0,1,2,3,4,5,6,7,8,9].map(d => (
-                      <SelectItem key={d} value={String(d)}>Dígito {d}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Empresa */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Empresa</p>
-                <Select value={filterCompany} onValueChange={setFilterCompany}>
-                  <SelectTrigger className="h-8 text-xs border-gray-200 w-52">
-                    <SelectValue placeholder="Todas las empresas" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas las empresas</SelectItem>
-                    {calendarCompanies
-                      .filter(c => c.active && c.activeContabilidad)
-                      .sort((a, b) => companyOrderIndex(a.name) - companyOrderIndex(b.name))
-                      .map(c => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Mes */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Mes</p>
-                <Select value={filterMonth} onValueChange={setFilterMonth}>
-                  <SelectTrigger className="h-8 text-xs border-gray-200 w-40">
-                    <SelectValue placeholder="Todos los meses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos los meses</SelectItem>
-                    {([
-                      ['2026-01','Enero 2026'],['2026-02','Febrero 2026'],['2026-03','Marzo 2026'],
-                      ['2026-04','Abril 2026'],['2026-05','Mayo 2026'],['2026-06','Junio 2026'],
-                      ['2026-07','Julio 2026'],['2026-08','Agosto 2026'],['2026-09','Septiembre 2026'],
-                      ['2026-10','Octubre 2026'],['2026-11','Noviembre 2026'],['2026-12','Diciembre 2026'],
-                      ['2027-01','Enero 2027'],['2027-02','Febrero 2027'],
-                    ] as [string,string][]).map(([val, label]) => (
-                      <SelectItem key={val} value={val}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Clear */}
-              {hasFilters && (
-                <button onClick={resetAll}
-                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-50 border border-transparent hover:border-red-100 self-end mb-0.5">
-                  <X className="w-3 h-3" /> Limpiar filtros
-                </button>
+              )}
+              {viewMode === 'past' && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400 whitespace-nowrap">Desde:</span>
+                  <Input
+                    type="month"
+                    value={vencidosFrom.slice(0, 7)}
+                    onChange={e => setVencidosFrom(e.target.value ? `${e.target.value}-01` : '2026-01-01')}
+                    className="h-7 text-xs border border-gray-200 rounded-lg px-2 text-gray-600 focus:outline-none focus:border-orange-400"
+                  />
+                </div>
               )}
             </div>
+
 
             {/* Active summary */}
             {hasFilters && (
@@ -1201,7 +1124,7 @@ export const TaxCalendarPage = () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {dianRows.map(({ company, digit, upcoming, allDianObls, nextDue }) => {
+          {dianRows.map(({ company, digit, upcoming, nextDue }) => {
             const noDigit = digit === null;
             const urgency = nextDue ? dianUrgency(nextDue.dueDate) : 'ok';
             const days    = nextDue ? safeDaysUntil(nextDue.dueDate) : null;
@@ -1243,7 +1166,21 @@ export const TaxCalendarPage = () => {
                     >
                       <SlidersHorizontal className="w-3.5 h-3.5" />
                     </button>
-                  {noDigit ? (
+                  {viewMode === 'paid' ? (
+                    (() => {
+                      const compNitC = (company.nit ?? '').replace(/[^0-9]/g, '');
+                      const doneCount = obligations.filter(o => {
+                        const oNitC = (o.nit ?? '').replace(/[^0-9]/g, '');
+                        const match = (compNitC && oNitC && compNitC === oNitC) || normalize(o.company) === normalize(company.name);
+                        return match && (o.status === 'Presentado' || o.status === 'Pagado');
+                      }).length;
+                      return (
+                        <span className="text-[10px] text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full font-semibold">
+                          {doneCount} al día
+                        </span>
+                      );
+                    })()
+                  ) : noDigit ? (
                     <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-1 rounded-lg">
                       NIT sin dígito verificador
                     </span>
@@ -1268,22 +1205,18 @@ export const TaxCalendarPage = () => {
                 {!noDigit && upcoming.length > 0 && (
                   <div className="divide-y divide-gray-50">
                     {upcoming.map((dianObl, i) => {
-                      // Ocultar fechas anteriores al inicio del mes actual (salvo que haya filtro de mes activo)
-                      if (filterMonth === 'all' && dianObl.dueDate < getCalendarCutoff()) return null;
-                      const d = safeDaysUntil(dianObl.dueDate);
-                      const _mNitC = (company.nit ?? '').replace(/[^0-9]/g, '');
-                      const _mNameN = normalize(company.name);
-                      const matched = obligations.find(o => {
-                        const oNitC = (o.nit ?? '').replace(/[^0-9]/g, '');
-                        const nitMatch = _mNitC && oNitC && _mNitC === oNitC;
-                        const nameMatch = normalize(o.company) === _mNameN;
-        return (nitMatch || nameMatch) &&
-          normTax(o.taxType) === normTax(dianObl.taxType) &&
-          sameAutoDueDate(o.dueDate, dianObl.dueDate);
-      });
+                      const matched = obligations.find(o =>
+                        belongsToCompany(o, company) && sameDianObligation(o, dianObl)
+                      );
+                      const effectiveDate = matched?.dueDate || dianObl.dueDate;
+                      const d = safeDaysUntil(effectiveDate);
                       if (matched?.status === 'No aplica') return null;
                       const doneStatus = matched?.status === 'Presentado' || matched?.status === 'Pagado';
-                      const u = doneStatus ? 'ok' : dianUrgency(dianObl.dueDate);
+                      // Completadas (Presentado/Pagado) → solo en "Al día"
+                      if (doneStatus && viewMode !== 'paid') return null;
+                      // "Al día" → solo completadas
+                      if (viewMode === 'paid' && !doneStatus) return null;
+                      const u = doneStatus ? 'ok' : dianUrgency(effectiveDate);
                       const cfg = matched?.status ? STATUS_CFG[matched.status] : null;
                       const handleDianClick = () => {
                         if (matched) {
@@ -1294,6 +1227,7 @@ export const TaxCalendarPage = () => {
                           setEditObl({ id: '__new__' } as TaxObligation);
                           setForm({
                             ...EMPTY_FORM,
+                            companyId:      company.id,
                             company:        company.name,
                             nit:            company.nit,
                             city:           'Bogotá',
@@ -1311,7 +1245,7 @@ export const TaxCalendarPage = () => {
                           setFormPaid('');
                         }
                       };
-                      const oblKey = matched ? matched.id : `${company.nit}__${dianObl.dueDate}__${dianObl.taxType}`;
+                      const oblKey = matched ? matched.id : `${company.nit}__${effectiveDate}__${dianObl.taxType}`;
 
                       const AmountCell = ({ field, label }: { field: 'projected' | 'paid'; label: string }) => {
                         const cellKey = `${oblKey}__${field}`;
@@ -1367,10 +1301,10 @@ export const TaxCalendarPage = () => {
                               {cfg
                                 ? <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
                                 : <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-gray-200" />}
-                              {dianObl.taxType}
+                              {displayTax(dianObl.taxType)}
                             </div>
                             <div className="col-span-3 text-gray-400 truncate">{dianObl.period}</div>
-                            <div className="col-span-2 text-center font-mono text-gray-500">{fmtDate(dianObl.dueDate)}</div>
+                            <div className="col-span-2 text-center font-mono text-gray-500">{fmtDate(effectiveDate)}</div>
                             <div className="col-span-2 text-right">
                               <span
                                 className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${URGENCY_BADGE[u]} ${doneStatus ? 'cursor-pointer hover:opacity-75' : ''}`}
@@ -1400,78 +1334,6 @@ export const TaxCalendarPage = () => {
                   <p className="text-[11px] text-gray-400 italic px-4 py-2">Sin obligaciones en los próximos {dianDays} días.</p>
                 )}
 
-                {/* Obligaciones Legales / Reportes / manuales de esta empresa */}
-                {(() => {
-                  const _cNitC = (company.nit ?? '').replace(/[^0-9]/g, '');
-                  const _cNameN = normalize(company.name);
-                  const legalObls = obligations
-                    .filter(o => {
-                      const oNitC = (o.nit ?? '').replace(/[^0-9]/g, '');
-                      return (_cNitC && oNitC && _cNitC === oNitC) ||
-                        normalize(o.company) === _cNameN;
-                    })
-                    // Excluir las que pertenecen al calendario DIAN (todo el año, no solo el rango próximo)
-                    .filter(o => !allDianObls.some(u =>
-                      u.taxType.toLowerCase().trim() === o.taxType.toLowerCase().trim() &&
-                      sameAutoDueDate(o.dueDate, u.dueDate)
-                    ))
-                    .filter(o => o.status !== 'No aplica')
-                    // Ocultar fechas anteriores al inicio del mes actual, salvo filtro de mes activo
-                    .filter(o => filterMonth !== 'all' || o.dueDate >= getCalendarCutoff())
-                    .filter(o => filterMonth === 'all' || o.dueDate.slice(0, 7) === filterMonth)
-                    .reduce<TaxObligation[]>((acc, o) => {
-                      const k = `${o.taxType}||${o.period ?? ''}||${o.dueDate}`;
-                      if (!acc.some(x => `${x.taxType}||${x.period ?? ''}||${x.dueDate}` === k)) acc.push(o);
-                      return acc;
-                    }, [])
-                    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-                  if (legalObls.length === 0) return null;
-                  return (
-                    <div className="border-t border-indigo-100">
-                      <div className="px-4 py-1.5 bg-indigo-50/50 flex items-center gap-1.5">
-                        <FileText className="w-3 h-3 text-indigo-400" />
-                        <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wide">
-                          Obligaciones Legales
-                        </span>
-                        <span className="text-[10px] text-indigo-300 ml-auto">{legalObls.length}</span>
-                      </div>
-                      <div className="divide-y divide-gray-50">
-                        {legalObls.map(obl => {
-                          const cfg = obl.status ? STATUS_CFG[obl.status] : null;
-                          const d   = safeDaysUntil(obl.dueDate);
-                          const oblDone = obl.status === 'Presentado' || obl.status === 'Pagado' || obl.status === 'No aplica';
-                          const u   = oblDone ? 'ok' : dianUrgency(obl.dueDate);
-                          return (
-                            <div key={obl.id} onClick={() => openEdit(obl, true)}
-                              className="grid grid-cols-12 px-4 py-2 items-center text-xs cursor-pointer hover:bg-indigo-50/30 transition-colors">
-                              <div className="col-span-5 text-gray-700 font-medium truncate pr-2 flex items-center gap-1.5">
-                                {cfg
-                                  ? <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
-                                  : <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-indigo-200" />}
-                                {obl.taxType}
-                              </div>
-                              <div className="col-span-3 truncate">
-                                {cfg
-                                  ? <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${cfg.bg} ${cfg.color}`}>{cfg.label}</span>
-                                  : <span className="text-gray-300">—</span>}
-                              </div>
-                              <div className="col-span-2 text-center font-mono text-gray-500">{fmtDate(obl.dueDate)}</div>
-                              <div className="col-span-2 text-right">
-                                <span
-                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${URGENCY_BADGE[u]} ${oblDone ? 'cursor-pointer hover:opacity-75' : ''}`}
-                                  onClick={oblDone ? (e) => { e.stopPropagation(); setFilterUrgency('ok'); } : undefined}
-                                  title={oblDone ? 'Filtrar solo Al día' : undefined}
-                                >
-                                  {oblDone ? '✓ Al día' : d === null ? '—' : d < 0 ? `+${Math.abs(d)}v` : d === 0 ? 'Hoy' : `${d}d`}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
               </div>
             );
           })}
@@ -1506,6 +1368,7 @@ export const TaxCalendarPage = () => {
                       value={form.company}
                       onValueChange={v => {
                         const c = calendarCompanies.find(c => c.name === v);
+                        setF('companyId', c?.id ?? '');
                         setF('company', v);
                         if (c?.nit) setF('nit', c.nit);
                       }}
@@ -2098,11 +1961,11 @@ export const TaxCalendarPage = () => {
 
       {/* Modal: gestionar tipos de obligación por empresa */}
       {managingTaxTypes && (() => {
-        const hidden = new Set(managingTaxTypes.hiddenTaxTypes ?? []);
+        const hidden = new Set(managingTaxTypes.excludedTaxTypes);
         const toggle = (type: string) => {
           const next = new Set(hidden);
           if (next.has(type)) next.delete(type); else next.add(type);
-          setManagingTaxTypes({ ...managingTaxTypes, hiddenTaxTypes: [...next] });
+          setManagingTaxTypes({ ...managingTaxTypes, excludedTaxTypes: [...next] });
         };
 
         const GROUPS = [
@@ -2221,7 +2084,7 @@ export const TaxCalendarPage = () => {
                   size="sm"
                   className="flex-1 text-sm bg-[#008C3C] hover:bg-[#006C2F] text-white"
                   disabled={savingHidden}
-                  onClick={() => saveHiddenTaxTypes(managingTaxTypes, managingTaxTypes.hiddenTaxTypes ?? [])}
+                  onClick={() => saveHiddenTaxTypes(managingTaxTypes, managingTaxTypes.excludedTaxTypes)}
                 >
                   {savingHidden
                     ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />

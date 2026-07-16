@@ -9,10 +9,12 @@ import {
   updateMessageDeliveryStatus,
   type MediaType,
 } from "./conversationService";
+import { WHATSAPP_COLLECTIONS } from "./firestorePaths";
 
 export const META_VERIFY_TOKEN = defineSecret("META_VERIFY_TOKEN");
 
 const META_BASE = "https://graph.facebook.com/v22.0";
+const USERS_COLLECTION = "identity/data/users";
 
 function msgTypeToMediaType(t: string): MediaType | null {
   if (t === "image")                  return "image";
@@ -67,7 +69,7 @@ async function findUserByPhone(
   const localPhone = phone.startsWith("57") && phone.length === 12 ? phone.slice(2) : phone;
   try {
     const snap = await getFirestore()
-      .collection("users")
+      .collection(USERS_COLLECTION)
       .where("personalData.phone", "==", localPhone)
       .limit(1)
       .get();
@@ -77,7 +79,7 @@ async function findUserByPhone(
     }
     // También buscar por corporatePhone
     const snap2 = await getFirestore()
-      .collection("users")
+      .collection(USERS_COLLECTION)
       .where("location.corporatePhone", "==", localPhone)
       .limit(1)
       .get();
@@ -136,7 +138,7 @@ export const waWebhook = onRequest(
     }
 
     const numbersSnap = await getFirestore()
-      .collection("wa_numbers")
+      .collection(WHATSAPP_COLLECTIONS.numbers)
       .where("phoneNumberId", "==", phoneNumberId)
       .limit(1)
       .get();
@@ -233,6 +235,29 @@ export const waWebhook = onRequest(
           status as "sent" | "delivered" | "read" | "failed",
           errEntry ? { code: errEntry.code, title: errEntry.title } : undefined
         );
+        const indexSnap = await getFirestore().collection(WHATSAPP_COLLECTIONS.messageIndex).doc(encodeURIComponent(wamid)).get();
+        if (indexSnap.exists) {
+          const recipientPath = String(indexSnap.data()?.recipientPath ?? "");
+          const campaignId = String(indexSnap.data()?.campaignId ?? "");
+          if (recipientPath) {
+            await getFirestore().doc(recipientPath).set({
+              deliveryStatus: status,
+              deliveryUpdatedAt: new Date(),
+              ...(errEntry ? { error: `${errEntry.code ?? ""}: ${errEntry.title ?? "Error de Meta"}` } : {}),
+            }, { merge: true });
+          }
+          if (campaignId) {
+            const recipientsSnap = await getFirestore().collection(`${WHATSAPP_COLLECTIONS.campaigns}/${campaignId}/recipients`).get();
+            const counts = { delivered: 0, read: 0, deliveryFailed: 0 };
+            recipientsSnap.docs.forEach(doc => {
+              const current = doc.data().deliveryStatus;
+              if (current === "delivered") counts.delivered++;
+              if (current === "read") { counts.read++; counts.delivered++; }
+              if (current === "failed") counts.deliveryFailed++;
+            });
+            await getFirestore().doc(`${WHATSAPP_COLLECTIONS.campaigns}/${campaignId}`).set({ ...counts, updatedAt: new Date() }, { merge: true });
+          }
+        }
       } catch (err) {
         logger.error("Error actualizando deliveryStatus", { wamid, err });
       }

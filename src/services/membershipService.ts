@@ -3,11 +3,12 @@ import {
   doc, query, where, serverTimestamp, updateDoc, arrayUnion, arrayRemove,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { CompanyMembership, ProjectMembership, MembershipRole } from '../models/types/Membership';
 
 class MembershipService {
-  private companyCol = 'company_memberships';
-  private projectCol = 'project_memberships';
+  private companyCol = FIRESTORE_COLLECTIONS.companyMemberships;
+  private projectCol = FIRESTORE_COLLECTIONS.projectMemberships;
 
   // ── Company memberships ───────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ class MembershipService {
       });
     }
     // Mantener array en usuario para queries rápidos
-    await updateDoc(doc(db, 'users', userId), {
+    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
       companyIds: arrayUnion(companyId),
     });
   }
@@ -40,7 +41,7 @@ class MembershipService {
         where('companyId', '==', companyId))
     );
     for (const d of snap.docs) await deleteDoc(doc(db, this.companyCol, d.id));
-    await updateDoc(doc(db, 'users', userId), {
+    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
       companyIds: arrayRemove(companyId),
     });
   }
@@ -77,7 +78,7 @@ class MembershipService {
         joinedAt: serverTimestamp(),
       });
     }
-    await updateDoc(doc(db, 'users', userId), {
+    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
       projectIds: arrayUnion(projectId),
     });
   }
@@ -89,7 +90,7 @@ class MembershipService {
         where('projectId', '==', projectId))
     );
     for (const d of snap.docs) await deleteDoc(doc(db, this.projectCol, d.id));
-    await updateDoc(doc(db, 'users', userId), {
+    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
       projectIds: arrayRemove(projectId),
     });
   }

@@ -9,6 +9,7 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { db } from "@/config/firebase";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 import type { Questionnaire, QuestionnaireResponse } from "@/models/types/Questionnaire";
 
 export interface ExportQueueItem {
@@ -17,8 +18,8 @@ export interface ExportQueueItem {
 }
 
 class ExporterAdminService {
-  private responsesCol = "questionnaire_responses";
-  private questionnairesCol = "questionnaires";
+  private responsesCol = FIRESTORE_COLLECTIONS.questionnaireResponses;
+  private questionnairesCol = FIRESTORE_COLLECTIONS.questionnaires;
 
   // Trae respuestas completadas NO exportadas o con error
  async getPendingExports(max: number = 100): Promise<ExportQueueItem[]> {

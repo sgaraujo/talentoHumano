@@ -1,8 +1,9 @@
 import {
-  collection, addDoc, getDocs, doc, updateDoc,
+  collection, addDoc, getDocs, doc, updateDoc, setDoc,
   query, orderBy, writeBatch, serverTimestamp, arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '../config/firestoreCollections';
 import type { TaxObligation, TaxStatus, StatusHistoryEntry } from '../models/types/TaxObligation';
 import type { Company } from '../models/types/Company';
 
@@ -28,7 +29,7 @@ function normalizeDueDate(v: any): string | undefined {
 }
 
 class TaxCalendarService {
-  private col = 'tax_obligations';
+  private col = FIRESTORE_COLLECTIONS.taxObligations;
 
   async getAll(): Promise<TaxObligation[]> {
     const snap = await getDocs(query(collection(db, this.col), orderBy('dueDate', 'asc')));
@@ -59,9 +60,61 @@ class TaxCalendarService {
   }
 
   async appendStatusHistory(id: string, entry: StatusHistoryEntry): Promise<void> {
-    await updateDoc(doc(db, this.col, id), {
+    const batch = writeBatch(db);
+    const obligationRef = doc(db, this.col, id);
+    const historyRef = doc(collection(
+      db,
+      this.col,
+      id,
+      FIRESTORE_SUBCOLLECTIONS.taxObligationHistory,
+    ));
+
+    // Escritura dual temporal: la subcolección será la fuente oficial y el
+    // array mantiene compatibilidad con la interfaz durante la migración.
+    batch.update(obligationRef, {
       statusHistory: arrayUnion(entry),
       updatedAt: serverTimestamp(),
+    });
+    batch.set(historyRef, {
+      ...entry,
+      obligationId: id,
+      createdAt: serverTimestamp(),
+    });
+    await batch.commit();
+  }
+
+  async getCompanyTaxSettings(): Promise<Record<string, string[]>> {
+    const snap = await getDocs(collection(db, FIRESTORE_COLLECTIONS.companyTaxSettings));
+    return Object.fromEntries(snap.docs.map(d => [
+      d.id,
+      Array.isArray(d.data().excludedTaxTypes) ? d.data().excludedTaxTypes : [],
+    ]));
+  }
+
+  async updateCompanyTaxSettings(companyId: string, excludedTaxTypes: string[]): Promise<void> {
+    await setDoc(doc(db, FIRESTORE_COLLECTIONS.companyTaxSettings, companyId), {
+      companyId,
+      excludedTaxTypes,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  async recordDailyActivity(entry: {
+    changedBy: string;
+    company: string;
+    nit?: string;
+    taxType: string;
+    period?: string;
+    dueDate?: string;
+    newStatus: TaxStatus;
+    projected?: number | null;
+    obligationId?: string;
+  }): Promise<void> {
+    const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    await addDoc(collection(db, FIRESTORE_COLLECTIONS.taxDailyLog), {
+      ...entry,
+      date,
+      changedAt: serverTimestamp(),
     });
   }
 

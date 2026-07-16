@@ -13,6 +13,13 @@ import { EditUserDialog } from '@/components/users/EditUserDialog';
 import { DeleteUserDialog } from '@/components/users/DeleteUserDialog';
 import { ViewUserProfileDialog } from '@/components/users/ViewUserProfileDialog';
 import { RegisterMovementDialog } from '@/components/analytics/RegisterMovementDialog';
+import { HrImportPreviewDialog } from '@/components/users/HrImportPreviewDialog';
+import type { HrExcelPreview } from '@/domain/humanResources/hrExcelPreview';
+import { runHrExcelPreview } from '@/domain/humanResources/runHrExcelPreview';
+import { runHrExcelImportPlan } from '@/domain/humanResources/runHrExcelPreview';
+import { applyHrImport } from '@/services/hrImportService';
+import { auth } from '@/config/firebase';
+import { toast } from 'sonner';
 
 const ROLE_LABEL: Record<string, string> = {
   all:           'Todos',
@@ -36,8 +43,16 @@ export const UsersPage = () => {
   const [profileDialogOpen,  setProfileDialogOpen]   = useState(false);
   const [selectedUserId,     setSelectedUserId]      = useState<string | null>(null);
   const [movementDialogOpen, setMovementDialogOpen]  = useState(false);
+  const [importPreviewOpen, setImportPreviewOpen] = useState(false);
+  const [importPreview, setImportPreview] = useState<HrExcelPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewLoadingLabel, setPreviewLoadingLabel] = useState('');
+  const [previewError, setPreviewError] = useState('');
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [applyingImport, setApplyingImport] = useState(false);
+  const [applyProgress, setApplyProgress] = useState(0);
 
-  const { users, loading, importProgress, importUsersFromExcel, refreshUsers } = useUsers();
+  const { users, loading, importProgress, refreshUsers } = useUsers();
 
   // ── Derived option lists ────────────────────────────────────────────────────
 
@@ -120,23 +135,48 @@ export const UsersPage = () => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setImportFile(file);
+      setImportPreviewOpen(true);
+      setImportPreview(null);
+      setPreviewError('');
+      setPreviewLoading(true);
+      setPreviewLoadingLabel('Preparando archivo');
       try {
-        const results = await importUsersFromExcel(file);
-        const movInfo  = results.movements
-          ? `\n\nMovimientos generados:\n  Ingresos: ${results.movements.ingresos}\n  Retiros: ${results.movements.retiros}` : '';
-        const projInfo = results.projectsInactivated != null
-          ? `\n\nProyectos inactivados: ${results.projectsInactivated}` : '';
-        const dupInfo = results.duplicateRowsMerged
-          ? `\n  Filas duplicadas consolidadas: ${results.duplicateRowsMerged}` : '';
-        const forcedInfo = results.forcedExcolaboradores
-          ? `\n  Excolaboradores asegurados por lista fija: ${results.forcedExcolaboradores}` : '';
-        const updatedCount = results.updated?.length || 0;
-        alert(`Importación completada:\n  Nuevos: ${results.success.length}\n  Actualizados: ${updatedCount}\n  Errores: ${results.errors.length}${dupInfo}${forcedInfo}${movInfo}${projInfo}${results.errors.length > 0 ? '\n\nErrores:\n' + results.errors.slice(0, 10).map((e: any) => `- ${e.email}: ${e.error}`).join('\n') + (results.errors.length > 10 ? `\n  ... y ${results.errors.length - 10} más` : '') : ''}`);
-      } catch {
-        alert('Error al importar usuarios');
+        setImportPreview(await runHrExcelPreview(file, users, setPreviewLoadingLabel));
+      } catch (error: any) {
+        setPreviewError(error?.message || 'No fue posible analizar el archivo.');
+      } finally {
+        setPreviewLoading(false);
       }
     }
     e.target.value = '';
+  };
+
+  const handleApplyImport = async () => {
+    if (!importFile || !importPreview || importPreview.conflicts || importPreview.rejected) return;
+    if (!window.confirm(`Se guardarán ${importPreview.totalRows.toLocaleString('es-CO')} relaciones laborales en Firebase. ¿Deseas continuar?`)) return;
+    setApplyingImport(true);
+    setApplyProgress(0);
+    setPreviewError('');
+    try {
+      setPreviewLoadingLabel('Normalizando expedientes');
+      const plan = await runHrExcelImportPlan(importFile, users, setPreviewLoadingLabel);
+      const result = await applyHrImport(
+        plan,
+        auth.currentUser?.email || auth.currentUser?.uid || 'usuario-desconocido',
+        (percent, label) => { setApplyProgress(percent); setPreviewLoadingLabel(label); },
+      );
+      toast.success('Importación completada', {
+        description: `${result.employees} expedientes y ${result.relationships} relaciones procesadas.`,
+      });
+      setImportPreviewOpen(false);
+      await refreshUsers();
+    } catch (error: any) {
+      setPreviewError(error?.message || 'No fue posible aplicar la importación.');
+      toast.error('La importación no se completó');
+    } finally {
+      setApplyingImport(false);
+    }
   };
 
   const handleExportExcel = async () => {
@@ -482,6 +522,17 @@ export const UsersPage = () => {
       <DeleteUserDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} user={selectedUser} onUserDeleted={refreshUsers} />
       <ViewUserProfileDialog open={profileDialogOpen} onOpenChange={setProfileDialogOpen} userId={selectedUserId} />
       <RegisterMovementDialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen} onSuccess={refreshUsers} />
+      <HrImportPreviewDialog
+        open={importPreviewOpen}
+        onOpenChange={setImportPreviewOpen}
+        preview={importPreview}
+        loading={previewLoading}
+        loadingLabel={previewLoadingLabel}
+        error={previewError}
+        applying={applyingImport}
+        applyProgress={applyProgress}
+        onApply={handleApplyImport}
+      />
     </div>
   );
 };

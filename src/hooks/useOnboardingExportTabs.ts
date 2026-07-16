@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { db } from "@/config/firebase";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 import type { Questionnaire } from "@/models/types/Questionnaire";
 
 export function useOnboardingExportTabs() {
@@ -15,7 +16,7 @@ export function useOnboardingExportTabs() {
 
     try {
       const q = query(
-        collection(db, "questionnaires"),
+        collection(db, FIRESTORE_COLLECTIONS.questionnaires),
         orderBy("createdAt", "desc")
       );
 

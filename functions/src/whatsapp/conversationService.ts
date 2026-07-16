@@ -1,10 +1,11 @@
 import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
+import { WHATSAPP_COLLECTIONS } from "./firestorePaths";
 
 const MAX_LAST_MESSAGES = 20;
 
 function convRef(numberId: string, conversationId: string) {
-  return getFirestore().collection(`wa_numbers/${numberId}/conversations`).doc(conversationId);
+  return getFirestore().collection(`${WHATSAPP_COLLECTIONS.numbers}/${numberId}/conversations`).doc(conversationId);
 }
 
 interface UserMeta {
@@ -129,7 +130,7 @@ export async function updateMessageDeliveryStatus(
 ): Promise<void> {
   const db = getFirestore();
   const msgRef = db.doc(
-    `wa_numbers/${numberId}/conversations/${conversationId}/messages/${wamid}`
+    `${WHATSAPP_COLLECTIONS.numbers}/${numberId}/conversations/${conversationId}/messages/${wamid}`
   );
 
   const snap = await msgRef.get();

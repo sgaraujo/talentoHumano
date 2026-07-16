@@ -1,6 +1,7 @@
 import type { Questionnaire } from "@/models/types/Questionnaire";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/config/firebase";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 import { arrayUnion } from "firebase/firestore";
 
 function coerceValue(fieldPath: string, value: any) {
@@ -49,7 +50,7 @@ export const exporterService = {
     if (!questionnaire.isOnboarding) return;
     if (!questionnaire.fieldMappings?.length) return;
 
-    const userRef = doc(db, "users", userId);
+    const userRef = doc(db, FIRESTORE_COLLECTIONS.users, userId);
     const snap = await getDoc(userRef);
     const current = snap.exists() ? snap.data() : {};
 

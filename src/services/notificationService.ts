@@ -1,5 +1,6 @@
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { NotificationEvent, NotificationType } from '../models/types/Notification';
 
 function parseDateLocal(v: any): Date | null {
@@ -227,7 +228,7 @@ class NotificationService {
 
   async getAllEvents(filters?: NotificationType[], maxDays = 90): Promise<NotificationEvent[]> {
     try {
-      const usersSnapshot = await getDocs(collection(db, 'users'));
+      const usersSnapshot = await getDocs(collection(db, FIRESTORE_COLLECTIONS.users));
       const users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
       let allEvents: NotificationEvent[] = [];
@@ -251,7 +252,7 @@ class NotificationService {
   // sin restricción de "días futuros" — muestra todo el mes aunque ya haya pasado
   async getEventsForMonth(year: number, month: number): Promise<NotificationEvent[]> {
     try {
-      const usersSnapshot = await getDocs(collection(db, 'users'));
+      const usersSnapshot = await getDocs(collection(db, FIRESTORE_COLLECTIONS.users));
       const users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       const today = new Date();
       const events: NotificationEvent[] = [];

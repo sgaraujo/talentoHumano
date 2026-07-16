@@ -3,7 +3,16 @@
     "allow": [
       "Bash(git config:*)",
       "Bash(git -C /mnt/c/Users/hp/nelyoda ls-files -- .env scripts/serviceAccount.json)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git status *)",
+      "Bash(npx tsc *)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(taskkill //F //IM node.exe //T)",
+      "Bash(curl -s \"http://localhost:5184/src/services/analyticsService.ts\")",
+      "Bash(curl -s \"http://localhost:5184/src/views/Companies/CompanyAnalyticsPage.tsx\")",
+      "PowerShell(Stop-Process -Id 32656 -Force -Confirm:$false)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 5184 -State Listen -ErrorAction SilentlyContinue)"
     ]
   }
 }

@@ -3,10 +3,10 @@ import { useAppRole } from '@/hooks/useAppRole';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Users, FileText, Bell, Download, Archive, Settings, Send,
-  BookOpen, LogOut, Bot, Search, Menu, X, ChevronLeft, Building2,
-  LayoutDashboard, FolderKanban, MessageSquare, Calculator, Shield,
-  ChevronDown, BarChart2, Mail, MessageCircle, Newspaper,
+  Users, FileText, Bell, Download, Send,
+  LogOut, Bot, Search, Menu, X, ChevronLeft, Building2,
+  LayoutDashboard, FolderKanban, MessageSquare, Calculator, Shield, ClipboardCheck,
+  ChevronDown, BarChart2, Mail, MessageCircle, Newspaper, Settings2,
 } from 'lucide-react';
 import { ROLE_LABELS } from '@/models/types/AppRole';
 import { Link, useLocation } from 'react-router-dom';
@@ -19,26 +19,46 @@ interface MenuGroup { id: string; label: string; icon: React.ElementType; items:
 
 const GROUPS: MenuGroup[] = [
   {
-    id: 'talento',
-    label: 'Talento Humano',
+    id: 'personas',
+    label: 'Personas y organización',
     icon: Users,
     items: [
-      { icon: Users,         label: 'Usuarios',           path: '/usuarios' },
+      { icon: Shield,        label: 'Usuarios y accesos', path: '/usuarios' },
+      { icon: ClipboardCheck,label: 'Expedientes y control', path: '/talento-humano/control' },
       { icon: Building2,     label: 'Empresas',           path: '/empresas' },
       { icon: FolderKanban,  label: 'Proyectos',          path: '/proyectos' },
-      { icon: MessageSquare, label: 'Comunicaciones',     path: '/comunicaciones' },
+      { icon: BarChart2,     label: 'Rotación de talento', path: '/rotacion-talento' },
+    ],
+  },
+  {
+    id: 'comunicaciones',
+    label: 'Comunicaciones',
+    icon: MessageSquare,
+    items: [
+      { icon: MessageSquare, label: 'Comunicados',        path: '/comunicaciones' },
       { icon: Newspaper,     label: 'Boletines',          path: '/boletines' },
       { icon: MessageCircle, label: 'WhatsApp',           path: '/whatsapp' },
       { icon: Bell,          label: 'Notificaciones',     path: '/notificaciones' },
+      { icon: Mail,          label: 'Estadísticas de correo', path: '/estadisticas-correos' },
+    ],
+  },
+  {
+    id: 'formularios',
+    label: 'Formularios y análisis',
+    icon: FileText,
+    items: [
       { icon: FileText,      label: 'Cuestionarios',      path: '/questionarios' },
-      { icon: BarChart2,     label: 'Est. Cuestionarios', path: '/estadisticas-cuestionarios' },
-      { icon: Mail,          label: 'Est. Correos',        path: '/estadisticas-correos' },
-      { icon: Bot,           label: 'Chat IA',            path: '/chatbot' },
-      { icon: Search,        label: 'Búsqueda',           path: '/busqueda' },
+      { icon: BarChart2,     label: 'Estadísticas de envíos', path: '/estadisticas-cuestionarios' },
       { icon: Download,      label: 'Exportador',         path: '/exportador' },
-      { icon: Archive,       label: 'Archivo',            path: '/archivo' },
-      { icon: Settings,      label: 'Configuraciones',    path: '/configuraciones' },
-      { icon: BookOpen,      label: 'Manual',             path: '/manual' },
+    ],
+  },
+  {
+    id: 'herramientas',
+    label: 'Herramientas',
+    icon: Bot,
+    items: [
+      { icon: Search,        label: 'Búsqueda de personas', path: '/busqueda' },
+      { icon: Bot,           label: 'Asistente IA',        path: '/chatbot' },
     ],
   },
   {
@@ -47,6 +67,7 @@ const GROUPS: MenuGroup[] = [
     icon: Calculator,
     items: [
       { icon: Calculator, label: 'Calendario Tributario', path: '/contabilidad' },
+      { icon: BarChart2,  label: 'Informe Tributario',    path: '/contabilidad/informe' },
       { icon: Send,       label: 'Mensajes',              path: '/contabilidad/mensajes' },
     ],
   },
@@ -56,6 +77,7 @@ const GROUPS: MenuGroup[] = [
     icon: Shield,
     items: [
       { icon: Shield, label: 'Roles y Accesos', path: '/roles' },
+      { icon: Settings2, label: 'Configuración de empresas', path: '/configuraciones/empresas' },
     ],
   },
 ];
@@ -68,12 +90,27 @@ export const Sidebar = () => {
   const location = useLocation();
   const [isOpen,            setIsOpen]            = useState(false);
   const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false);
-  // Track which groups are open (admin only); default all open
+  // Cada sesión inicia con las secciones cerradas; el usuario abre solo la que necesita.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    talento: true, contabilidad: true, admin: true,
+    personas: false,
+    comunicaciones: false,
+    formularios: false,
+    herramientas: false,
+    contabilidad: false,
+    admin: false,
   });
 
   useEffect(() => { setIsOpen(false); }, [location.pathname]);
+  // Mantener visible la opción activa. MainLayout puede recrearse al cambiar
+  // de ruta, por lo que no dependemos únicamente del clic que abrió el grupo.
+  useEffect(() => {
+    const activeGroup = GROUPS.find(group => group.items.some(item =>
+      location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
+    ));
+    if (activeGroup) {
+      setOpenGroups(previous => ({ ...previous, [activeGroup.id]: true }));
+    }
+  }, [location.pathname]);
   useEffect(() => {
     const handleResize = () => { if (window.innerWidth >= 1024) setIsOpen(false); };
     window.addEventListener('resize', handleResize);
@@ -83,7 +120,11 @@ export const Sidebar = () => {
   const toggleGroup = (id: string) =>
     setOpenGroups(prev => ({ ...prev, [id]: !prev[id] }));
 
-  const isActive = (path: string) => location.pathname === path;
+  const accessibleItems = GROUPS.flatMap(group => group.items).filter(item => canAccess(item.path));
+  const activePath = accessibleItems
+    .filter(item => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.path;
+  const isActive = (path: string) => activePath === path;
   const getInitials = (email: string) => email.charAt(0).toUpperCase();
 
   // ── NavItem ──────────────────────────────────────────────────────────────
@@ -147,11 +188,6 @@ export const Sidebar = () => {
   // ── SidebarContent ────────────────────────────────────────────────────────
 
   const SidebarContent = ({ collapsed = false }: { collapsed?: boolean }) => {
-    const isAdmin = role === 'admin';
-
-    // For non-admin roles: flat list of accessible items (no groups needed)
-    const flatItems = GROUPS.flatMap(g => g.items).filter(i => canAccess(i.path));
-
     return (
       <div className="h-screen flex flex-col bg-gradient-to-b from-[#006330] via-[#008C3C] to-[#005528] shadow-2xl">
 
@@ -182,14 +218,12 @@ export const Sidebar = () => {
             </div>
           )}
 
-          {isAdmin ? (
-            /* ── Admin: grouped + collapsible ── */
-            <div className="space-y-1">
+          <div className="space-y-1">
               {GROUPS.map(group => {
                 const visibleItems = group.items.filter(i => canAccess(i.path));
                 if (visibleItems.length === 0) return null;
                 const GroupIcon = group.icon;
-                const isExpanded = openGroups[group.id] !== false;
+                const isExpanded = openGroups[group.id] === true;
 
                 return (
                   <div key={group.id}>
@@ -228,15 +262,7 @@ export const Sidebar = () => {
                   </div>
                 );
               })}
-            </div>
-          ) : (
-            /* ── Non-admin: flat list ── */
-            <div className="space-y-0.5">
-              {flatItems.map(item => (
-                <NavItem key={item.path} item={item} collapsed={collapsed} />
-              ))}
-            </div>
-          )}
+          </div>
         </ScrollArea>
 
         {/* User footer */}

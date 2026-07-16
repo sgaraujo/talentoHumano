@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 import { useOnboardingExportTabs } from "@/hooks/useOnboardingExportTabs";
 import { questionnaireService } from "@/services/questionnaireService";
 import { db } from "@/config/firebase";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 import { doc, getDoc } from "firebase/firestore";
 import type { Questionnaire } from "@/models/types/Questionnaire";
 
@@ -72,7 +73,7 @@ function ResponseTable({
       const uids = Array.from(new Set((data as any[]).map((r) => r.userId).filter(Boolean)));
       const entries = await Promise.all(
         uids.map(async (uid) => {
-          const snap = await getDoc(doc(db, "users", uid));
+          const snap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, uid));
           const d: any = snap.exists() ? snap.data() : null;
           const fromDoc = d ? { fullName: d.fullName, email: d.email } : null;
           const fromResponse = directMap[uid];

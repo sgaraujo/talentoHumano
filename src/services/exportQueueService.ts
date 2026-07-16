@@ -10,6 +10,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/config/firebase";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 import type { Questionnaire, QuestionnaireResponse } from "@/models/types/Questionnaire";
 import { exporterService } from "@/services/exporterService";
 
@@ -19,8 +20,8 @@ type QueueItem = {
 };
 
 class ExportQueueService {
-  private responsesCol = "questionnaire_responses";
-  private questionnairesCol = "questionnaires";
+  private responsesCol = FIRESTORE_COLLECTIONS.questionnaireResponses;
+  private questionnairesCol = FIRESTORE_COLLECTIONS.questionnaires;
 
   // 🔥 Trae cola pendiente: exported=false O exported==null (campo inexistente)
   async getPendingOnboardingQueue(max = 200): Promise<QueueItem[]> {

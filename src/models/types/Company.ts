@@ -11,7 +11,12 @@ export interface Company {
   active: boolean;
   activeTH?: boolean;
   activeContabilidad?: boolean;
-  hiddenTaxTypes?: string[];   // tipos de obligación DIAN ocultos para esta empresa
+  aliases?: string[];
+  modules?: {
+    humanResources?: boolean;
+    accounting?: boolean;
+    communications?: boolean;
+  };
   createdAt: Date;
   updatedAt: Date;
 }

@@ -3,6 +3,7 @@ import {
   deleteDoc, serverTimestamp, query, orderBy,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { PlatformUser, AppRole } from '../models/types/AppRole';
 
 function normalize(email: string) {
@@ -17,7 +18,7 @@ function toDate(v: any): Date | undefined {
 }
 
 class RolesService {
-  private col = 'platform_roles';
+  private col = FIRESTORE_COLLECTIONS.platformRoles;
 
   async getByEmail(email: string): Promise<PlatformUser | null> {
     const id = normalize(email);
@@ -54,7 +55,7 @@ class RolesService {
       });
     }
     // Authorize login: add / reactivate in allowed_emails
-    await setDoc(doc(db, 'allowed_emails', id), {
+    await setDoc(doc(db, FIRESTORE_COLLECTIONS.allowedEmails, id), {
       email: id,
       active: true,
       updatedAt: serverTimestamp(),
@@ -65,7 +66,7 @@ class RolesService {
     const id = normalize(email);
     await deleteDoc(doc(db, this.col, id));
     // Revoke login access
-    await setDoc(doc(db, 'allowed_emails', id), {
+    await setDoc(doc(db, FIRESTORE_COLLECTIONS.allowedEmails, id), {
       active: false,
       updatedAt: serverTimestamp(),
     }, { merge: true });

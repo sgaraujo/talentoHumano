@@ -1,0 +1,222 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function email() {
+      return request.auth.token.email.lower();
+    }
+
+    function roleDoc() {
+      return get(/databases/$(database)/documents/identity/data/platform_roles/$(email()));
+    }
+
+    function hasRole(roles) {
+      return signedIn() && roleDoc().data.role in roles;
+    }
+
+    function isAdmin() {
+      return hasRole(['admin']);
+    }
+
+    function isAccounting() {
+      return hasRole(['admin', 'contabilidad']);
+    }
+
+    function isFinance() {
+      return hasRole(['admin', 'financiera']);
+    }
+
+    // Estructura canónica del dominio contable. Las reglas legacy anteriores
+    // permanecen temporalmente para permitir una reversión segura.
+    match /accounting/data/tax_obligations/{obligationId} {
+      allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+      allow create, delete: if isAccounting();
+      allow update: if isAccounting() || isFinance();
+
+      match /history/{historyId} {
+        allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+        allow create: if isAccounting() || isFinance();
+        allow update, delete: if false;
+      }
+    }
+
+    match /accounting/data/tax_daily_activity/{logId} {
+      allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+      allow create: if isAccounting() || isFinance();
+      allow update, delete: if false;
+    }
+
+    match /accounting/data/tax_alerts/{logId} {
+      allow read: if isAccounting();
+      allow write: if false;
+    }
+
+    match /accounting/data/tax_calendar_events/{eventId} {
+      allow read: if isAccounting();
+      allow write: if false;
+    }
+
+    match /accounting/data/company_tax_settings/{companyId} {
+      allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+      allow create, update: if isAccounting();
+      allow delete: if isAdmin();
+    }
+
+    match /accounting/{documentId} {
+      allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+      allow write: if false;
+    }
+
+    match /organization/data/companies/{companyId} {
+      allow read: if signedIn();
+      allow create, update: if hasRole(['admin', 'talento_humano']);
+      allow delete: if isAdmin();
+    }
+    match /organization/data/projects/{projectId} {
+      allow read, write: if signedIn();
+    }
+    match /organization/data/company_memberships/{membershipId} {
+      allow read, write: if signedIn();
+    }
+    match /organization/data/project_memberships/{membershipId} {
+      allow read, write: if signedIn();
+    }
+    match /organization/{documentId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /questionnaires/data/definitions/{questionnaireId} {
+      allow read, write: if signedIn();
+    }
+    match /questionnaires/data/assignments/{assignmentId} {
+      allow read, write: if signedIn();
+    }
+    match /questionnaires/data/responses/{responseId} {
+      allow read, write: if signedIn();
+    }
+    match /questionnaires/{documentId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /human_resources/data/movements/{movementId} {
+      allow read, write: if hasRole(['admin', 'talento_humano']);
+    }
+    match /human_resources/data/employees/{employeeId} {
+      allow read, create, update: if hasRole(['admin', 'talento_humano']);
+      allow delete: if isAdmin();
+
+      match /private/{privateDocumentId} {
+        allow read, create, update: if hasRole(['admin', 'talento_humano']);
+        allow delete: if isAdmin();
+      }
+
+      match /employments/{employmentId} {
+        allow read, create, update: if hasRole(['admin', 'talento_humano']);
+        allow delete: if isAdmin();
+
+        match /private/{privateDocumentId} {
+          allow read, create, update: if hasRole(['admin', 'talento_humano']);
+          allow delete: if isAdmin();
+        }
+      }
+
+      match /audit/{auditId} {
+        allow read, create: if hasRole(['admin', 'talento_humano']);
+        allow update, delete: if false;
+      }
+    }
+
+    // Autoriza las consultas collectionGroup('employments') usadas por el
+    // panel de control. Se mantiene restringida a los dos roles de RR. HH.
+    match /{parentPath=**}/employments/{employmentId} {
+      allow read: if hasRole(['admin', 'talento_humano']);
+    }
+    match /human_resources/data/contractors/{contractorId} {
+      allow read, create, update: if hasRole(['admin', 'talento_humano']);
+      allow delete: if isAdmin();
+    }
+    match /human_resources/data/apprentices/{apprenticeId} {
+      allow read, create, update: if hasRole(['admin', 'talento_humano']);
+      allow delete: if isAdmin();
+    }
+    match /human_resources/data/incapacities/{caseId} {
+      allow read, create, update: if hasRole(['admin', 'talento_humano']);
+      allow delete: if isAdmin();
+    }
+    match /human_resources/data/correspondence/{recordId} {
+      allow read, create, update: if hasRole(['admin', 'talento_humano']);
+      allow delete: if isAdmin();
+    }
+    match /human_resources/data/import_runs/{importId} {
+      allow read, create, update: if hasRole(['admin', 'talento_humano']);
+      allow delete: if isAdmin();
+    }
+    match /human_resources/{documentId} {
+      allow read: if hasRole(['admin', 'talento_humano']);
+      allow write: if false;
+    }
+    match /communications/data/messages/{messageId} {
+      allow read, write: if signedIn();
+    }
+    match /communications/data/recipients/{recipientId} {
+      allow read, write: if signedIn();
+    }
+    match /communications/data/accounting_messages/{messageId} {
+      allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+      allow write: if false;
+    }
+    match /communications/data/bulletins/{bulletinId} {
+      allow read: if true;
+      allow write: if signedIn();
+      match /views/{viewId} {
+        allow create: if true;
+        allow read: if signedIn();
+        allow update, delete: if false;
+      }
+    }
+    match /communications/{documentId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /whatsapp/data/numbers/{document=**} {
+      allow read, write: if signedIn();
+    }
+    match /whatsapp/data/campaigns/{document=**} {
+      allow read, write: if signedIn();
+    }
+    match /whatsapp/data/message_index/{document=**} {
+      allow read, write: if false;
+    }
+    match /whatsapp/{documentId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /identity/data/platform_roles/{roleId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /identity/data/users/{userId} {
+      allow read: if hasRole(['admin', 'talento_humano']);
+      allow create, update, delete: if isAdmin();
+    }
+    match /identity/data/allowed_emails/{emailId} {
+      allow read, write: if isAdmin();
+    }
+    match /identity/data/email_verifications/{verificationId} {
+      allow read, write: if false;
+    }
+    match /identity/{documentId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      // Denegar por defecto cualquier ruta que no esté inventariada arriba.
+      allow read, write: if false;
+    }
+  }
+}

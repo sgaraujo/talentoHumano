@@ -173,21 +173,21 @@ function VideoRenderer({ s }: { s: VideoSection }) {
 
 function LinksRenderer({ s }: { s: LinksSection }) {
   return (
-    <div>
+    <div className="w-full">
       {s.title && <h2 className="text-base font-bold text-gray-800 mb-2">{s.title}</h2>}
       <div className="space-y-2">
         {s.items.filter(item => item.label && item.url).map(item => (
-          <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 bg-gray-50 group">
+          <div key={item.id} className="flex items-center gap-2 p-2 rounded-xl border border-gray-100 bg-gray-50 overflow-hidden w-full">
             {item.imageUrl && (
-              <div className="flex-shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-gray-200">
+              <div className="flex-shrink-0 w-9 h-9 rounded-lg overflow-hidden bg-gray-200">
                 <img src={item.imageUrl} alt={item.label} className="w-full h-full object-cover" />
               </div>
             )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-[#008C3C] truncate">{item.label}</p>
-              {item.description && <p className="text-xs text-gray-400 truncate">{item.description}</p>}
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <p className="text-xs font-semibold text-[#008C3C] truncate">{item.label}</p>
+              {item.description && <p className="text-[10px] text-gray-400 truncate">{item.description}</p>}
             </div>
-            <ExternalLink className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />
+            <ExternalLink className="w-3 h-3 text-gray-300 flex-shrink-0 ml-1" />
           </div>
         ))}
       </div>

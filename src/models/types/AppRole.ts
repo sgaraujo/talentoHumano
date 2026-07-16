@@ -28,7 +28,7 @@ export const ROLE_COLORS: Record<AppRole, string> = {
 export const ROLE_MODULES: Record<AppRole, string[]> = {
   admin: ['*'],   // todos
   talento_humano: [
-    '/dashboard', '/usuarios', '/empresas', '/proyectos',
+    '/dashboard', '/talento-humano/control', '/empresas', '/proyectos',
     '/comunicaciones', '/boletines', '/whatsapp', '/notificaciones', '/rotacion-talento',
     '/chatbot', '/busqueda', '/exportador', '/questionarios',
     '/archivo', '/configuraciones', '/manual',

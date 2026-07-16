@@ -12,6 +12,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { FIRESTORE_COLLECTIONS } from "../config/firestoreCollections";
 import type { User } from "../models/types/User";
 
 function normalizeEmail(email: any): string {
@@ -42,7 +43,7 @@ function mergePlainObjects(base: any, incoming: any): any {
 
 class UserService {
   [x: string]: any;
-  private collectionName = "users";
+  private collectionName = FIRESTORE_COLLECTIONS.users;
 
   /**
    * ✅ Crea/actualiza el usuario usando el UID como ID del documento:

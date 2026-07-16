@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "@/config/firebase";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 
 interface RawAssignment {
   id: string;
@@ -133,10 +134,10 @@ export function useQuestionnaireStats() {
     setError("");
     try {
       const [qSnap, aSnap, uSnap, pSnap] = await Promise.all([
-        getDocs(collection(db, "questionnaires")),
-        getDocs(collection(db, "questionnaire_assignments")),
-        getDocs(collection(db, "users")),
-        getDocs(collection(db, "projects")),
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaires)),
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaireAssignments)),
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.users)),
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.projects)),
       ]);
 
       const questionnaires: RawQuestionnaire[] = qSnap.docs.map(d => ({

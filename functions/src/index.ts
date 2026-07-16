@@ -8,9 +8,61 @@ import { ALL_BOGOTA_2026 } from "./bogotaCalendar2026";
 
 admin.initializeApp();
 
+const ACCOUNTING_COLLECTIONS = {
+  obligations: "accounting/data/tax_obligations",
+  dailyActivity: "accounting/data/tax_daily_activity",
+  alerts: "accounting/data/tax_alerts",
+  calendarEvents: "accounting/data/tax_calendar_events",
+  companyTaxSettings: "accounting/data/company_tax_settings",
+} as const;
+
+const ORGANIZATION_COLLECTIONS = {
+  companies: "organization/data/companies",
+} as const;
+
+const QUESTIONNAIRE_COLLECTIONS = {
+  definitions: "questionnaires/data/definitions",
+  assignments: "questionnaires/data/assignments",
+  responses: "questionnaires/data/responses",
+} as const;
+const COMMUNICATION_COLLECTIONS = {
+  messages: "communications/data/messages",
+  recipients: "communications/data/recipients",
+  accountingMessages: "communications/data/accounting_messages",
+} as const;
+const IDENTITY_COLLECTIONS = {
+  platformRoles: "identity/data/platform_roles",
+  allowedEmails: "identity/data/allowed_emails",
+  emailVerifications: "identity/data/email_verifications",
+  users: "identity/data/users",
+} as const;
+
+type PlatformRole = "admin" | "talento_humano" | "contabilidad" | "financiera";
+
+/** Verifica autenticación y rol en callables administrativas. */
+async function requirePlatformRole(
+  request: { auth?: { token?: Record<string, unknown> } },
+  allowedRoles: PlatformRole[],
+): Promise<{ email: string; role: PlatformRole }> {
+  const rawEmail = request.auth?.token?.email;
+  if (typeof rawEmail !== "string" || !rawEmail.trim()) {
+    throw new HttpsError("unauthenticated", "Debes iniciar sesión.");
+  }
+
+  const email = rawEmail.trim().toLowerCase();
+  const roleSnap = await admin.firestore().collection(IDENTITY_COLLECTIONS.platformRoles).doc(email).get();
+  const role = roleSnap.data()?.role as PlatformRole | undefined;
+  if (!role || !allowedRoles.includes(role)) {
+    throw new HttpsError("permission-denied", "No tienes permisos para ejecutar esta acción.");
+  }
+
+  return { email, role };
+}
+
 // ── WhatsApp / Meta Business ─────────────────────────────────────────────
 export { waWebhook } from "./whatsapp/webhookHandler";
 export { sendWhatsAppMessage, sendWaTemplate } from "./whatsapp/sendMessageHandler";
+export { sendWaCampaign } from "./whatsapp/campaignHandler";
 
 
 const TENANT_ID      = defineSecret("TENANT_ID");
@@ -98,7 +150,7 @@ function normalizeEmail(email: string) {
 
 async function isAllowedEmail(email: string): Promise<boolean> {
   const e = normalizeEmail(email);
-  const snap = await admin.firestore().collection("allowed_emails").doc(e).get();
+  const snap = await admin.firestore().collection(IDENTITY_COLLECTIONS.allowedEmails).doc(e).get();
   if (!snap.exists) return false;
   const data = snap.data() || {};
   // si no tiene "active", asumimos true
@@ -127,7 +179,7 @@ export const sendVerificationCode = onCall(
     const code = generateCode();
     const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 10 * 60 * 1000);
 
-    await admin.firestore().collection("email_verifications").doc(email).set({
+    await admin.firestore().collection(IDENTITY_COLLECTIONS.emailVerifications).doc(email).set({
       email,
       code,
       expiresAt,
@@ -193,7 +245,7 @@ export const verifyEmailCodeAndLogin = onCall(
       throw new HttpsError("permission-denied", "Este correo no está autorizado");
     }
 
-    const ref = admin.firestore().collection("email_verifications").doc(email);
+    const ref = admin.firestore().collection(IDENTITY_COLLECTIONS.emailVerifications).doc(email);
     const snap = await ref.get();
 
     if (!snap.exists) throw new HttpsError("not-found", "No hay código para este email");
@@ -235,7 +287,7 @@ export const verifyEmailCodeAndLogin = onCall(
       role: "colaborador",
     });
 
-    const usersRef = admin.firestore().collection("users").doc(userRecord.uid);
+    const usersRef = admin.firestore().collection(IDENTITY_COLLECTIONS.users).doc(userRecord.uid);
     const userSnap = await usersRef.get();
 
     if (!userSnap.exists) {
@@ -412,7 +464,7 @@ export const submitPublicResponse = onCall(
 
     // 1) Buscar asignación por token
     const assSnap = await firestore
-      .collection("questionnaire_assignments")
+      .collection(QUESTIONNAIRE_COLLECTIONS.assignments)
       .where("token", "==", token)
       .limit(1)
       .get();
@@ -441,7 +493,7 @@ export const submitPublicResponse = onCall(
     // Verificar por email: bloquear si el mismo correo ya completó antes (IDs cambiaron por recarga de BD)
     if (assignment.userEmail) {
       const prevSnap = await firestore
-        .collection("questionnaire_assignments")
+        .collection(QUESTIONNAIRE_COLLECTIONS.assignments)
         .where("userEmail", "==", assignment.userEmail)
         .where("questionnaireId", "==", questionnaireId)
         .where("status", "==", "completed")
@@ -452,7 +504,7 @@ export const submitPublicResponse = onCall(
         // Find the existing response for this email so we can link the assignment
         // without creating a duplicate response record.
         const existingResp = await firestore
-          .collection("questionnaire_responses")
+          .collection(QUESTIONNAIRE_COLLECTIONS.responses)
           .where("userEmail", "==", assignment.userEmail)
           .where("questionnaireId", "==", questionnaireId)
           .limit(1)
@@ -468,14 +520,14 @@ export const submitPublicResponse = onCall(
     }
 
     // 2) Traer cuestionario
-    const qDoc = await firestore.collection("questionnaires").doc(questionnaireId).get();
+    const qDoc = await firestore.collection(QUESTIONNAIRE_COLLECTIONS.definitions).doc(questionnaireId).get();
     if (!qDoc.exists) {
       throw new HttpsError("not-found", "Cuestionario no existe");
     }
     const questionnaire = qDoc.data()!;
 
     // 3) Guardar respuesta — incluir userName y userEmail para que sobrevivan recargas de BD
-    const responseRef = await firestore.collection("questionnaire_responses").add({
+    const responseRef = await firestore.collection(QUESTIONNAIRE_COLLECTIONS.responses).add({
       questionnaireId,
       userId,
       userName:  assignment.userName  || "",
@@ -499,7 +551,7 @@ export const submitPublicResponse = onCall(
     if (assignment.communicationId && assignment.recipientId) {
       try {
         await firestore
-          .collection("comunicado_recipients")
+          .collection(COMMUNICATION_COLLECTIONS.recipients)
           .doc(assignment.recipientId)
           .update({ quizSubmittedAt: admin.firestore.FieldValue.serverTimestamp() });
       } catch { /* silently ignore */ }
@@ -508,7 +560,7 @@ export const submitPublicResponse = onCall(
     // 5) Export onboarding si aplica
     if (questionnaire.isOnboarding && questionnaire.fieldMappings?.length) {
       try {
-        const userRef = firestore.collection("users").doc(userId);
+        const userRef = firestore.collection(IDENTITY_COLLECTIONS.users).doc(userId);
         const userSnap = await userRef.get();
         const userData = userSnap.exists ? (userSnap.data() || {}) : {};
 
@@ -992,7 +1044,7 @@ export const getPublicAssignment = onCall(
     // 1) Buscar asignación por token (query)
     const assSnap = await admin
       .firestore()
-      .collection("questionnaire_assignments")
+      .collection(QUESTIONNAIRE_COLLECTIONS.assignments)
       .where("token", "==", token)
       .limit(1)
       .get();
@@ -1022,7 +1074,7 @@ export const getPublicAssignment = onCall(
     if (assignment.userEmail) {
       const prevSnap = await admin
         .firestore()
-        .collection("questionnaire_assignments")
+        .collection(QUESTIONNAIRE_COLLECTIONS.assignments)
         .where("userEmail", "==", assignment.userEmail)
         .where("questionnaireId", "==", questionnaireId)
         .where("status", "==", "completed")
@@ -1043,7 +1095,7 @@ export const getPublicAssignment = onCall(
     }
 
     // 2) Traer cuestionario
-    const qDoc = await admin.firestore().collection("questionnaires").doc(questionnaireId).get();
+    const qDoc = await admin.firestore().collection(QUESTIONNAIRE_COLLECTIONS.definitions).doc(questionnaireId).get();
     if (!qDoc.exists) {
       throw new HttpsError("not-found", "Cuestionario no existe");
     }
@@ -1064,8 +1116,22 @@ export const getPublicAssignment = onCall(
 // TAX CALENDAR ALERTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ALERT_THRESHOLDS = [1, 3, 7, 15]; // days before due date
-const COMPLETED_STATUSES = new Set(["Pagado", "No aplica", "Informe Enviado"]);
+const UPCOMING_WINDOW = 7;             // días hacia adelante que aparecen en el correo
+const OVERDUE_FROM    = "2026-06-01";  // solo vencidos desde esta fecha (evita ruido histórico)
+const COMPLETED_STATUSES = new Set(["Pagado", "No aplica", "Informe Enviado", "Presentado"]);
+
+const _baseNorm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[.\-,]/g, "").replace(/\s+/g, " ").trim();
+const _DISPLAY_NAMES: Record<string, string> = {
+  'impuesto a las ventas':            'IVA',
+  'iva':                              'IVA',
+  'impuesto de industria y comercio': 'ICA Bimestral',
+  'retefuente':                       'Retención en la Fuente',
+  'retencion fuente':                 'Retención en la Fuente',
+  'retencion en la fuente':           'Retención en la Fuente',
+  'retencion de ica':                 'ReteICA',
+  'retencion ica':                    'ReteICA',
+};
+const displayTax = (t: string) => _DISPLAY_NAMES[_baseNorm(t ?? "")] ?? (t ?? "");
 
 interface TaxObligation {
   id: string;
@@ -1110,7 +1176,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   const today = new Date(todayStr + "T00:00:00"); // medianoche Colombia para calcular días
 
   // Única lectura de tax_obligations
-  const snap = await db.collection("tax_obligations").get();
+  const snap = await db.collection(ACCOUNTING_COLLECTIONS.obligations).get();
   const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TaxObligation));
 
   // Helpers de normalización para dedup robusto
@@ -1125,7 +1191,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
     if (nitC) keys.push(`nit:${nitC}__${suffix}`);
     return keys;
   };
-  const hasAny = (set: Set<string>, keys: string[]) => keys.some(k => set.has(k));
+  const _hasAny = (set: Set<string>, keys: string[]) => keys.some(k => set.has(k)); void _hasAny;
 
   const statusPriority = (s: string) => {
     if (s === "Pagado")          return 5;
@@ -1146,7 +1212,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
       keys.forEach(k => dedupMap.set(k, obl));
     }
   }
-  const firestoreObligations = [...new Set(dedupMap.values())];
+  void dedupMap; // unused after refactor — kept for completedKeys side-effect
 
   // Índice de TODAS las obligaciones Firestore — por NIT y por nombre de empresa
   const firestoreKeys = new Set<string>();
@@ -1159,7 +1225,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   }
 
   // Load all contabilidad + admin users to always notify them
-  const rolesSnap = await db.collection("platform_roles")
+  const rolesSnap = await db.collection(IDENTITY_COLLECTIONS.platformRoles)
     .where("role", "in", ["contabilidad", "admin"])
     .get();
   const globalRecipients: { name: string; email: string }[] = rolesSnap.docs.map(d => ({
@@ -1168,7 +1234,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   }));
 
   // Check which alerts were already sent today to avoid duplicates
-  const logRef = db.collection("tax_alert_log");
+  const logRef = db.collection(ACCOUNTING_COLLECTIONS.alerts);
   const todayLogSnap = force ? { docs: [] } : await logRef.where("sentDate", "==", todayStr).get();
   const alreadySent = new Set((todayLogSnap as any).docs.map((d: any) => d.data().key as string));
 
@@ -1194,101 +1260,161 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
     if (batchCount >= 400) await flushBatch();
   };
 
-  // ── 1. Firestore obligations ─────────────────────────────────────────────────
-  for (const obl of firestoreObligations) {
-    if (!obl.dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(obl.dueDate)) continue;
+  // ── Helpers de matching idénticos al frontend ────────────────────────────────
+  const TAX_ALIASES: Record<string, string> = {
+    'reteica':                        'reteica',
+    'retencion de ica':               'reteica',
+    'retencion ica':                  'reteica',
+    'impuesto de industria y comercio': 'reteica',
+    'ica':                            'reteica',
+    'iva bimestral':                  'iva',
+    'iva cuatrimestral':              'iva',
+    'impuesto a las ventas':          'iva',
+    'iva':                            'iva',
+    'retencion en la fuente':         'retencion en la fuente',
+    'retencion fuente':               'retencion en la fuente',
+    'retefuente':                     'retencion en la fuente',
+  };
+  const baseNorm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[.\-,]/g, "").replace(/\s+/g, " ").trim();
+  const normTax = (t: string) => { const n = baseNorm(t); return TAX_ALIASES[n] ?? n; };
 
-    const due = new Date(obl.dueDate + "T00:00:00");
-    const daysLeft = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+  const sameDate = (a: string, b: string) => {
+    if (a === b) return true;
+    const [ay, am, ad] = a.split("-").map(Number);
+    const [by, bm, bd] = b.split("-").map(Number);
+    return Math.abs(Date.UTC(ay, am-1, ad) - Date.UTC(by, bm-1, bd)) <= 5 * 86_400_000;
+  };
+  const nitClean = (n: string) => (n ?? "").replace(/[^0-9]/g, "");
 
-    if (!ALERT_THRESHOLDS.includes(daysLeft)) continue;
-
-    const alertKey = `${obl.id}_${daysLeft}_${todayStr}`;
-    if (alreadySent.has(alertKey)) { skipped++; continue; }
-
-    if (obl.advisor && obl.advisor.includes("@")) {
-      ensureRecipient(obl.advisor, obl.advisor).obligations.push({ ...obl, daysLeft, threshold: daysLeft });
-    }
-    for (const gr of globalRecipients) {
-      ensureRecipient(gr.email, gr.name).obligations.push({ ...obl, daysLeft, threshold: daysLeft });
-    }
-
-    await addLog({ key: alertKey, sentDate: todayStr, obligationId: obl.id, daysLeft });
-  }
-
-  // ── 2. Auto-generated calendar obligations (DIAN + Bogotá) ──────────────────
-  // Load all active companies with contabilidad enabled
-  const companiesSnap = await db.collection("companies")
+  // ── Cargar empresas activas ───────────────────────────────────────────────────
+  const companiesSnap = await db.collection(ORGANIZATION_COLLECTIONS.companies)
     .where("active", "==", true)
     .where("activeContabilidad", "==", true)
     .get();
+  const companyTaxSettingsSnap = await db.collection(ACCOUNTING_COLLECTIONS.companyTaxSettings).get();
+  const excludedTaxTypesByCompany = new Map(companyTaxSettingsSnap.docs.map(doc => [
+    doc.id,
+    doc.data().excludedTaxTypes ?? [],
+  ]));
 
-  const bogotaCalendar: TaxObligation[] = ALL_BOGOTA_2026.map(o => ({
-    id: `bogota__${o.taxType}__${o.dueDate}`,
-    company: "—",
-    nit:     "—",
-    taxType: o.taxType,
-    obligationType: "Impuestos",
-    period:  o.period,
-    dueDate: o.dueDate,
-    year:    o.dueDate.slice(0, 4),
-    status:  "",
-    advisor: "",
-    observation: "",
-  }));
-
+  // ── Recorrer calendario DIAN empresa por empresa (igual que el frontend) ──────
   for (const compDoc of companiesSnap.docs) {
     const comp = compDoc.data();
     const nit: string = comp.nit || "";
     if (!nit) continue;
 
-    const hidden = new Set<string>(comp.hiddenTaxTypes ?? []);
+    const hidden = new Set<string>(excludedTaxTypesByCompany.get(compDoc.id) ?? []);
+    const nitC    = nitClean(nit);
+    const compN   = cComp(comp.name ?? "");
 
-    // DIAN national obligations
+    // Obtener todas las obligaciones del calendario para esta empresa
     const dianObls = getDianObligationsByNit(nit).filter(o => !hidden.has(o.taxType));
-    // Bogotá district obligations
-    const bogotaObls = bogotaCalendar.filter(o => !hidden.has(o.taxType));
-
-    const calendarObls: TaxObligation[] = [
-      ...dianObls.map(o => ({
-        id: `cal__${nit}__${o.taxType}__${o.dueDate}`,
-        company: comp.name || nit,
-        nit,
-        taxType: o.taxType,
-        obligationType: "Impuestos",
-        period: o.period,
-        dueDate: o.dueDate,
-        year: o.dueDate.slice(0, 4),
-        status: "",
-        advisor: "",
-        observation: "",
-      })),
-      ...bogotaObls.map(o => ({
-        ...o,
-        id: `cal__${nit}__${o.taxType}__${o.dueDate}`,
-        company: comp.name || nit,
-        nit,
-      })),
+    const bogotaObls = ALL_BOGOTA_2026.filter(o => !hidden.has(o.taxType));
+    const allCalObls = [
+      ...dianObls.map(o => ({ ...o, company: comp.name || nit, nit })),
+      ...bogotaObls.map(o => ({ taxType: o.taxType, period: o.period, dueDate: o.dueDate, company: comp.name || nit, nit })),
     ];
 
-    for (const obl of calendarObls) {
-      if (!obl.dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(obl.dueDate)) continue;
+    // hasVisibleCalendar: igual al `hasVisible` del frontend
+    // Si es false → empresa oculta de Vencidos/Próximos → tampoco mostramos sus legales
+    let hasVisibleCalendar = false;
+    const pendingCalEntries: Array<{ calObl: any; matched: any; daysLeft: number }> = [];
 
-      const due = new Date(obl.dueDate + "T00:00:00");
+    for (const calObl of allCalObls) {
+      const due = new Date(calObl.dueDate + "T00:00:00");
       const daysLeft = Math.round((due.getTime() - today.getTime()) / 86_400_000);
-      if (!ALERT_THRESHOLDS.includes(daysLeft)) continue;
+      const isOverdue  = daysLeft < 0 && calObl.dueDate >= OVERDUE_FROM;
+      const isUpcoming = daysLeft >= 0 && daysLeft <= UPCOMING_WINDOW;
+      if (!isOverdue && !isUpcoming) continue;
 
-      // Saltar si ya existe en Firestore (completada o pendiente) — evita duplicados
-      const autoKeys = oblKeys(nit, comp.name, obl.taxType, obl.dueDate);
-      if (hasAny(firestoreKeys, autoKeys) || hasAny(completedKeys, autoKeys)) { skipped++; continue; }
+      // Buscar TODOS los registros Firestore del mismo vencimiento (puede haber duplicados con NITs distintos)
+      const allMatched = allDocs.filter(o => {
+        const oNitC = nitClean(o.nit ?? "");
+        const nitMatch  = nitC && oNitC && nitC === oNitC;
+        const nameMatch = cComp(o.company ?? "") === compN;
+        return (nitMatch || nameMatch)
+          && normTax(o.taxType) === normTax(calObl.taxType)
+          && sameDate(o.dueDate, calObl.dueDate);
+      });
 
-      const alertKey = `cal__${nit}__${obl.taxType}__${obl.dueDate}__${daysLeft}__${todayStr}`;
-      if (alreadySent.has(alertKey)) { skipped++; continue; }
-
-      for (const gr of globalRecipients) {
-        ensureRecipient(gr.email, gr.name).obligations.push({ ...obl, daysLeft, threshold: daysLeft });
+      // Si CUALQUIER versión está completada o no aplica → omitir
+      if (allMatched.some(o => COMPLETED_STATUSES.has(o.status ?? "") || o.status === "No aplica")) {
+        skipped++; continue;
       }
 
+      // Al menos una obligación de calendario está pendiente → empresa visible
+      hasVisibleCalendar = true;
+
+      // Usar el registro con mayor prioridad de estado
+      const matched = allMatched.sort((a, b) => statusPriority(b.status ?? "") - statusPriority(a.status ?? ""))[0];
+      pendingCalEntries.push({ calObl, matched, daysLeft });
+    }
+
+    // Si ninguna obligación del calendario está pendiente, ocultar empresa (igual que frontend)
+    if (!hasVisibleCalendar) continue;
+
+    for (const { calObl, matched, daysLeft } of pendingCalEntries) {
+      const oblId   = matched?.id ?? `cal__${nit}__${calObl.taxType}__${calObl.dueDate}`;
+      const alertKey = `${oblId}__${daysLeft}__${todayStr}`;
+      if (alreadySent.has(alertKey)) { skipped++; continue; }
+
+      const entry = {
+        id: oblId,
+        company: comp.name || nit,
+        nit,
+        taxType: calObl.taxType,
+        obligationType: "Impuestos",
+        period:  (calObl as any).period ?? "",
+        dueDate: calObl.dueDate,
+        year:    calObl.dueDate.slice(0, 4),
+        status:  matched?.status ?? "",
+        advisor: matched?.advisor ?? "",
+        observation: "",
+        daysLeft,
+        threshold: daysLeft,
+      };
+
+      for (const gr of globalRecipients) {
+        ensureRecipient(gr.email, gr.name).obligations.push(entry);
+      }
+      if (matched?.advisor && matched.advisor.includes("@")) {
+        ensureRecipient(matched.advisor, matched.advisor).obligations.push(entry);
+      }
+
+      await addLog({ key: alertKey, sentDate: todayStr, obligationId: oblId, daysLeft });
+    }
+
+    // Obligaciones legales/manuales — solo si la empresa tiene calendario pendiente
+    const legalObls = allDocs.filter(o => {
+      const oNitC = nitClean(o.nit ?? "");
+      const match = (nitC && oNitC && nitC === oNitC) || cComp(o.company ?? "") === compN;
+      if (!match) return false;
+      if (COMPLETED_STATUSES.has(o.status ?? "") || o.status === "No aplica") return false;
+      // Excluir si ya está representada en el calendario DIAN (mismo tipo y fecha ±5d)
+      if (allCalObls.some(cal => normTax(cal.taxType) === normTax(o.taxType) && sameDate(cal.dueDate, o.dueDate))) return false;
+      // Excluir si existe otra versión completada del mismo vencimiento
+      return !allDocs.some(other =>
+        other.id !== o.id &&
+        cComp(other.company ?? "") === compN &&
+        normTax(other.taxType) === normTax(o.taxType) &&
+        sameDate(other.dueDate, o.dueDate) &&
+        (COMPLETED_STATUSES.has(other.status ?? "") || other.status === "No aplica")
+      );
+    });
+
+    for (const obl of legalObls) {
+      const due = new Date(obl.dueDate + "T00:00:00");
+      const daysLeft = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+      const isOverdue  = daysLeft < 0 && obl.dueDate >= OVERDUE_FROM;
+      const isUpcoming = daysLeft >= 0 && daysLeft <= UPCOMING_WINDOW;
+      if (!isOverdue && !isUpcoming) continue;
+
+      const alertKey = `${obl.id}__legal__${daysLeft}__${todayStr}`;
+      if (alreadySent.has(alertKey)) { skipped++; continue; }
+
+      const entry = { ...obl, daysLeft, threshold: daysLeft };
+      for (const gr of globalRecipients) ensureRecipient(gr.email, gr.name).obligations.push(entry);
+      if (obl.advisor?.includes("@")) ensureRecipient(obl.advisor, obl.advisor).obligations.push(entry);
       await addLog({ key: alertKey, sentDate: todayStr, obligationId: obl.id, daysLeft });
     }
   }
@@ -1300,10 +1426,10 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   // ── Helpers de ordenación ────────────────────────────────────────────────
   const COMPANY_ORDER = [
     "inteegra",
+    "consorcio scia",
     "netcol",
     "inversiones eon",
     "itac colombia",
-    "consorcio scia",
     "triangulum",
     "netia",
     "logistica empresarial",
@@ -1327,8 +1453,8 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
 
   // ── Estado por empresa — agrupa variantes de nombre por índice canónico ──
   const COMPANY_CANONICAL: Record<number, string> = {
-    0: "Inteegra SAS BIC", 1: "Netcol Ingeniería SAS BIC", 2: "Inversiones EON SAS",
-    3: "ITAC Colombia SAS", 4: "Consorcio SCIA Netcol", 5: "Triangulum BPO SAS",
+    0: "Inteegra SAS BIC", 1: "Consorcio SCIA Netcol", 2: "Netcol Ingeniería SAS BIC",
+    3: "Inversiones EON SAS", 4: "ITAC Colombia SAS", 5: "Triangulum BPO SAS",
     6: "Netia SAS", 7: "Logística Empresarial de Transporte", 8: "LETI SAS",
     9: "Newstar SAS", 10: "Newforce SAS", 11: "Unión Temporal Tecnología EIP",
     12: "Unión Temporal Fomento TIC", 13: "Unión Temporal Internuqui",
@@ -1448,36 +1574,59 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   for (const recipient of recipientMap.values()) {
     if (recipient.obligations.length === 0) continue;
 
-    // Sort: primero por urgencia (días asc), luego por empresa, luego por tipo
-    recipient.obligations.sort((a, b) => {
-      if (a.daysLeft !== b.daysLeft) return a.daysLeft - b.daysLeft;
-      const cmp = companyIdx(a.company) - companyIdx(b.company);
-      return cmp !== 0 ? cmp : a.taxType.localeCompare(b.taxType, "es");
-    });
+    const overdueObls  = recipient.obligations.filter(o => o.daysLeft < 0)
+      .sort((a, b) => b.daysLeft - a.daysLeft || companyIdx(a.company) - companyIdx(b.company)); // más reciente primero
+    const upcomingObls = recipient.obligations.filter(o => o.daysLeft >= 0)
+      .sort((a, b) => a.daysLeft - b.daysLeft || companyIdx(a.company) - companyIdx(b.company));
 
-    const rows = recipient.obligations.map(o => {
-      const urgencyColor = o.daysLeft <= 1 ? "#dc2626" : o.daysLeft <= 3 ? "#ea580c" : o.daysLeft <= 7 ? "#d97706" : "#1d4ed8";
-      const urgencyBg    = o.daysLeft <= 1 ? "#fef2f2" : o.daysLeft <= 3 ? "#fff7ed" : o.daysLeft <= 7 ? "#fffbeb" : "#eff6ff";
-      const daysLabel    = o.daysLeft === 0 ? "HOY" : o.daysLeft === 1 ? "Ma&#xF1;ana" : `${o.daysLeft} d&#xED;as`;
-      const statusColor  = o.status === "No iniciado" ? "#6b7280" : o.status === "Revisado" ? "#3b82f6" : o.status === "Informe Enviado" ? "#0d9488" : o.status === "Presentado" ? "#7c3aed" : "#16a34a";
+    const makeRow = (o: any, isOverdue: boolean) => {
+      const statusColor = o.status === "No iniciado" ? "#6b7280" : o.status === "Revisado" ? "#3b82f6" : "#16a34a";
+      const daysColor   = isOverdue ? "#dc2626" : o.daysLeft <= 3 ? "#ea580c" : o.daysLeft <= 7 ? "#d97706" : "#1d4ed8";
+      const daysBg      = isOverdue ? "#fef2f2" : o.daysLeft <= 3 ? "#fff7ed" : o.daysLeft <= 7 ? "#fffbeb" : "#eff6ff";
+      const daysLabel   = isOverdue
+        ? `Vencido hace ${Math.abs(o.daysLeft)}d`
+        : o.daysLeft === 0 ? "HOY" : o.daysLeft === 1 ? "Ma&#xF1;ana" : `${o.daysLeft} d&#xED;as`;
       return `
         <tr>
-          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1f2937;font-weight:600;border-bottom:1px solid #f3f4f6">${o.company}${cNit(o.nit) ? `<br/><span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:400;color:#9ca3af">NIT: ${cNit(o.nit)}</span>` : ""}</td>
-          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;border-bottom:1px solid #f3f4f6">${o.taxType}</td>
-          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #f3f4f6">${o.period}</td>
-          <td style="padding:10px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap">${o.dueDate.split("-").reverse().join("/")}</td>
-          <td align="center" style="padding:10px 12px;border-bottom:1px solid #f3f4f6">
-            <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;color:${statusColor}">${o.status || "Auto"}</span>
+          <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1f2937;font-weight:600;border-bottom:1px solid #f3f4f6">${o.company}${cNit(o.nit) ? `<br/><span style="font-size:10px;font-weight:400;color:#9ca3af">NIT: ${cNit(o.nit)}</span>` : ""}</td>
+          <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;border-bottom:1px solid #f3f4f6">${displayTax(o.taxType)}</td>
+          <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #f3f4f6">${o.period ?? ""}</td>
+          <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap">${o.dueDate.split("-").reverse().join("/")}</td>
+          <td align="center" style="padding:9px 12px;border-bottom:1px solid #f3f4f6">
+            <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;color:${statusColor}">${o.status || "Sin gestionar"}</span>
           </td>
-          <td align="center" bgcolor="${urgencyBg}" style="padding:10px 12px;background-color:${urgencyBg};border-bottom:1px solid #f3f4f6;white-space:nowrap">
-            <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${urgencyColor}">${daysLabel}</span>
+          <td align="center" bgcolor="${daysBg}" style="padding:9px 12px;background-color:${daysBg};border-bottom:1px solid #f3f4f6;white-space:nowrap">
+            <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${daysColor}">${daysLabel}</span>
           </td>
         </tr>`;
-    }).join("");
+    };
+
+    const TABLE_HEADER = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb">
+      <tr bgcolor="#f9fafb" style="background-color:#f9fafb">
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Empresa</th>
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Obligaci&#xF3;n</th>
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Per&#xED;odo</th>
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Vence</th>
+        <th align="center" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Estado</th>
+        <th align="center" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">D&#xED;as</th>
+      </tr>`;
+
+    const overdueSection = overdueObls.length === 0 ? "" : `
+  <!-- VENCIDOS -->
+  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px 8px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;border-top:1px solid #f3f4f6">
+    <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:1.5px">&#128308; Vencimientos sin gestionar (${overdueObls.length})</p>
+    ${TABLE_HEADER}${overdueObls.map(o => makeRow(o, true)).join("")}</table>
+  </td></tr>`;
+
+    const upcomingSection = upcomingObls.length === 0 ? "" : `
+  <!-- PROXIMOS -->
+  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px 8px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;border-top:1px solid #f3f4f6">
+    <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#128197; Pr&#xF3;ximos 7 d&#xED;as (${upcomingObls.length})</p>
+    ${TABLE_HEADER}${upcomingObls.map(o => makeRow(o, false)).join("")}</table>
+  </td></tr>`;
 
     const year = new Date().getFullYear();
     const dateStr = new Date().toLocaleDateString("es-CO", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-    const urgentCount = recipient.obligations.filter(o => o.daysLeft <= 1).length;
     const html = `<!DOCTYPE html>
 <html lang="es" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -1505,27 +1654,16 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   <!-- GREETING -->
   <tr><td bgcolor="#f0fdf4" style="background-color:#f0fdf4;padding:14px 32px;border-left:1px solid #d1fae5;border-right:1px solid #d1fae5">
     <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#166534">
-      Hola <strong>${recipient.name}</strong> &mdash; ${urgentCount > 0 ? `<strong style="color:#dc2626">${urgentCount} vence${urgentCount !== 1 ? "n" : ""} hoy o ma&#xF1;ana.</strong> ` : ""}Hay <strong>${recipient.obligations.length}</strong> obligaci${recipient.obligations.length !== 1 ? "ones tributarias pr&#xF3;ximas" : "&#xF3;n tributaria pr&#xF3;xima"} a vencer.
+      Hola <strong>${recipient.name}</strong> &mdash;
+      ${overdueObls.length > 0 ? `<strong style="color:#dc2626">${overdueObls.length} vencimiento${overdueObls.length !== 1 ? "s" : ""} sin gestionar.</strong> ` : ""}
+      ${upcomingObls.length > 0 ? `<strong>${upcomingObls.length} obligaci&#xF3;n${upcomingObls.length !== 1 ? "es" : ""}</strong> vence${upcomingObls.length !== 1 ? "n" : ""} en los pr&#xF3;ximos 7 d&#xED;as.` : "No hay vencimientos pr&#xF3;ximos en 7 d&#xED;as."}
     </p>
   </td></tr>
 
-  <!-- ══ SECCIÓN 1: VENCIMIENTOS ══ -->
-  <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px 8px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">
-    <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#128197; Vencimientos pr&#xF3;ximos</p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb">
-      <tr bgcolor="#f9fafb" style="background-color:#f9fafb">
-        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Empresa</th>
-        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Obligaci&#xF3;n</th>
-        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Per&#xED;odo</th>
-        <th align="left" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Vence</th>
-        <th align="center" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">Estado</th>
-        <th align="center" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #e5e7eb">D&#xED;as</th>
-      </tr>
-      ${rows}
-    </table>
-  </td></tr>
+  ${overdueSection}
+  ${upcomingSection}
 
-  <!-- ══ SECCIÓN 2: ESTADO POR EMPRESA ══ -->
+  <!-- ══ ESTADO POR EMPRESA ══ -->
   <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;border-top:1px solid #f3f4f6">
     <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#127970; Estado por empresa</p>
     ${companyStatusGrid}
@@ -1555,9 +1693,10 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
         body: JSON.stringify({
           message: {
             subject: (() => {
-              const urgent = recipient.obligations.filter(o => o.daysLeft <= 1).length;
-              const prefix = urgent > 0 ? `🔴 ${urgent} vence${urgent > 1 ? "n" : ""} hoy/mañana — ` : "⚠️ ";
-              return `${prefix}${recipient.obligations.length} obligación${recipient.obligations.length !== 1 ? "es" : ""} tributaria${recipient.obligations.length !== 1 ? "s" : ""} próxima${recipient.obligations.length !== 1 ? "s" : ""} a vencer`;
+              const parts: string[] = [];
+              if (overdueObls.length > 0) parts.push(`🔴 ${overdueObls.length} vencido${overdueObls.length !== 1 ? "s" : ""} sin gestionar`);
+              if (upcomingObls.length > 0) parts.push(`📅 ${upcomingObls.length} próximo${upcomingObls.length !== 1 ? "s" : ""} (≤15d)`);
+              return parts.length > 0 ? parts.join(" · ") : "Calendario Tributario — Sin novedades";
             })(),
             body: { contentType: "HTML", content: html },
             toRecipients: [{ emailAddress: { address: recipient.email } }],
@@ -1599,6 +1738,7 @@ export const triggerTaxAlerts = onCall(
     secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
+    await requirePlatformRole(request, ["admin"]);
     const force = request.data?.force === true;
     const result = await runTaxAlerts(admin.firestore(), force);
     return result;
@@ -1610,9 +1750,10 @@ export const triggerTaxAlerts = onCall(
  */
 export const findDuplicateAlerts = onCall(
   { region: "us-central1", cors: true },
-  async () => {
+  async (request) => {
+    await requirePlatformRole(request, ["admin"]);
     const db = admin.firestore();
-    const snap = await db.collection("tax_obligations").get();
+    const snap = await db.collection(ACCOUNTING_COLLECTIONS.obligations).get();
     const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TaxObligation));
 
     // Índice de todas las obligaciones Firestore
@@ -1623,10 +1764,15 @@ export const findDuplicateAlerts = onCall(
     }
 
     // Generar obligaciones del calendario auto
-    const companiesSnap = await db.collection("companies")
+    const companiesSnap = await db.collection(ORGANIZATION_COLLECTIONS.companies)
       .where("active", "==", true)
       .where("activeContabilidad", "==", true)
       .get();
+    const companyTaxSettingsSnap = await db.collection(ACCOUNTING_COLLECTIONS.companyTaxSettings).get();
+    const excludedTaxTypesByCompany = new Map(companyTaxSettingsSnap.docs.map(doc => [
+      doc.id,
+      doc.data().excludedTaxTypes ?? [],
+    ]));
 
     const duplicates: Array<{
       key: string; company: string; nit: string;
@@ -1638,7 +1784,7 @@ export const findDuplicateAlerts = onCall(
       const comp = compDoc.data();
       const nit: string = comp.nit || "";
       if (!nit) continue;
-      const hidden = new Set<string>(comp.hiddenTaxTypes ?? []);
+      const hidden = new Set<string>(excludedTaxTypesByCompany.get(compDoc.id) ?? []);
       const dianObls = getDianObligationsByNit(nit).filter((o: any) => !hidden.has(o.taxType));
       const bogotaObls = ALL_BOGOTA_2026.filter((o: any) => !hidden.has(o.taxType));
 
@@ -1677,6 +1823,7 @@ export const scheduleTaxInCalendar = onCall(
     secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
+    await requirePlatformRole(request, ["admin"]);
     const db = admin.firestore();
     const daysAhead: number = Number(request.data?.daysAhead ?? 90);
 
@@ -1686,7 +1833,7 @@ export const scheduleTaxInCalendar = onCall(
     cutoff.setDate(cutoff.getDate() + daysAhead);
 
     // Load non-completed obligations within window
-    const snap = await db.collection("tax_obligations").get();
+    const snap = await db.collection(ACCOUNTING_COLLECTIONS.obligations).get();
     const obligations: TaxObligation[] = snap.docs
       .map(d => ({ id: d.id, ...d.data() } as TaxObligation))
       .filter(o => {
@@ -1699,7 +1846,7 @@ export const scheduleTaxInCalendar = onCall(
     if (obligations.length === 0) return { scheduled: 0, skipped: 0 };
 
     // Load contabilidad + admin attendees
-    const rolesSnap = await db.collection("platform_roles")
+    const rolesSnap = await db.collection(IDENTITY_COLLECTIONS.platformRoles)
       .where("role", "in", ["contabilidad", "admin"])
       .get();
     const attendees = rolesSnap.docs.map(d => ({
@@ -1710,7 +1857,7 @@ export const scheduleTaxInCalendar = onCall(
     if (attendees.length === 0) return { scheduled: 0, skipped: 0, error: "No hay usuarios de contabilidad registrados" };
 
     // Check already-scheduled events
-    const eventsRef = db.collection("tax_calendar_events");
+    const eventsRef = db.collection(ACCOUNTING_COLLECTIONS.calendarEvents);
     const existingSnap = await eventsRef.get();
     const alreadyScheduled = new Set(existingSnap.docs.map(d => d.data().obligationId as string));
 
@@ -1727,7 +1874,7 @@ export const scheduleTaxInCalendar = onCall(
 
       const bodyHtml = `
         <p><b>Empresa:</b> ${obl.company} &nbsp;|&nbsp; <b>NIT:</b> ${obl.nit}</p>
-        <p><b>Obligación:</b> ${obl.taxType} — ${obl.obligationType}</p>
+        <p><b>Obligación:</b> ${displayTax(obl.taxType)} — ${obl.obligationType}</p>
         <p><b>Periodo:</b> ${obl.period} &nbsp;|&nbsp; <b>Año:</b> ${obl.year}</p>
         ${obl.advisor ? `<p><b>Asesor:</b> ${obl.advisor}</p>` : ""}
         <p><b>Estado actual:</b> ${obl.status || "Pendiente"}</p>
@@ -1786,7 +1933,7 @@ export const getPublicQuestionnaire = onCall(
     if (!questionnaireId) throw new HttpsError("invalid-argument", "questionnaireId requerido");
 
     const firestore = admin.firestore();
-    const qDoc = await firestore.collection("questionnaires").doc(questionnaireId).get();
+    const qDoc = await firestore.collection(QUESTIONNAIRE_COLLECTIONS.definitions).doc(questionnaireId).get();
 
     if (!qDoc.exists) throw new HttpsError("not-found", "Formulario no encontrado");
 
@@ -1827,7 +1974,7 @@ export const submitPublicFormResponse = onCall(
     const cleanName  = name.trim();
 
     // 1) Verificar que el cuestionario existe, está activo y es público
-    const qDoc = await firestore.collection("questionnaires").doc(questionnaireId).get();
+    const qDoc = await firestore.collection(QUESTIONNAIRE_COLLECTIONS.definitions).doc(questionnaireId).get();
     if (!qDoc.exists) {
       throw new HttpsError("not-found", "Formulario no encontrado");
     }
@@ -1841,7 +1988,7 @@ export const submitPublicFormResponse = onCall(
 
     // 2) Verificar que el correo no haya respondido antes (por cualquier canal)
     const prev = await firestore
-      .collection("questionnaire_responses")
+      .collection(QUESTIONNAIRE_COLLECTIONS.responses)
       .where("questionnaireId", "==", questionnaireId)
       .where("userEmail", "==", cleanEmail)
       .limit(1)
@@ -1855,7 +2002,7 @@ export const submitPublicFormResponse = onCall(
     }
 
     // 3) Guardar respuesta
-    await firestore.collection("questionnaire_responses").add({
+    await firestore.collection(QUESTIONNAIRE_COLLECTIONS.responses).add({
       questionnaireId,
       userId:    cleanEmail,
       userName:  cleanName,
@@ -1875,7 +2022,7 @@ export const submitPublicFormResponse = onCall(
 
 // Trigger: when a recipient is marked as read, sync totalRead on the communication doc
 export const onRecipientRead = onDocumentUpdated(
-  { document: "comunicado_recipients/{docId}", region: "us-central1" },
+  { document: "communications/data/recipients/{docId}", region: "us-central1" },
   async (event) => {
     const before = event.data?.before?.data();
     const after  = event.data?.after?.data();
@@ -1886,11 +2033,11 @@ export const onRecipientRead = onDocumentUpdated(
     const communicationId = after.communicationId;
     if (!communicationId) return;
     const db = admin.firestore();
-    const snap = await db.collection("comunicado_recipients")
+    const snap = await db.collection(COMMUNICATION_COLLECTIONS.recipients)
       .where("communicationId", "==", communicationId)
       .where("status", "==", "read")
       .get();
-    await db.collection("comunicados").doc(communicationId).update({
+    await db.collection(COMMUNICATION_COLLECTIONS.messages).doc(communicationId).update({
       totalRead: snap.size,
     });
   }
@@ -1909,6 +2056,7 @@ export const notifyTaxStatusChange = onCall(
     secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
+    await requirePlatformRole(request, ["admin", "contabilidad", "financiera"]);
     const {
       companyName,
       nit,
@@ -2136,7 +2284,7 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
 
   // Solo filtra por fecha — orderBy en campo distinto requeriría índice compuesto
-  const logSnap = await db.collection("tax_daily_log")
+  const logSnap = await db.collection(ACCOUNTING_COLLECTIONS.dailyActivity)
     .where("date", "==", today)
     .get();
 
@@ -2167,7 +2315,7 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
   }
 
   // Destinatarios: contabilidad + financiera + admin
-  const rolesSnap = await db.collection("platform_roles")
+  const rolesSnap = await db.collection(IDENTITY_COLLECTIONS.platformRoles)
     .where("role", "in", ["contabilidad", "financiera", "admin"])
     .get();
   const recipients = rolesSnap.docs.map(d => ({
@@ -2184,7 +2332,7 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
     // Firestore no soporta 'in' con más de 30 — partir en chunks
     for (let i = 0; i < oblIds.length; i += 30) {
       const chunk = oblIds.slice(i, i + 30);
-      const snap = await db.collection("tax_obligations").where(admin.firestore.FieldPath.documentId(), "in", chunk).get();
+      const snap = await db.collection(ACCOUNTING_COLLECTIONS.obligations).where(admin.firestore.FieldPath.documentId(), "in", chunk).get();
       snap.docs.forEach(d => oblMap.set(d.id, d.data() as any));
     }
   }
@@ -2240,7 +2388,7 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
           <!-- Info principal -->
           <tr>
             <td style="padding:11px 13px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#1f2937;width:35%;border-bottom:1px solid #f3f4f6">${a.company}</td>
-            <td style="padding:11px 13px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;width:25%;border-bottom:1px solid #f3f4f6">${a.taxType}</td>
+            <td style="padding:11px 13px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;width:25%;border-bottom:1px solid #f3f4f6">${displayTax(a.taxType)}</td>
             <td style="padding:11px 13px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;width:16%;border-bottom:1px solid #f3f4f6">
               ${a.period ?? "&#8212;"}<br/>
               <span style="font-size:10px;color:#9ca3af">Vence: ${fmtDate(a.dueDate)}</span>
@@ -2395,7 +2543,10 @@ export const triggerDailyTaxDigest = onCall(
     cors: true,
     secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
-  async () => sendDailyDigest(admin.firestore())
+  async (request) => {
+    await requirePlatformRole(request, ["admin"]);
+    return sendDailyDigest(admin.firestore());
+  }
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2609,9 +2760,10 @@ const LEGAL_OBLIGATIONS_2026 = [
  */
 export const importLegalObligations2026 = onCall(
   { region: "us-central1", cors: true },
-  async () => {
+  async (request) => {
+    await requirePlatformRole(request, ["admin"]);
     const db = admin.firestore();
-    const col = db.collection("tax_obligations");
+    const col = db.collection(ACCOUNTING_COLLECTIONS.obligations);
     const ts = admin.firestore.FieldValue.serverTimestamp();
 
     let created = 0;
@@ -2642,7 +2794,7 @@ export const importLegalObligations2026 = onCall(
 export const migrateEmailStatuses = onCall(
   { region: "us-central1", cors: true },
   async () => {
-    const snap = await admin.firestore().collection("questionnaire_assignments").get();
+    const snap = await admin.firestore().collection(QUESTIONNAIRE_COLLECTIONS.assignments).get();
 
     let markedSent    = 0;
     let markedLegacy  = 0;
@@ -2684,6 +2836,7 @@ export const migrateEmailStatuses = onCall(
 export const sendAccountingMessage = onCall(
   { region: "us-central1", cors: true, secrets: [TENANT_ID_3, CLIENT_ID_3, CLIENT_SECRET_3, SENDER_EMAIL_3] },
   async (request) => {
+    await requirePlatformRole(request, ["admin", "contabilidad"]);
     const { subject, body, recipients, attachments: atts = [] } = request.data || {};
 
     if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0)
@@ -2799,6 +2952,16 @@ export const sendAccountingMessage = onCall(
       )
     );
 
+    await admin.firestore().collection(COMMUNICATION_COLLECTIONS.accountingMessages).add({
+      subject,
+      body,
+      recipientCount: (recipients as any[]).length,
+      recipients: (recipients as Array<{ name: string; email: string }>).map(r => r.email),
+      attachments: (atts as Array<{ name: string; url: string }>).map(a => a.name),
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      sentBy: request.auth?.token?.email ?? "unknown",
+    });
+
     return { ok: true, sent: recipients.length };
   }
 );
@@ -2847,7 +3010,7 @@ function normalizeNameFn(s: string): string {
 export const setGlobalLeaders = onCall(
   { region: "us-central1", cors: true },
   async () => {
-    const snap = await admin.firestore().collection("users").get();
+    const snap = await admin.firestore().collection(IDENTITY_COLLECTIONS.users).get();
     let marked = 0;
     let notFound: string[] = [...GLOBAL_LEADER_NAMES];
     const batch = admin.firestore().batch();

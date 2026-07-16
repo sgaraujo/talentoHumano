@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { collection, collectionGroup, getDocs } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '@/config/firestoreCollections';
 import { companyService } from '@/services/companyService';
-import { analyticsService } from '@/services/analyticsService';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -150,15 +152,48 @@ export const CompanyAnalyticsPage = () => {
         if (!found) return;
         setCompany(found);
 
-        const [byId, byName, allMovs] = await Promise.all([
-          companyService.getUsersByCompany(companyId!),
-          companyService.getUsersByCompanyName(found.name),
-          analyticsService.getMovements(),
+        const [employeeSnap, employmentSnap] = await Promise.all([
+          getDocs(collection(db, FIRESTORE_COLLECTIONS.employees)),
+          getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments)),
         ]);
-        const seenIds = new Set(byId.map((u: any) => u.id));
-        const emps = [...byId, ...byName.filter((u: any) => !seenIds.has(u.id))];
-        setEmployees(emps);
-        setMovements(allMovs.filter(m => m.company === found.name));
+        const employeesById = new Map(employeeSnap.docs.map(item => [item.id, item.data() as any]));
+        const normalizeKey = (value?: string) => String(value ?? '').toLowerCase().normalize('NFD')
+          .replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]/g, '');
+        const acceptedNames = [found.name, ...(found.aliases ?? [])].map(normalizeKey);
+        const belongsToCompany = (relation: any) =>
+          (relation.companyId && relation.companyId === found.id) || acceptedNames.includes(normalizeKey(relation.companyName));
+
+        // Adaptamos employees+employments a la misma forma que consumían las
+        // vistas/memos de esta página cuando leían de identity/data/users, para
+        // no reescribir cada acceso a campos más abajo.
+        const rows = employmentSnap.docs
+          .map(item => ({ id: item.id, employeeId: item.data().employeeId || item.ref.parent.parent?.id, ...item.data() } as any))
+          .filter(belongsToCompany)
+          .map(relation => {
+            const employee = employeesById.get(relation.employeeId) ?? {};
+            return {
+              id: relation.id,
+              fullName: employee.fullName || 'Sin nombre',
+              role: relation.status === 'active' ? 'colaborador' : 'excolaborador',
+              personalData: { gender: employee.gender, documentNumber: employee.documentNumber },
+              contractInfo: {
+                assignment: { company: relation.companyName, project: relation.projectName, position: relation.position, area: relation.area },
+                contract: { startDate: relation.startDate, contractType: relation.contractType },
+              },
+              administrativeRecord: { terminationDate: relation.endDate, terminationReason: relation.terminationReason, terminationCost: relation.terminationCost },
+              createdAt: relation.startDate,
+            };
+          });
+        setEmployees(rows);
+
+        const movementRows: MovementRecord[] = [];
+        rows.forEach(row => {
+          const start = row.contractInfo.contract.startDate;
+          if (start) movementRows.push({ id: `${row.id}-in`, type: 'ingreso', date: start } as unknown as MovementRecord);
+          const end = row.administrativeRecord.terminationDate;
+          if (row.role === 'excolaborador' && end) movementRows.push({ id: `${row.id}-out`, type: 'retiro', date: end } as unknown as MovementRecord);
+        });
+        setMovements(movementRows);
       } finally {
         setLoading(false);
       }

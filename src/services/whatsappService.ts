@@ -4,6 +4,7 @@ import {
   type QueryDocumentSnapshot, type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "@/config/firebase";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 import type { WaNumber, WaConversation, WaMessage, WaTemplate } from "@/models/types/WhatsApp";
 
 function toDate(v: any): Date {
@@ -51,7 +52,7 @@ function toConv(d: QueryDocumentSnapshot): WaConversation {
 
 // ── Numbers ─────────────────────────────────────────────────────────────────
 export function listenNumbers(cb: (numbers: WaNumber[]) => void): Unsubscribe {
-  return onSnapshot(collection(db, "wa_numbers"), snap => {
+  return onSnapshot(collection(db, FIRESTORE_COLLECTIONS.whatsappNumbers), snap => {
     cb(snap.docs.map(d => ({
       id:            d.id,
       displayName:   d.data().displayName ?? d.id,
@@ -67,7 +68,7 @@ export function listenInbox(
   cb: (convs: WaConversation[]) => void
 ): Unsubscribe {
   const q = query(
-    collection(db, `wa_numbers/${numberId}/conversations`),
+    collection(db, `${FIRESTORE_COLLECTIONS.whatsappNumbers}/${numberId}/conversations`),
     orderBy("lastMessageAt", "desc"),
     limit(50)
   );
@@ -80,7 +81,7 @@ export function listenConversation(
   conversationId: string,
   cb: (conv: WaConversation | null) => void
 ): Unsubscribe {
-  return onSnapshot(doc(db, `wa_numbers/${numberId}/conversations/${conversationId}`), snap => {
+  return onSnapshot(doc(db, `${FIRESTORE_COLLECTIONS.whatsappNumbers}/${numberId}/conversations/${conversationId}`), snap => {
     cb(snap.exists() ? toConv(snap as any) : null);
   });
 }
@@ -92,7 +93,7 @@ export function listenMessages(
   cb: (msgs: WaMessage[]) => void
 ): Unsubscribe {
   const q = query(
-    collection(db, `wa_numbers/${numberId}/conversations/${conversationId}/messages`),
+    collection(db, `${FIRESTORE_COLLECTIONS.whatsappNumbers}/${numberId}/conversations/${conversationId}/messages`),
     orderBy("ts", "desc"),
     limit(30)
   );
@@ -110,7 +111,7 @@ export async function fetchOlderMessages(
 ): Promise<WaMessage[]> {
   const snap = await getDocs(
     query(
-      collection(db, `wa_numbers/${numberId}/conversations/${conversationId}/messages`),
+      collection(db, `${FIRESTORE_COLLECTIONS.whatsappNumbers}/${numberId}/conversations/${conversationId}/messages`),
       orderBy("ts", "desc"),
       startAfter(before),
       limit(pageSize)
@@ -121,7 +122,7 @@ export async function fetchOlderMessages(
 
 // ── Mark conversation read ───────────────────────────────────────────────────
 export async function markConversationRead(numberId: string, conversationId: string): Promise<void> {
-  await updateDoc(doc(db, `wa_numbers/${numberId}/conversations/${conversationId}`), {
+  await updateDoc(doc(db, `${FIRESTORE_COLLECTIONS.whatsappNumbers}/${numberId}/conversations/${conversationId}`), {
     unreadCount: 0,
   });
 }
@@ -134,7 +135,7 @@ export function isMetaWindowOpen(conv: WaConversation): boolean {
 
 // ── Templates ────────────────────────────────────────────────────────────────
 export async function getTemplates(numberId: string): Promise<WaTemplate[]> {
-  const snap = await getDocs(collection(db, `wa_numbers/${numberId}/templates`));
+  const snap = await getDocs(collection(db, `${FIRESTORE_COLLECTIONS.whatsappNumbers}/${numberId}/templates`));
   return snap.docs.map(d => ({
     id:                    d.id,
     displayName:           d.data().displayName ?? d.id,

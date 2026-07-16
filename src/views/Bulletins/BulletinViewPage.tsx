@@ -311,7 +311,7 @@ function VideoRenderer({ section }: { section: VideoSection }) {
 
 function LinksRenderer({ section }: { section: LinksSection }) {
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-3xl mx-auto w-full">
       {section.title && (
         <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">{section.title}</h2>
       )}
@@ -322,21 +322,21 @@ function LinksRenderer({ section }: { section: LinksSection }) {
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-4 p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md hover:border-[#008C3C]/30 transition-all group"
+              className="flex items-center gap-3 p-3 sm:p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md hover:border-[#008C3C]/30 transition-all group w-full overflow-hidden"
             >
               {item.imageUrl && (
-                <div className="flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-gray-100">
+                <div className="flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden bg-gray-100">
                   <img src={item.imageUrl} alt={item.label} className="w-full h-full object-cover" />
                 </div>
               )}
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-800 group-hover:text-[#008C3C] transition-colors">{item.label}</p>
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <p className="font-semibold text-gray-800 group-hover:text-[#008C3C] transition-colors text-sm sm:text-base leading-snug break-words">{item.label}</p>
                 {item.description && (
-                  <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{item.description}</p>
+                  <p className="text-xs sm:text-sm text-gray-500 mt-0.5 line-clamp-2 break-words">{item.description}</p>
                 )}
-                <p className="text-xs text-gray-400 mt-1 truncate">{item.url}</p>
+                <p className="text-[10px] sm:text-xs text-gray-400 mt-1 truncate">{item.url}</p>
               </div>
-              <ExternalLink className="w-4 h-4 text-gray-300 group-hover:text-[#008C3C] flex-shrink-0 transition-colors" />
+              <ExternalLink className="w-4 h-4 text-gray-300 group-hover:text-[#008C3C] flex-shrink-0 transition-colors ml-1" />
             </a>
           </FadeIn>
         ))}

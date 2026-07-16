@@ -9,6 +9,7 @@ import {
 } from "firebase/firestore";
 import { db, functions } from "../config/firebase";
 import { httpsCallable } from "firebase/functions";
+import { FIRESTORE_COLLECTIONS } from "../config/firestoreCollections";
 
 interface Assignment {
   id: string;
@@ -29,7 +30,7 @@ interface Assignment {
 
 
 class AssignmentService {
-  private collectionName = "questionnaire_assignments";
+  private collectionName = FIRESTORE_COLLECTIONS.questionnaireAssignments;
 
   private generateToken(): string {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);

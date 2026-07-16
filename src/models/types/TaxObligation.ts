@@ -27,6 +27,7 @@ export interface TaxAttachment {
 
 export interface TaxObligation {
   id: string;
+  companyId?: string;     // referencia canónica a companies
   company: string;
   nit: string;
   city: string;

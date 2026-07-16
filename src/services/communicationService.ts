@@ -4,6 +4,7 @@ import {
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { Communication, CommunicationRecipient, CommunicationTarget } from '../models/types/Communication';
 
 function toDate(v: any): Date {
@@ -18,8 +19,8 @@ function generateToken(): string {
 }
 
 class CommunicationService {
-  private col    = 'comunicados';
-  private recCol = 'comunicado_recipients';
+  private col    = FIRESTORE_COLLECTIONS.communications;
+  private recCol = FIRESTORE_COLLECTIONS.communicationRecipients;
 
   // ── Create & send ────────────────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ class CommunicationService {
       if (questionnaireId) {
         quizToken = generateToken();
         quizLink  = `${baseUrl}/responder/${quizToken}`;
-        const qRef = doc(collection(db, 'questionnaire_assignments'));
+        const qRef = doc(collection(db, FIRESTORE_COLLECTIONS.questionnaireAssignments));
         batch.set(qRef, {
           questionnaireId,
           token: quizToken,
@@ -292,7 +293,7 @@ class CommunicationService {
     if (questionnaireId) {
       quizToken = generateToken();
       quizLink  = `${baseUrl}/responder/${quizToken}`;
-      const qRef = doc(collection(db, 'questionnaire_assignments'));
+      const qRef = doc(collection(db, FIRESTORE_COLLECTIONS.questionnaireAssignments));
       batch.set(qRef, {
         questionnaireId,
         token: quizToken,

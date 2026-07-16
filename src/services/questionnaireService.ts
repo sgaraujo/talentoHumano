@@ -1,10 +1,11 @@
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { Questionnaire, QuestionnaireResponse } from '../models/types/Questionnaire';
 
 class QuestionnaireService {
-  private collectionName = 'questionnaires';
-  private responsesCollection = 'questionnaire_responses';
+  private collectionName = FIRESTORE_COLLECTIONS.questionnaires;
+  private responsesCollection = FIRESTORE_COLLECTIONS.questionnaireResponses;
 
   // Crear cuestionario
   async create(data: Omit<Questionnaire, 'id'>) {
@@ -71,7 +72,7 @@ class QuestionnaireService {
     if (!questionnaire.isOnboarding) return;
     if (!questionnaire.fieldMappings || questionnaire.fieldMappings.length === 0) return;
 
-    const userRef = doc(db, "users", userId);
+    const userRef = doc(db, FIRESTORE_COLLECTIONS.users, userId);
 
     // Si quieres respetar overwrite=false, necesitas leer user actual:
     const userSnap = await getDoc(userRef);

@@ -1,12 +1,13 @@
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc,
+  collection, collectionGroup, getDocs, addDoc, updateDoc, deleteDoc,
   doc, query, where, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '../config/firestoreCollections';
 import type { Company } from '../models/types/Company';
 
 class CompanyService {
-  private col = 'companies';
+  private col = FIRESTORE_COLLECTIONS.companies;
 
   async getAll(): Promise<Company[]> {
     const snap = await getDocs(collection(db, this.col));
@@ -30,24 +31,16 @@ class CompanyService {
     });
   }
 
+  /** No permite eliminar si la empresa tiene proyectos o relaciones laborales vinculadas por companyId. */
   async delete(id: string): Promise<void> {
+    const [employments, projects] = await Promise.all([
+      getDocs(query(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments), where('companyId', '==', id))),
+      getDocs(query(collection(db, FIRESTORE_COLLECTIONS.projects), where('companyId', '==', id))),
+    ]);
+    if (!employments.empty || !projects.empty) {
+      throw new Error('No se puede eliminar: la empresa tiene proyectos o relaciones laborales vinculadas. Márcala como inactiva en su lugar.');
+    }
     await deleteDoc(doc(db, this.col, id));
-  }
-
-  /** Busca por companyId (array-contains) — forma correcta */
-  async getUsersByCompany(companyId: string) {
-    const snap = await getDocs(
-      query(collection(db, 'users'), where('companyIds', 'array-contains', companyId))
-    );
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  }
-
-  /** Compatibilidad: busca por nombre (string) — para datos legacy */
-  async getUsersByCompanyName(companyName: string) {
-    const snap = await getDocs(
-      query(collection(db, 'users'), where('contractInfo.assignment.company', '==', companyName))
-    );
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
 }
 

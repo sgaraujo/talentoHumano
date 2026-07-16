@@ -8,6 +8,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
 
 
 export type UserSearchFilters = {
@@ -40,7 +41,7 @@ export async function searchUsers(filters: UserSearchFilters) {
   const take = filters.limit ?? 500;
 
   // 🔎 Firestore: filtro por rol si se requiere
-  const base = collection(db, "users");
+  const base = collection(db, FIRESTORE_COLLECTIONS.users);
   const q =
     filters.role && filters.role !== "all"
       ? query(base, where("role", "==", filters.role), orderBy("fullName"), limit(take))

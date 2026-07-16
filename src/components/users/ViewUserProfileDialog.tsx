@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
+import { FIRESTORE_COLLECTIONS } from '@/config/firestoreCollections';
 import { companyService } from '@/services/companyService';
 import { projectService } from '@/services/projectService';
 import { userService } from '@/services/userService';
@@ -164,7 +165,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
     if (!open || !userId) return;
     setLoading(true);
     setIsEditing(false);
-    getDoc(doc(db, 'users', userId))
+    getDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId))
       .then(snap => {
         if (!snap.exists()) { toast.error('Usuario no encontrado'); return; }
         const data = { id: snap.id, ...snap.data() };
@@ -237,7 +238,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
 
       // Limpiar undefined recursivamente antes de enviar a Firestore
       const cleanData = JSON.parse(JSON.stringify(data, (_, v) => v === undefined ? null : v));
-      await updateDoc(doc(db, 'users', userId), cleanData);
+      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), cleanData);
       setUser(editData);
       setIsEditing(false);
       const moved = companyMoved ? ` · Historial guardado: ${oldCompany}` : projectMoved ? ` · Historial guardado: ${oldProject}` : '';

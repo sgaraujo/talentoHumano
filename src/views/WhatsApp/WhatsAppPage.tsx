@@ -3,6 +3,7 @@ import {
   MessageCircle, Send, Paperclip, Search, X, Phone,
   CheckCheck, Check, Clock, AlertCircle, Lock,
   FileText, Loader2, ChevronLeft, MessageSquare,
+  Megaphone,
 } from "lucide-react";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
@@ -15,6 +16,7 @@ import {
   isMetaWindowOpen,
 } from "@/services/whatsappService";
 import type { WaNumber, WaConversation, WaMessage } from "@/models/types/WhatsApp";
+import { CampaignsPanel } from "./CampaignsPanel";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -403,6 +405,7 @@ export const WhatsAppPage = () => {
   const [numberId,  setNumberId]  = useState<string | null>(null);
   const [activeConv, setActiveConv] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"inbox" | "thread">("inbox");
+  const [section, setSection] = useState<"inbox" | "campaigns">("inbox");
 
   useEffect(() => listenNumbers(setNumbers), []);
 
@@ -419,7 +422,23 @@ export const WhatsAppPage = () => {
   if (!numberId) return <NumberSelect numbers={numbers} onSelect={setNumberId} />;
 
   return (
-    <div className="flex h-full" style={{ height: "calc(100vh - 64px)" }}>
+    <div className="flex flex-col h-full" style={{ height: "calc(100vh - 64px)" }}>
+      <div className="h-12 flex-shrink-0 bg-white border-b border-gray-200 px-4 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <button onClick={() => setSection("inbox")}
+            className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${section === "inbox" ? "bg-[#00a884]/10 text-[#007c65] font-semibold" : "text-gray-500 hover:bg-gray-50"}`}>
+            <MessageCircle className="w-4 h-4" /> Conversaciones
+          </button>
+          <button onClick={() => setSection("campaigns")}
+            className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${section === "campaigns" ? "bg-[#00a884]/10 text-[#007c65] font-semibold" : "text-gray-500 hover:bg-gray-50"}`}>
+            <Megaphone className="w-4 h-4" /> Campañas
+          </button>
+        </div>
+        {numbers.length > 1 && <button onClick={() => setNumberId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cambiar número</button>}
+      </div>
+
+      {section === "campaigns" ? <div className="flex-1 min-h-0"><CampaignsPanel numberId={numberId} /></div> : (
+      <div className="flex flex-1 min-h-0">
 
       {/* Inbox — hidden on mobile when thread is open */}
       <div className={`${mobileView === "thread" ? "hidden lg:flex" : "flex"} flex-col w-full lg:w-80 xl:w-96 flex-shrink-0`}>
@@ -429,11 +448,6 @@ export const WhatsAppPage = () => {
             <MessageCircle className="w-5 h-5 text-[#00a884]" />
             <span className="font-semibold text-gray-800 text-sm">WhatsApp</span>
           </div>
-          {numbers.length > 1 && (
-            <button onClick={() => setNumberId(null)} className="text-xs text-gray-400 hover:text-gray-600">
-              Cambiar número
-            </button>
-          )}
         </div>
         <InboxPanel numberId={numberId} activeConvId={activeConv} onSelect={openConv} />
       </div>
@@ -454,6 +468,8 @@ export const WhatsAppPage = () => {
           </div>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 };

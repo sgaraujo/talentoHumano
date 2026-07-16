@@ -3,6 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { appendMessage, type MediaType } from "./conversationService";
 import { getOrCreateConversation } from "./conversationService";
+import { WHATSAPP_COLLECTIONS } from "./firestorePaths";
 
 const META_BASE = "https://graph.facebook.com/v22.0";
 
@@ -64,8 +65,8 @@ export const sendWhatsAppMessage = onCall(
 
     const db = getFirestore();
     const [numberSnap, convSnap] = await Promise.all([
-      db.doc(`wa_numbers/${numberId}`).get(),
-      db.doc(`wa_numbers/${numberId}/conversations/${conversationId}`).get(),
+      db.doc(`${WHATSAPP_COLLECTIONS.numbers}/${numberId}`).get(),
+      db.doc(`${WHATSAPP_COLLECTIONS.numbers}/${numberId}/conversations/${conversationId}`).get(),
     ]);
 
     if (!numberSnap.exists) throw new HttpsError("not-found", "Número no encontrado.");
@@ -129,8 +130,8 @@ export const sendWaTemplate = onCall(
     if (userAddress.length < 10) throw new HttpsError("invalid-argument", "Número inválido.");
 
     const db = getFirestore();
-    const numberSnap   = await db.doc(`wa_numbers/${numberId}`).get();
-    const templateSnap = await db.doc(`wa_numbers/${numberId}/templates/${templateId}`).get();
+    const numberSnap   = await db.doc(`${WHATSAPP_COLLECTIONS.numbers}/${numberId}`).get();
+    const templateSnap = await db.doc(`${WHATSAPP_COLLECTIONS.numbers}/${numberId}/templates/${templateId}`).get();
 
     if (!numberSnap.exists)   throw new HttpsError("not-found", "Número no encontrado.");
     if (!templateSnap.exists) throw new HttpsError("not-found", "Plantilla no encontrada.");

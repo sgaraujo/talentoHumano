@@ -1,11 +1,17 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Send, Loader2, Users, Mail, Image, X, Plus,
-  Eye, Paperclip, CheckCircle2, Search,
+  Eye, Paperclip, CheckCircle2, Search, History, ChevronDown, ChevronUp, BarChart2,
+  Copy, RefreshCw,
 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+} from 'recharts';
 import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { functions, storage } from '@/config/firebase';
+import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { functions, storage, db } from '@/config/firebase';
+import { FIRESTORE_COLLECTIONS } from '@/config/firestoreCollections';
 import { userService } from '@/services/userService';
 import { companyService } from '@/services/companyService';
 import { projectService } from '@/services/projectService';
@@ -137,6 +143,90 @@ export const AccountingMessagesPage = () => {
   // Preview
   const [previewOpen, setPreviewOpen] = useState(false);
 
+  // Ref para scroll al editor
+  const composeRef = useRef<HTMLDivElement>(null);
+
+  // History
+  const [history,          setHistory]          = useState<any[]>([]);
+  const [historyOpen,      setHistoryOpen]      = useState(false);
+  const [historyLoading,   setHistoryLoading]   = useState(false);
+  const [expandedHistory,  setExpandedHistory]  = useState<Set<string>>(new Set());
+  const [resending,        setResending]        = useState<string | null>(null);
+
+  // Stats
+  const [statsData,    setStatsData]    = useState<any[]>([]);
+  const [statsOpen,    setStatsOpen]    = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const q = query(collection(db, FIRESTORE_COLLECTIONS.accountingMessageLog), orderBy('sentAt', 'desc'), limit(30));
+      const snap = await getDocs(q);
+      setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch { /* ignore */ } finally { setHistoryLoading(false); }
+  };
+
+  const cargarEnEditor = (m: any) => {
+    setSubject(m.subject || '');
+    setBody(m.body || '');
+    setSent(false);
+    composeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast.success('Mensaje cargado en el editor');
+  };
+
+  const reenviar = async (m: any) => {
+    if (!m.recipients?.length) { toast.error('Sin destinatarios guardados'); return; }
+    setResending(m.id);
+    try {
+      const fn = httpsCallable(functions, 'sendAccountingMessage');
+      const recipientList = m.recipients.map((email: string) => ({ name: email.split('@')[0], email }));
+      await fn({ subject: m.subject, body: m.body, recipients: recipientList, attachments: [] });
+      toast.success('Mensaje reenviado', { description: `${m.recipients.length} destinatario${m.recipients.length !== 1 ? 's' : ''}` });
+      loadHistory();
+    } catch (e: any) {
+      toast.error('Error al reenviar', { description: e?.message });
+    } finally { setResending(null); }
+  };
+
+  const loadStats = async () => {
+    if (statsData.length > 0) return;
+    setStatsLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, FIRESTORE_COLLECTIONS.accountingMessageLog), orderBy('sentAt', 'desc')));
+      setStatsData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch { /* ignore */ } finally { setStatsLoading(false); }
+  };
+
+  const statsCards = useMemo(() => {
+    const total = statsData.length;
+    const totalDest = statsData.reduce((s, m) => s + (m.recipientCount ?? m.recipients?.length ?? 0), 0);
+    const ultimo = statsData[0]?.sentAt?.toDate?.() ?? null;
+    const promedio = total > 0 ? Math.round(totalDest / total) : 0;
+    return { total, totalDest, ultimo, promedio };
+  }, [statsData]);
+
+  const statsMonthly = useMemo(() => {
+    const now = new Date();
+    const months: { key: string; label: string; mensajes: number; destinatarios: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: d.toLocaleDateString('es-CO', { month: 'short', year: '2-digit' }),
+        mensajes: 0, destinatarios: 0,
+      });
+    }
+    for (const m of statsData) {
+      const date = m.sentAt?.toDate?.();
+      if (!date) continue;
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const entry = months.find(mo => mo.key === key);
+      if (entry) { entry.mensajes++; entry.destinatarios += m.recipientCount ?? m.recipients?.length ?? 0; }
+    }
+    return months;
+  }, [statsData]);
+
   // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
@@ -173,8 +263,14 @@ export const AccountingMessagesPage = () => {
     }
     let users = allUsers.filter(u => u.role === 'colaborador' || u.role === 'lider');
     if (targetType === 'company' && targetIds.length > 0) {
-      const names = targetIds.map(id => companies.find((c: any) => c.id === id)?.name).filter(Boolean);
-      users = users.filter(u => names.includes(u.contractInfo?.assignment?.company));
+      const normCo = (s: string) => s.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+      const namesNorm = new Set(
+        targetIds
+          .map(id => companies.find((c: any) => c.id === id)?.name)
+          .filter(Boolean)
+          .map((n: string) => normCo(n))
+      );
+      users = users.filter(u => namesNorm.has(normCo(u.contractInfo?.assignment?.company || '')));
     }
     if (targetType === 'project' && targetIds.length > 0) {
       const names = targetIds.map(id => projects.find((p: any) => p.id === id)?.name).filter(Boolean);
@@ -183,13 +279,17 @@ export const AccountingMessagesPage = () => {
         names.includes(u.contractInfo?.assignment?.project)
       );
     }
-    return users.map(u => ({
+    const mapped = users.map(u => ({
       userId:    u.id,
       userName:  u.fullName,
-      userEmail: u.location?.corporateEmail || u.location?.personalEmail || u.email,
+      userEmail: (u.location?.corporateEmail || u.location?.personalEmail || u.email || '').trim().toLowerCase(),
       company:   u.contractInfo?.assignment?.company || '',
       project:   u.contractInfo?.assignment?.project || '',
     })).filter(u => u.userEmail);
+
+    // Dedup por email — evita envíos duplicados si el usuario aparece varias veces
+    const seen = new Set<string>();
+    return mapped.filter(u => { if (seen.has(u.userEmail)) return false; seen.add(u.userEmail); return true; });
   }, [allUsers, companies, projects, targetType, targetIds, manualUsers]);
 
   // ── File upload ───────────────────────────────────────────────────────────
@@ -296,6 +396,8 @@ export const AccountingMessagesPage = () => {
           Envía comunicados a las personas de las empresas · desde <span className="font-medium">lguio@triangulum.net.co</span>
         </p>
       </div>
+
+      <div ref={composeRef} />
 
       {sent ? (
         /* ── Confirmación ── */
@@ -603,6 +705,163 @@ export const AccountingMessagesPage = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Estadísticas ── */}
+      <div className="mt-6 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <button
+          onClick={() => { setStatsOpen(o => !o); if (!statsOpen) loadStats(); }}
+          className="w-full flex items-center gap-2 px-5 py-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <BarChart2 className="w-4 h-4 text-gray-400" />
+          Estadísticas de envíos
+          {statsOpen ? <ChevronUp className="w-4 h-4 ml-auto text-gray-400" /> : <ChevronDown className="w-4 h-4 ml-auto text-gray-400" />}
+        </button>
+        {statsOpen && (
+          <div className="border-t border-gray-100 p-5">
+            {statsLoading ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-gray-400 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" /> Calculando...
+              </div>
+            ) : (
+              <>
+                {/* Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                  {[
+                    { label: 'Mensajes enviados', value: statsCards.total, color: 'text-[#008C3C]', bg: 'bg-[#008C3C]/5' },
+                    { label: 'Destinatarios alcanzados', value: statsCards.totalDest, color: 'text-blue-600', bg: 'bg-blue-50' },
+                    { label: 'Promedio por envío', value: statsCards.promedio, color: 'text-purple-600', bg: 'bg-purple-50' },
+                    {
+                      label: 'Último envío',
+                      value: statsCards.ultimo
+                        ? statsCards.ultimo.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+                        : '—',
+                      color: 'text-amber-600', bg: 'bg-amber-50',
+                    },
+                  ].map(c => (
+                    <div key={c.label} className={`${c.bg} rounded-xl p-4 flex flex-col gap-1`}>
+                      <p className={`text-xl font-bold ${c.color}`}>{c.value}</p>
+                      <p className="text-xs text-gray-500 leading-tight">{c.label}</p>
+                    </div>
+                  ))}
+                </div>
+                {/* Gráfica mensual */}
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Últimos 6 meses</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={statsMonthly} barGap={4}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip
+                      formatter={(value, name) =>
+                        [value, name === 'mensajes' ? 'Mensajes' : 'Destinatarios']}
+                      labelStyle={{ fontSize: 12 }}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Bar dataKey="mensajes" fill="#008C3C" radius={[4,4,0,0]} name="Mensajes" />
+                    <Bar dataKey="destinatarios" fill="#93c5fd" radius={[4,4,0,0]} name="Destinatarios" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Historial ── */}
+      <div className="mt-4 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <button
+          onClick={() => { setHistoryOpen(o => !o); if (!historyOpen) loadHistory(); }}
+          className="w-full flex items-center gap-2 px-5 py-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <History className="w-4 h-4 text-gray-400" />
+          Historial de mensajes enviados
+          {historyOpen ? <ChevronUp className="w-4 h-4 ml-auto text-gray-400" /> : <ChevronDown className="w-4 h-4 ml-auto text-gray-400" />}
+        </button>
+        {historyOpen && (
+          <div className="border-t border-gray-100">
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-gray-400 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" /> Cargando...
+              </div>
+            ) : history.length === 0 ? (
+              <p className="text-center text-sm text-gray-400 py-8">Sin mensajes enviados aún.</p>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {history.map(m => {
+                  const date = m.sentAt?.toDate?.() ?? null;
+                  const dateStr = date
+                    ? date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+                      + ' ' + date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+                    : '—';
+                  const count = m.recipientCount ?? m.recipients?.length ?? 0;
+                  const isExpanded = expandedHistory.has(m.id);
+                  return (
+                    <div key={m.id}>
+                      {/* Fila principal — clic para expandir */}
+                      <button
+                        className="w-full px-5 py-3 flex items-start gap-3 hover:bg-gray-50 transition-colors text-left"
+                        onClick={() => setExpandedHistory(prev => {
+                          const next = new Set(prev);
+                          next.has(m.id) ? next.delete(m.id) : next.add(m.id);
+                          return next;
+                        })}
+                      >
+                        <Mail className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{m.subject}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {dateStr} · {count} destinatario{count !== 1 ? 's' : ''}
+                            {m.sentBy && m.sentBy !== 'unknown' ? ` · ${m.sentBy}` : ''}
+                          </p>
+                        </div>
+                        {isExpanded
+                          ? <ChevronUp className="w-4 h-4 text-gray-300 mt-0.5 flex-shrink-0" />
+                          : <ChevronDown className="w-4 h-4 text-gray-300 mt-0.5 flex-shrink-0" />}
+                      </button>
+
+                      {/* Panel expandido */}
+                      {isExpanded && (
+                        <div className="px-5 pb-4 bg-gray-50 border-t border-gray-100">
+                          {m.body ? (
+                            <div className="mt-3 text-sm text-gray-600 whitespace-pre-line bg-white border border-gray-100 rounded-lg p-3 max-h-48 overflow-y-auto leading-relaxed">
+                              {m.body}
+                            </div>
+                          ) : (
+                            <p className="mt-3 text-xs text-gray-400 italic">Sin cuerpo guardado.</p>
+                          )}
+                          {m.attachments?.length > 0 && (
+                            <p className="mt-2 text-xs text-gray-400">
+                              📎 {(m.attachments as string[]).join(', ')}
+                            </p>
+                          )}
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => cargarEnEditor(m)}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 transition-colors"
+                            >
+                              <Copy className="w-3 h-3" /> Cargar en editor
+                            </button>
+                            <button
+                              onClick={() => reenviar(m)}
+                              disabled={resending === m.id}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#008C3C] text-white hover:bg-[#007a34] transition-colors disabled:opacity-50"
+                            >
+                              {resending === m.id
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <RefreshCw className="w-3 h-3" />}
+                              Reenviar a mismos destinatarios
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
     </div>
   );

@@ -4,6 +4,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import { convertToWebP } from '../utils/imageUtils';
 import type { Bulletin, BulletinSection, BulletinStatus, BulletinViewEntry } from '../models/types/Bulletin';
 
@@ -26,7 +27,7 @@ function fromFirestore(id: string, data: any): Bulletin {
 }
 
 class BulletinService {
-  private col = 'bulletins';
+  private col = FIRESTORE_COLLECTIONS.bulletins;
 
   async getAll(): Promise<Bulletin[]> {
     const q = query(collection(db, this.col), orderBy('updatedAt', 'desc'));
@@ -110,14 +111,14 @@ class BulletinService {
   }
 
   async logView(bulletinId: string, entry: Omit<BulletinViewEntry, 'id' | 'viewedAt'>): Promise<void> {
-    await addDoc(collection(db, 'bulletins', bulletinId, 'views'), {
+    await addDoc(collection(db, FIRESTORE_COLLECTIONS.bulletins, bulletinId, 'views'), {
       ...entry,
       viewedAt: serverTimestamp(),
     });
   }
 
   async getViewLog(bulletinId: string): Promise<BulletinViewEntry[]> {
-    const snap = await getDocs(query(collection(db, 'bulletins', bulletinId, 'views'), orderBy('viewedAt', 'desc')));
+    const snap = await getDocs(query(collection(db, FIRESTORE_COLLECTIONS.bulletins, bulletinId, 'views'), orderBy('viewedAt', 'desc')));
     return snap.docs.map(d => {
       const data = d.data();
       return {

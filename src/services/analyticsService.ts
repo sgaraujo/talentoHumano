@@ -1,9 +1,55 @@
-import { collection, getDocs, addDoc, query, where, writeBatch, doc } from 'firebase/firestore';
+import { collection, collectionGroup, getDocs, addDoc, query, where, writeBatch, doc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '../config/firestoreCollections';
 import type { RotationMetrics, MonthlyData, FilterOptions, MovementRecord } from '../models/types/Analytics';
+import type { Company } from '../models/types/Company';
+
+const toDate = (raw: any): Date | null => {
+  if (!raw) return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+  if (typeof raw.toDate === 'function') return raw.toDate();
+  if (typeof raw.seconds === 'number') return new Date(raw.seconds * 1000);
+  if (typeof raw === 'string' && raw.trim()) return new Date(raw);
+  return null;
+};
+
+const normalize = (value?: string) => String(value ?? '').toLowerCase().normalize('NFD')
+  .replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]/g, '');
+
+const matchesCompany = (relation: any, companyName: string, companies: Company[]) => {
+  const target = companies.find(c => normalize(c.name) === normalize(companyName));
+  if (target) {
+    if (relation.companyId && relation.companyId === target.id) return true;
+    const accepted = [target.name, ...(target.aliases ?? [])].map(normalize);
+    return accepted.includes(normalize(relation.companyName));
+  }
+  return normalize(relation.companyName) === normalize(companyName);
+};
+
+const esVoluntario = (reason?: string) => {
+  const l = (reason || '').toLowerCase();
+  return l.includes('renuncia') || l.includes('mutuo acuerdo') || l === 'voluntario';
+};
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+const MOTIVOS_ORDEN = [
+  'Fallecimiento',
+  'Anulado',
+  'Renuncia voluntaria',
+  'Sustitución patronal',
+  'Terminación contrato a término fijo',
+  'Terminación contrato con justa causa',
+  'Terminación contrato sin justa causa',
+  'Terminación contrato de aprendizaje',
+  'Terminación de contrato por mutuo acuerdo',
+  'Terminación de contrato por obra o labor',
+  'Terminación de contrato por periodo de prueba',
+  'Terminación de contrato unilateral de aprendizaje',
+];
 
 class AnalyticsService {
-  private movementsCollection = 'movements';
+  private movementsCollection = FIRESTORE_COLLECTIONS.movements;
 
   // Calcular meses de diferencia entre dos fechas
   private monthsDifference(date1: Date, date2: Date): number {
@@ -144,139 +190,54 @@ class AnalyticsService {
     }
   }
 
-  // Calcular métricas de rotación
+  // Calcular métricas de rotación — fuente: human_resources/data/employees + employments
   async getRotationMetrics(filters?: FilterOptions): Promise<RotationMetrics> {
     try {
-      // Obtener todos los usuarios
-      const { userService } = await import('./userService');
-      const allUsers = await userService.getAll();
+      const [companiesSnap, employmentSnap] = await Promise.all([
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
+        getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments)),
+      ]);
+      const companies = companiesSnap.docs.map(item => ({ id: item.id, ...item.data() } as Company));
+      let relations = employmentSnap.docs.map(item => ({
+        id: item.id, employeeId: item.data().employeeId || item.ref.parent.parent?.id, ...item.data(),
+      } as any));
 
-      // Obtener movimientos y aplicar filtros de empresa/proyecto
-      let movements = await this.getMovements();
-      if (filters?.empresa) {
-        const matchingUserIds = new Set(
-          allUsers.filter(u => u.contractInfo?.assignment?.company === filters.empresa).map(u => u.id)
-        );
-        movements = movements.filter(m =>
-          m.company === filters.empresa || matchingUserIds.has(m.userId)
-        );
-      }
-      if (filters?.proyecto) {
-        const matchingUserIds = new Set(
-          allUsers.filter(u => u.contractInfo?.assignment?.project === filters.proyecto).map(u => u.id)
-        );
-        movements = movements.filter(m =>
-          m.project === filters.proyecto || matchingUserIds.has(m.userId)
-        );
-      }
+      if (filters?.empresa) relations = relations.filter(r => matchesCompany(r, filters.empresa!, companies));
+      if (filters?.proyecto) relations = relations.filter(r => normalize(r.projectName) === normalize(filters.proyecto));
 
       const today = new Date();
       const currentYear = filters?.año || today.getFullYear();
       const currentMonth = filters?.mes !== undefined ? filters.mes : today.getMonth();
-      // Filtrar colaboradores actuales (también por empresa/proyecto si aplica)
-      let colaboradores = allUsers.filter(u => u.role === 'colaborador');
-      if (filters?.empresa) {
-        colaboradores = colaboradores.filter(u => u.contractInfo?.assignment?.company === filters.empresa);
-      }
-      if (filters?.proyecto) {
-        colaboradores = colaboradores.filter(u => u.contractInfo?.assignment?.project === filters.proyecto);
-      }
 
-      // Calcular ingresos y retiros del periodo
-      const ingresos = movements.filter(m => {
-        const moveDate = new Date(m.date);
-        return m.type === 'ingreso' &&
-          moveDate.getFullYear() === currentYear &&
-          (filters?.mes === undefined || moveDate.getMonth() === currentMonth);
-      });
+      const activeRelations = relations.filter(r => r.status === 'active');
+      const headcount = new Set(activeRelations.map(r => r.employeeId)).size;
 
-      const retiros = movements.filter(m => {
-        const moveDate = new Date(m.date);
-        return m.type === 'retiro' &&
-          moveDate.getFullYear() === currentYear &&
-          (filters?.mes === undefined || moveDate.getMonth() === currentMonth);
-      });
+      const inPeriod = (date: Date | null) => date
+        && date.getFullYear() === currentYear
+        && (filters?.mes === undefined || date.getMonth() === currentMonth);
 
-      // Calcular headcount
-      const headcount = colaboradores.length;
+      const ingresos = relations.filter(r => inPeriod(toDate(r.startDate)));
+      const retiros = relations.filter(r => r.status === 'retired' && inPeriod(toDate(r.endDate)));
 
-      // Calcular tiempo promedio en la empresa
-      // Calcular tiempo promedio en la empresa
       let tiempoPromedioEmpresa = 0;
       let countWithContract = 0;
-
-      colaboradores.forEach(user => {
-        let startDate: Date | null = null;
-
-        // Intentar obtener la fecha de inicio del contrato
-        if (user.contractInfo?.contract?.startDate) {
-          const contractStart = user.contractInfo.contract.startDate as any;
-
-          if (contractStart instanceof Date) {
-            startDate = contractStart;
-          } else if (contractStart.toDate && typeof contractStart.toDate === 'function') {
-            startDate = contractStart.toDate();
-          } else if (typeof contractStart === 'string') {
-            startDate = new Date(contractStart);
-          }
-        }
-
-        // Si no hay fecha de contrato, usar createdAt como alternativa
-        if (!startDate && user.createdAt) {
-          if (user.createdAt instanceof Date) {
-            startDate = user.createdAt;
-          } else if (typeof user.createdAt === 'object' && user.createdAt !== null && 'toDate' in user.createdAt && typeof (user.createdAt as any).toDate === 'function') {
-            startDate = (user.createdAt as any).toDate();
-          } else if (typeof user.createdAt === 'string') {
-            startDate = new Date(user.createdAt);
-          }
-        }
-
-        // Calcular meses si tenemos una fecha válida
-        if (startDate && !isNaN(startDate.getTime())) {
-          const months = this.monthsDifference(startDate, today);
-          if (months >= 0) { // Solo contar si es positivo
-            tiempoPromedioEmpresa += months;
-            countWithContract++;
-          }
-        }
+      activeRelations.forEach(r => {
+        const start = toDate(r.startDate);
+        if (!start) return;
+        const months = this.monthsDifference(start, today);
+        if (months >= 0) { tiempoPromedioEmpresa += months; countWithContract++; }
       });
+      tiempoPromedioEmpresa = countWithContract > 0 ? Math.round((tiempoPromedioEmpresa / countWithContract) * 10) / 10 : 0;
 
-      tiempoPromedioEmpresa = countWithContract > 0
-        ? Math.round((tiempoPromedioEmpresa / countWithContract) * 10) / 10
-        : 0;
+      const retirosVoluntarios   = retiros.filter(r => esVoluntario(r.terminationReason)).length;
+      const retirosInvoluntarios = retiros.length - retirosVoluntarios;
 
-      const esVoluntario = (r: string = '') => {
-        const l = r.toLowerCase();
-        return l.includes('renuncia') || l.includes('mutuo acuerdo') || l === 'voluntario';
-      };
-      const retirosVoluntarios   = retiros.filter(r => esVoluntario(r.reason)).length;
-      const retirosInvoluntarios = retiros.filter(r => !esVoluntario(r.reason)).length;
+      const rotacionGeneral    = headcount > 0 ? round2((retiros.length / headcount) * 100) : 0;
+      const rotacionVoluntaria = headcount > 0 ? round2((retirosVoluntarios / headcount) * 100) : 0;
+      const rotacionEvitable   = rotacionVoluntaria;
+      const tasaVoluntaria     = retiros.length > 0 ? round2((retirosVoluntarios / retiros.length) * 100) : 0;
+      const cubrimiento        = retiros.length > 0 ? round2((ingresos.length / retiros.length) * 100) : 0;
 
-      const rotacionGeneral = headcount > 0
-        ? Math.round((retiros.length / headcount) * 100 * 100) / 100
-        : 0;
-
-      const rotacionVoluntaria = headcount > 0
-        ? Math.round((retirosVoluntarios / headcount) * 100 * 100) / 100
-        : 0;
-
-      const rotacionEvitable = headcount > 0
-        ? Math.round((retirosVoluntarios / headcount) * 100 * 100) / 100
-        : 0;
-
-      const tasaVoluntaria = retiros.length > 0
-        ? Math.round((retirosVoluntarios / retiros.length) * 100 * 100) / 100
-        : 0;
-
-      // Calcular cubrimiento
-      const cubrimiento = retiros.length > 0
-        ? Math.round((ingresos.length / retiros.length) * 100 * 100) / 100
-        : 0;
-
-      // Calcular datos mensuales
-      // Si mes es "todos", mostrar ene-dic del año seleccionado
-      // Si hay mes específico, mostrar los últimos 12 meses hasta ese mes
       const monthlyData: MonthlyData[] = [];
       const showFullYear = filters?.mes === undefined;
       for (let i = 11; i >= 0; i--) {
@@ -284,70 +245,27 @@ class AnalyticsService {
         const date = new Date(currentYear, refMonth - i, 1);
         const month = date.getMonth();
         const year = date.getFullYear();
-
-        const monthIngresos = movements.filter(m => {
-          const moveDate = new Date(m.date);
-          return m.type === 'ingreso' &&
-            moveDate.getMonth() === month &&
-            moveDate.getFullYear() === year;
-        }).length;
-
-        const monthRetiros = movements.filter(m => {
-          const moveDate = new Date(m.date);
-          return m.type === 'retiro' &&
-            moveDate.getMonth() === month &&
-            moveDate.getFullYear() === year;
-        }).length;
-
-        const monthRotacion = headcount > 0
-          ? Math.round((monthRetiros / headcount) * 100 * 100) / 100
-          : 0;
-
-        monthlyData.push({
-          month: this.getMonthName(month),
-          year,
-          ingresos: monthIngresos,
-          retiros: monthRetiros,
-          rotacion: monthRotacion,
-          rotacionEvitable: monthRotacion,
-        });
+        const sameMonth = (d: Date | null) => d && d.getMonth() === month && d.getFullYear() === year;
+        const monthIngresos = relations.filter(r => sameMonth(toDate(r.startDate))).length;
+        const monthRetiros  = relations.filter(r => r.status === 'retired' && sameMonth(toDate(r.endDate))).length;
+        const monthRotacion = headcount > 0 ? round2((monthRetiros / headcount) * 100) : 0;
+        monthlyData.push({ month: this.getMonthName(month), year, ingresos: monthIngresos, retiros: monthRetiros, rotacion: monthRotacion, rotacionEvitable: monthRotacion });
       }
 
-      // Calcular costos
-      const costoRetiros = retiros.reduce((sum, r) => sum + (r.cost || 0), 0);
+      const costoRetiros = retiros.reduce((sum, r) => sum + (Number(r.terminationCost) || 0), 0);
+      const isTemprano = (r: any) => {
+        const start = toDate(r.startDate);
+        const end = toDate(r.endDate);
+        return !!start && !!end && this.monthsDifference(start, end) < 3;
+      };
+      const retirosTempranosList = retiros.filter(isTemprano);
+      const retirosTempranos = retirosTempranosList.length;
+      const costoRetirosTemprano = retirosTempranosList.reduce((sum, r) => sum + (Number(r.terminationCost) || 0), 0);
 
-      // Retiros tempranos (menos de 3 meses)
-      const retirosTempranos = retiros.filter(r => {
-        const user = allUsers.find(u => u.id === r.userId);
-        if (user?.contractInfo?.contract?.startDate) {
-          const startDate = new Date(user.contractInfo.contract.startDate);
-          const endDate = new Date(r.date);
-          const months = this.monthsDifference(startDate, endDate);
-          return months < 3;
-        }
-        return false;
-      }).length;
-
-      const MOTIVOS_ORDEN = [
-        'Fallecimiento',
-        'Anulado',
-        'Renuncia voluntaria',
-        'Sustitución patronal',
-        'Terminación contrato a término fijo',
-        'Terminación contrato con justa causa',
-        'Terminación contrato sin justa causa',
-        'Terminación contrato de aprendizaje',
-        'Terminación de contrato por mutuo acuerdo',
-        'Terminación de contrato por obra o labor',
-        'Terminación de contrato por periodo de prueba',
-        'Terminación de contrato unilateral de aprendizaje',
-      ];
       const motivosRetiro: Record<string, number> = {};
       for (const m of MOTIVOS_ORDEN) motivosRetiro[m] = 0;
       retiros.forEach(r => {
-        const key = r.reason && motivosRetiro.hasOwnProperty(r.reason)
-          ? r.reason
-          : 'Sin motivo';
+        const key = r.terminationReason && motivosRetiro.hasOwnProperty(r.terminationReason) ? r.terminationReason : 'Sin motivo';
         motivosRetiro[key] = (motivosRetiro[key] || 0) + 1;
       });
 
@@ -362,20 +280,14 @@ class AnalyticsService {
         tasaVoluntaria,
         tasaVoluntariaExterna: tasaVoluntaria,
         cubrimiento,
-        voluntarioVsInvoluntario: {
-          voluntario: retirosVoluntarios,
-          involuntario: retirosInvoluntarios,
-        },
-        externoVsInterno: {
-          externo: retirosVoluntarios,
-          interno: retirosInvoluntarios,
-        },
+        voluntarioVsInvoluntario: { voluntario: retirosVoluntarios, involuntario: retirosInvoluntarios },
+        externoVsInterno: { externo: retirosVoluntarios, interno: retirosInvoluntarios },
         motivosRetiro,
         headcountPorProyecto: (() => {
           const map = new Map<string, { empresa: string; count: number }>();
-          colaboradores.forEach(u => {
-            const proj = u.contractInfo?.assignment?.project || 'Sin proyecto';
-            const emp  = u.contractInfo?.assignment?.company  || '';
+          activeRelations.forEach(r => {
+            const proj = r.projectName || 'Sin proyecto';
+            const emp  = r.companyName || '';
             if (!map.has(proj)) map.set(proj, { empresa: emp, count: 0 });
             map.get(proj)!.count++;
           });
@@ -386,21 +298,8 @@ class AnalyticsService {
         ingresosPorMes: monthlyData,
         retirosPorMes: monthlyData,
         costoRetiros,
-        fracasoContratacion: headcount > 0
-          ? Math.round((retirosTempranos / headcount) * 100 * 100) / 100
-          : 0,
-        costoRetirosTemprano: retiros
-          .filter(r => {
-            const user = allUsers.find(u => u.id === r.userId);
-            if (user?.contractInfo?.contract?.startDate) {
-              const startDate = new Date(user.contractInfo.contract.startDate);
-              const endDate = new Date(r.date);
-              const months = this.monthsDifference(startDate, endDate);
-              return months < 3;
-            }
-            return false;
-          })
-          .reduce((sum, r) => sum + (r.cost || 0), 0),
+        fracasoContratacion: headcount > 0 ? round2((retirosTempranos / headcount) * 100) : 0,
+        costoRetirosTemprano,
         retirosTempranos,
       };
     } catch (error) {
@@ -408,29 +307,21 @@ class AnalyticsService {
       throw error;
     }
   }
-  // Obtener opciones únicas de empresa y proyecto desde usuarios y movements
+
+  // Opciones de filtro — empresas desde el catálogo maestro, proyectos desde las relaciones laborales
   async getFilterOptions(): Promise<{ empresas: string[]; proyectos: string[] }> {
     try {
-      const { userService } = await import('./userService');
-      const allUsers = await userService.getAll();
-      const movements = await this.getMovements();
-
-      const empresasSet = new Set<string>();
+      const [companiesSnap, employmentSnap] = await Promise.all([
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
+        getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments)),
+      ]);
+      const empresas = companiesSnap.docs.map(item => (item.data() as any).name).filter(Boolean).sort();
       const proyectosSet = new Set<string>();
-
-      allUsers.forEach(u => {
-        if (u.contractInfo?.assignment?.company) empresasSet.add(u.contractInfo.assignment.company);
-        if (u.contractInfo?.assignment?.project) proyectosSet.add(u.contractInfo.assignment.project);
+      employmentSnap.docs.forEach(item => {
+        const projectName = (item.data() as any).projectName;
+        if (projectName) proyectosSet.add(projectName);
       });
-      movements.forEach(m => {
-        if (m.company) empresasSet.add(m.company);
-        if (m.project) proyectosSet.add(m.project);
-      });
-
-      return {
-        empresas: [...empresasSet].sort(),
-        proyectos: [...proyectosSet].sort(),
-      };
+      return { empresas, proyectos: [...proyectosSet].sort() };
     } catch (error) {
       console.error('Error obteniendo opciones de filtro:', error);
       return { empresas: [], proyectos: [] };

@@ -4,6 +4,7 @@ import { useAppRole } from './hooks/useAppRole';
 import { LoginPage } from './views/Auth/LoginPage';
 import { DashboardPage } from './views/Dashboard/DashboardPage';
 import { UsersPage } from './views/Users/UsersPage';
+import { HrControlPage } from './views/Users/HrControlPage';
 import { QuestionnairesPage } from './views/Questionnaires/QuestionnairesPage';
 import { NotificationsPage } from './views/Notifications/NotificationsPage'; // NUEVO
 import { AnswerQuestionnairePage } from './views/Public/AnswerQuestionnairePage';
@@ -14,6 +15,8 @@ import ChatWidget from './components/ia/ChatWidget';
 import UsersSearchPage from './views/Users/UsersSearchPage';
 import ExportQueueTable from './views/Exporter/ExporterPage';
 import { CompaniesPage } from './views/Companies/CompaniesPage';
+import { CompanyWorkforcePage } from './views/Companies/CompanyWorkforcePage';
+import { CompanySettingsPage } from './views/Companies/CompanySettingsPage';
 import { CompanyAnalyticsPage } from './views/Companies/CompanyAnalyticsPage';
 import { ProjectsPage } from './views/Projects/ProjectsPage';
 import { CommunicationsPage } from './views/Communications/CommunicationsPage';
@@ -57,6 +60,13 @@ function BulletinsRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { role, loading: roleLoading } = useAppRole();
+  if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
+  if (role !== 'admin') return <Navigate to={role === 'talento_humano' ? '/talento-humano/control' : '/contabilidad'} replace />;
+  return <>{children}</>;
+}
+
 function App() {
   const { isAuthenticated, loading } = useAuth();
 
@@ -97,8 +107,17 @@ function App() {
           path="/usuarios"
           element={
             loading ? null
-            : isAuthenticated ? <MainLayout><UsersPage /></MainLayout>
+            : isAuthenticated ? <AdminRoute><MainLayout><UsersPage /></MainLayout></AdminRoute>
             : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/talento-humano/control"
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <BulletinsRoute><MainLayout><HrControlPage /></MainLayout></BulletinsRoute>
           }
         />
 
@@ -197,6 +216,24 @@ function App() {
           element={
             loading ? null
             : isAuthenticated ? <MainLayout><CompanyAnalyticsPage /></MainLayout>
+            : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/empresas/:companyId"
+          element={
+            loading ? null
+            : isAuthenticated ? <MainLayout><CompanyWorkforcePage /></MainLayout>
+            : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/configuraciones/empresas"
+          element={
+            loading ? null
+            : isAuthenticated ? <MainLayout><CompanySettingsPage /></MainLayout>
             : <Navigate to="/login" />
           }
         />
