@@ -402,12 +402,13 @@ function NumberSelect({ numbers, onSelect }: { numbers: WaNumber[]; onSelect: (i
 
 export const WhatsAppPage = () => {
   const [numbers,   setNumbers]   = useState<WaNumber[]>([]);
+  const [numbersLoaded, setNumbersLoaded] = useState(false);
   const [numberId,  setNumberId]  = useState<string | null>(null);
   const [activeConv, setActiveConv] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"inbox" | "thread">("inbox");
   const [section, setSection] = useState<"inbox" | "campaigns">("inbox");
 
-  useEffect(() => listenNumbers(setNumbers), []);
+  useEffect(() => listenNumbers(list => { setNumbers(list); setNumbersLoaded(true); }), []);
 
   // Auto-select if only one number
   useEffect(() => {
@@ -418,6 +419,16 @@ export const WhatsAppPage = () => {
     setActiveConv(id);
     setMobileView("thread");
   };
+
+  // Evita el parpadeo de "selecciona un número" mientras Firestore responde y
+  // el número único todavía no se ha autoseleccionado.
+  if (!numbersLoaded) {
+    return (
+      <div className="flex items-center justify-center h-full" style={{ height: "calc(100vh - 64px)" }}>
+        <Loader2 className="w-8 h-8 animate-spin text-[#00a884]" />
+      </div>
+    );
+  }
 
   if (!numberId) return <NumberSelect numbers={numbers} onSelect={setNumberId} />;
 

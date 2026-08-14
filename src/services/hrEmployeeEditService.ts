@@ -8,6 +8,67 @@ export type HrEditableValues = {
   bankName?: string; accountType?: string; accountNumber?: string;
 };
 
+export type HrNewEmployeeValues = {
+  documentType?: string; documentNumber: string; fullName: string;
+  birthDate?: string; gender?: string; nationality?: string;
+  personalEmail?: string; personalPhone?: string; corporateEmail?: string; corporatePhone?: string;
+  city?: string; department?: string; address?: string;
+};
+
+export type HrNewEmploymentValues = {
+  companyId?: string; companyName?: string; projectId?: string; projectName?: string;
+  position?: string; contractType?: string; startDate?: string; modality?: string; workday?: string;
+  supervisor?: string; area?: string;
+};
+
+/** Crea un expediente nuevo (identificado por cédula) y, si se completó, su primera relación laboral activa. */
+export async function createHrEmployee(
+  employee: HrNewEmployeeValues, employment: HrNewEmploymentValues | null, actor: string,
+) {
+  const documentNumber = clean(employee.documentNumber);
+  if (!documentNumber) throw new Error('La cédula es obligatoria.');
+  if (!clean(employee.fullName)) throw new Error('El nombre completo es obligatorio.');
+
+  const employeeRef = doc(db, FIRESTORE_COLLECTIONS.employees, documentNumber);
+  const existing = await getDoc(employeeRef);
+  if (existing.exists()) throw new Error(`Ya existe un expediente con la cédula ${documentNumber}.`);
+
+  const hasEmployment = Boolean(employment && (employment.companyName || employment.companyId));
+
+  await setDoc(employeeRef, {
+    documentType: clean(employee.documentType), documentNumber, fullName: clean(employee.fullName),
+    status: hasEmployment ? 'active' : 'unknown',
+    birthDate: clean(employee.birthDate), gender: clean(employee.gender), nationality: clean(employee.nationality),
+    personalEmail: clean(employee.personalEmail), personalPhone: clean(employee.personalPhone),
+    corporateEmail: clean(employee.corporateEmail), corporatePhone: clean(employee.corporatePhone),
+    residence: { city: clean(employee.city), department: clean(employee.department), address: clean(employee.address) },
+    source: { system: 'application' },
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+  });
+  await addDoc(collection(employeeRef, 'audit'), {
+    source: 'manual_create', changedBy: actor, changedAt: serverTimestamp(),
+    changes: [{ field: 'created', previousValue: null, newValue: true }],
+  });
+
+  let employmentId: string | undefined;
+  if (hasEmployment) {
+    const relationRef = doc(collection(employeeRef, FIRESTORE_SUBCOLLECTIONS.employeeEmployments));
+    employmentId = relationRef.id;
+    await setDoc(relationRef, {
+      employeeId: documentNumber, status: 'active',
+      companyId: employment!.companyId || null, companyName: clean(employment!.companyName),
+      projectId: employment!.projectId || null, projectName: clean(employment!.projectName),
+      position: clean(employment!.position), contractType: clean(employment!.contractType),
+      startDate: clean(employment!.startDate), modality: clean(employment!.modality), workday: clean(employment!.workday),
+      supervisor: clean(employment!.supervisor), area: clean(employment!.area),
+      source: { system: 'application' },
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    });
+  }
+
+  return { employeeId: documentNumber, employmentId };
+}
+
 const employeeFields = ['corporateEmail', 'personalEmail', 'corporatePhone', 'personalPhone'] as const;
 const socialFields = ['eps', 'afp', 'ccf', 'severanceFund'] as const;
 const bankingFields = ['bankName', 'accountType', 'accountNumber'] as const;

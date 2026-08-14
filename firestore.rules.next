@@ -159,10 +159,16 @@ service cloud.firestore {
       allow write: if false;
     }
     match /communications/data/messages/{messageId} {
-      allow read, write: if signedIn();
+      // Lectura pública: el destinatario abre el enlace del correo sin sesión iniciada.
+      allow read: if true;
+      allow write: if signedIn();
     }
     match /communications/data/recipients/{recipientId} {
-      allow read, write: if signedIn();
+      // Lectura y actualización de estado (leído/acuse/clic) públicas por el mismo motivo;
+      // solo el token del enlace identifica al destinatario, no hay usuario autenticado.
+      allow read: if true;
+      allow create, delete: if signedIn();
+      allow update: if true;
     }
     match /communications/data/accounting_messages/{messageId} {
       allow read: if hasRole(['admin', 'contabilidad', 'financiera']);

@@ -43,6 +43,7 @@ export interface TaxObligation {
   attachments?: TaxAttachment[];
   statusHistory?: StatusHistoryEntry[];
   projected?: number;
+  presented?: number;    // valor declarado/presentado ante la entidad
   paid?: number;
   paidAt?: string;       // ISO date YYYY-MM-DD — fecha de pago registrada por financiera
   presentedAt?: string;  // ISO string — fecha real de presentación ante DIAN

@@ -3,7 +3,7 @@ import { Send, Search, Check, User, Building2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/config/firebase';
-import { userService } from '@/services/userService';
+import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
 import type { Bulletin } from '@/models/types/Bulletin';
 import type { User as AppUser } from '@/models/types/User';
 import {
@@ -12,7 +12,7 @@ import {
 
 const sendCommunicationEmail = httpsCallable(functions, 'sendCommunicationEmail');
 
-const ACTIVE_ROLES = new Set(['colaborador', 'lider']);
+const ACTIVE_ROLES = new Set(['colaborador']);
 
 interface Props {
   bulletin: Bulletin;
@@ -31,7 +31,7 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    userService.getAll()
+    getEmployeeDirectoryUsers()
       .then(u => setUsers(u.filter(x => x.email && ACTIVE_ROLES.has(x.role))))
       .catch(() => toast.error('Error cargando usuarios'))
       .finally(() => setLoading(false));

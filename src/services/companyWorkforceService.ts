@@ -18,6 +18,11 @@ export interface CompanyWorkforcePerson {
   regional?: string;
   baseLocation?: string;
   startDate?: string;
+  endDate?: string;
+  gender?: string;
+  birthDate?: string;
+  terminationReason?: string;
+  terminationCost?: number;
   status: 'active' | 'retired';
   payroll?: {
     baseSalary?: number;
@@ -86,6 +91,11 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
         regional: relation.regional,
         baseLocation: relation.baseLocation,
         startDate: relation.startDate,
+        endDate: relation.endDate,
+        gender: employee.gender,
+        birthDate: employee.birthDate,
+        terminationReason: relation.terminationReason,
+        terminationCost: relation.terminationCost,
         status: relation.status === 'active' ? 'active' : 'retired',
         payroll: payrollSnap.exists() ? payrollSnap.data() : undefined,
       } as CompanyWorkforcePerson;

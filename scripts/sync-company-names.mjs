@@ -1,11 +1,11 @@
 /**
  * sync-company-names.mjs
  *
- * Busca todas las tax_obligations que tengan NIT,
- * las cruza con la colección companies para obtener el nombre canónico,
- * y actualiza el campo `company` si hay diferencia.
+ * Completa companyId, nombre y NIT canónicos en obligaciones heredadas que no
+ * tienen companyId, siempre que el NIT coincida con una única empresa.
  *
- * Uso: node scripts/sync-company-names.mjs [--dry-run]
+ * Uso: node scripts/sync-company-names.mjs          # simulación
+ *      node scripts/sync-company-names.mjs --apply  # aplica cambios
  */
 
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
@@ -22,21 +22,25 @@ try { app = getApp(); } catch { app = initializeApp({ credential: cert(serviceAc
 
 const db = getFirestore(app);
 
-const DRY_RUN = process.argv.includes('--dry-run');
+const APPLY = process.argv.includes('--apply');
 
 const cleanNit  = (n = '') => n.replace(/[^0-9]/g, '');
-const normalize = (s = '') =>
-  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-   .replace(/[.\-,]/g, '').replace(/\s+/g, ' ').trim();
+const normalize = (s = '') => s.toLowerCase().normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '').replace(/[.\-,]/g, '')
+  .replace(/\s+/g, ' ').trim();
+const compatibleNames = (a = '', b = '') => {
+  const left = normalize(a), right = normalize(b);
+  return Boolean(left && right && (left === right || left.includes(right) || right.includes(left)));
+};
 
 async function main() {
-  console.log(DRY_RUN ? '🔍  DRY RUN — no se escribirá nada\n' : '✏️   Modo escritura activo\n');
+  console.log(APPLY ? '✏️   Modo escritura activo\n' : '🔍  DRY RUN — no se escribirá nada\n');
 
   // 1. Cargar companies: armar mapa NIT → nombre canónico
   console.log('Cargando companies...');
-  const compSnap = await db.collection('companies').get();
+  const compSnap = await db.collection('organization/data/companies').get();
   const nitToCompany = new Map(); // nitLimpio → empresa canónica
-  const nameToCanonical = new Map(); // nombreNorm → { name, nit } canónico
+  const companies = [];
   for (const doc of compSnap.docs) {
     const { name, nit } = doc.data();
     const nitC = cleanNit(nit ?? '');
@@ -46,14 +50,15 @@ async function main() {
       }
       const canonical = { id: doc.id, name: name.trim(), nit: (nit ?? '').trim() };
       nitToCompany.set(nitC, canonical);
-      nameToCanonical.set(normalize(name), canonical);
+      companies.push(canonical);
     }
   }
   console.log(`  ${nitToCompany.size} empresas con NIT cargadas\n`);
 
   // 2. Cargar tax_obligations
   console.log('Cargando tax_obligations...');
-  const oblSnap = await db.collection('tax_obligations').get();
+  const obligationsRef = db.collection('accounting/data/tax_obligations');
+  const oblSnap = await obligationsRef.get();
   console.log(`  ${oblSnap.size} obligaciones encontradas\n`);
 
   // 3. Cruzar y detectar diferencias (nombre Y NIT)
@@ -61,16 +66,21 @@ async function main() {
 
   for (const doc of oblSnap.docs) {
     const data = doc.data();
+    if (data.companyId) continue;
     const oblNitC = cleanNit(data.nit ?? '');
     const oblNit  = (data.nit ?? '').trim();
     const oblName = (data.company ?? '').trim();
 
-    // Buscar canónico por NIT limpio primero, luego por nombre
-    let canonical = null;
-    if (oblNitC && nitToCompany.has(oblNitC)) {
-      canonical = nitToCompany.get(oblNitC);
-    } else if (oblName && nameToCanonical.has(normalize(oblName))) {
-      canonical = nameToCanonical.get(normalize(oblName));
+    // Primero NIT exacto. Para registros heredados sin dígito de verificación,
+    // aceptar NIT base solo cuando existe un único candidato y el nombre coincide.
+    let canonical = oblNitC ? nitToCompany.get(oblNitC) : null;
+    if (!canonical && oblNitC.length === 9) {
+      const candidates = companies.filter(company => {
+        const companyNit = cleanNit(company.nit);
+        return companyNit.length === 10 && companyNit.startsWith(oblNitC) &&
+          compatibleNames(oblName, company.name);
+      });
+      if (candidates.length === 1) canonical = candidates[0];
     }
     if (!canonical) continue;
 
@@ -97,8 +107,8 @@ async function main() {
     if (u.fields.companyId) console.log(`    companyId: → ${u.canonical.id}`);
   }
 
-  if (DRY_RUN) {
-    console.log('\n🔍  DRY RUN — ejecuta sin --dry-run para aplicar los cambios.');
+  if (!APPLY) {
+    console.log('\n🔍  DRY RUN — ejecuta con --apply para aplicar los cambios.');
     return;
   }
 
@@ -110,7 +120,7 @@ async function main() {
     const batch = db.batch();
     const chunk = updates.slice(i, i + BATCH_SIZE);
     for (const u of chunk) {
-      batch.update(db.collection('tax_obligations').doc(u.id), u.fields);
+      batch.update(obligationsRef.doc(u.id), u.fields);
     }
     await batch.commit();
     updated += chunk.length;

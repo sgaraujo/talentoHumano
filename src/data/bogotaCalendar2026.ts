@@ -14,12 +14,12 @@ export interface BogotaObligation {
 // ── ICA Bimestral 2026 ────────────────────────────────────────────────────────
 // Aplica a contribuyentes con impuesto a cargo en 2025 superior a 391 UVT
 export const ICA_BIMESTRAL_BOGOTA_2026: BogotaObligation[] = [
-  { taxType: 'ICA Bimestral', category: 'ICA', period: 'ICA Bim 1 (Ene-Feb)', dueDate: '2026-04-10', scope: 'Distrital' },
-  { taxType: 'ICA Bimestral', category: 'ICA', period: 'ICA Bim 2 (Mar-Abr)', dueDate: '2026-06-12', scope: 'Distrital' },
-  { taxType: 'ICA Bimestral', category: 'ICA', period: 'ICA Bim 3 (May-Jun)', dueDate: '2026-08-21', scope: 'Distrital' },
-  { taxType: 'ICA Bimestral', category: 'ICA', period: 'ICA Bim 4 (Jul-Ago)', dueDate: '2026-10-09', scope: 'Distrital' },
-  { taxType: 'ICA Bimestral', category: 'ICA', period: 'ICA Bim 5 (Sep-Oct)', dueDate: '2026-12-11', scope: 'Distrital' },
-  { taxType: 'ICA Bimestral', category: 'ICA', period: 'ICA Bim 6 (Nov-Dic)', dueDate: '2027-02-12', scope: 'Distrital' },
+  { taxType: 'ICA Bimestral', category: 'ICA', period: 'Bimestre 1', dueDate: '2026-04-10', scope: 'Distrital' },
+  { taxType: 'ICA Bimestral', category: 'ICA', period: 'Bimestre 2', dueDate: '2026-06-12', scope: 'Distrital' },
+  { taxType: 'ICA Bimestral', category: 'ICA', period: 'Bimestre 3', dueDate: '2026-08-21', scope: 'Distrital' },
+  { taxType: 'ICA Bimestral', category: 'ICA', period: 'Bimestre 4', dueDate: '2026-10-09', scope: 'Distrital' },
+  { taxType: 'ICA Bimestral', category: 'ICA', period: 'Bimestre 5', dueDate: '2026-12-11', scope: 'Distrital' },
+  { taxType: 'ICA Bimestral', category: 'ICA', period: 'Bimestre 6', dueDate: '2027-02-12', scope: 'Distrital' },
 ];
 
 // ── ICA Anual 2026 ────────────────────────────────────────────────────────────
@@ -32,12 +32,12 @@ export const ICA_ANUAL_BOGOTA_2026: BogotaObligation[] = [
 // ── ReteICA 2026 ──────────────────────────────────────────────────────────────
 // Retención del Impuesto de Industria y Comercio — bimestral
 export const RETEICA_BOGOTA_2026: BogotaObligation[] = [
-  { taxType: 'ReteICA', category: 'ReteICA', period: 'ReteICA Bim 1 (Ene-Feb)', dueDate: '2026-03-20', scope: 'Distrital' },
-  { taxType: 'ReteICA', category: 'ReteICA', period: 'ReteICA Bim 2 (Mar-Abr)', dueDate: '2026-05-22', scope: 'Distrital' },
-  { taxType: 'ReteICA', category: 'ReteICA', period: 'ReteICA Bim 3 (May-Jun)', dueDate: '2026-07-17', scope: 'Distrital' },
-  { taxType: 'ReteICA', category: 'ReteICA', period: 'ReteICA Bim 4 (Jul-Ago)', dueDate: '2026-09-18', scope: 'Distrital' },
-  { taxType: 'ReteICA', category: 'ReteICA', period: 'ReteICA Bim 5 (Sep-Oct)', dueDate: '2026-11-20', scope: 'Distrital' },
-  { taxType: 'ReteICA', category: 'ReteICA', period: 'ReteICA Bim 6 (Nov-Dic)', dueDate: '2027-01-15', scope: 'Distrital' },
+  { taxType: 'ReteICA', category: 'ReteICA', period: 'Bimestre 1', dueDate: '2026-03-20', scope: 'Distrital' },
+  { taxType: 'ReteICA', category: 'ReteICA', period: 'Bimestre 2', dueDate: '2026-05-22', scope: 'Distrital' },
+  { taxType: 'ReteICA', category: 'ReteICA', period: 'Bimestre 3', dueDate: '2026-07-17', scope: 'Distrital' },
+  { taxType: 'ReteICA', category: 'ReteICA', period: 'Bimestre 4', dueDate: '2026-09-18', scope: 'Distrital' },
+  { taxType: 'ReteICA', category: 'ReteICA', period: 'Bimestre 5', dueDate: '2026-11-20', scope: 'Distrital' },
+  { taxType: 'ReteICA', category: 'ReteICA', period: 'Bimestre 6', dueDate: '2027-01-15', scope: 'Distrital' },
 ];
 
 // ── Predial 2026 ──────────────────────────────────────────────────────────────

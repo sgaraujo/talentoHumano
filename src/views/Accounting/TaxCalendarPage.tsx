@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { taxCalendarService } from '@/services/taxCalendarService';
 import { rolesService } from '@/services/rolesService';
 import { companyService } from '@/services/companyService';
+import { applyTaxImportPlan } from '@/services/taxImportService';
 import { useAuth } from '@/hooks/useAuth';
 import type { AppRole } from '@/models/types/AppRole';
 import type { TaxObligation, TaxStatus, TaxAttachment, StatusHistoryEntry } from '@/models/types/TaxObligation';
@@ -33,28 +34,41 @@ import {
   type DianObligation, type NitDigit,
 } from '@/data/dianCalendar2026';
 import {
-  cleanNit, displayTax, normalize, normTax, sameAutoDueDate,
+  cleanNit, displayTax, normalize, normalizePeriod, normTax, sameAutoDueDate,
   sameCompany as belongsToCompany, sameDianObligation,
 } from '@/domain/tax/taxIdentity';
+import { buildTaxImportPlan, type TaxImportPlan } from '@/domain/tax/taxExcelImport';
+import { TaxImportPreviewDialog } from '@/components/accounting/TaxImportPreviewDialog';
+import { TaxImportInstructions } from '@/components/accounting/TaxImportInstructions';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   '':               { label: 'Pendiente',       color: 'text-gray-500',   bg: 'bg-gray-100',    dot: 'bg-gray-400' },
   'No iniciado':    { label: 'No iniciado',      color: 'text-gray-600',   bg: 'bg-gray-100',    dot: 'bg-gray-400' },
+  'En revisión':    { label: 'En revisión',      color: 'text-amber-700',  bg: 'bg-amber-50',    dot: 'bg-amber-500' },
   'Revisado':       { label: 'Revisado',         color: 'text-blue-700',   bg: 'bg-blue-50',     dot: 'bg-blue-500' },
   'Presentado':     { label: 'Presentado',       color: 'text-purple-700', bg: 'bg-purple-50',   dot: 'bg-purple-500' },
   'Informe Enviado':{ label: 'Informe Enviado',  color: 'text-teal-700',   bg: 'bg-teal-50',     dot: 'bg-teal-500' },
+  'Informe Enviado RF': { label: 'Informe Enviado RF', color: 'text-cyan-700', bg: 'bg-cyan-50', dot: 'bg-cyan-500' },
+  'Impuesto Enviado para pago': { label: 'Enviado para pago', color: 'text-indigo-700', bg: 'bg-indigo-50', dot: 'bg-indigo-500' },
   'No aplica':      { label: 'No aplica',        color: 'text-gray-400',   bg: 'bg-gray-50',     dot: 'bg-gray-300' },
   'Pagado':         { label: 'Pagado',           color: 'text-green-700',  bg: 'bg-green-50',    dot: 'bg-green-500' },
 };
 
+// Mantener sincronizado con COMPLETED_STATUSES de functions/src/index.ts.
+const ALERT_RESOLVED_STATUSES = new Set<TaxStatus>([
+  'Pagado', 'No aplica', 'Informe Enviado', 'Presentado',
+]);
+const isAlertResolved = (status?: string) => ALERT_RESOLVED_STATUSES.has(status as TaxStatus);
+
 const PERIOD_OPTIONS = [
-  'Mensual-1', 'Mensual-2', 'Mensual-3', 'Mensual-4', 'Mensual-5', 'Mensual-6',
-  'Mensual-7', 'Mensual-8', 'Mensual-9', 'Mensual-10', 'Mensual-11', 'Mensual-12',
-  'Bim 1', 'Bim 2', 'Bim 3', 'Bim 4', 'Bim 5', 'Bim 6',
-  'Cuatrim 1', 'Cuatrim 2', 'Cuatrim 3',
-  'Trimestre-1', 'Trimestre-2', 'Trimestre-3', 'Trimestre-4',
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+  'Bimestre 1', 'Bimestre 2', 'Bimestre 3', 'Bimestre 4', 'Bimestre 5', 'Bimestre 6',
+  'Cuatrimestre 1', 'Cuatrimestre 2', 'Cuatrimestre 3',
+  'Trimestre 1', 'Trimestre 2', 'Trimestre 3', 'Trimestre 4',
+  'Semestre 1', 'Semestre 2',
   'Cuota 1', 'Cuota 2',
   'Anual',
 ];
@@ -225,10 +239,6 @@ export const TaxCalendarPage = () => {
   const [dianSearch, setDianSearch]             = useState('');
   const [dianDays, setDianDays]                 = useState(60);
   const [filterUrgency, setFilterUrgency]       = useState<'all'|'overdue'|'urgent'|'soon'|'ok'>('all');
-  const filterStatus  = 'all';
-  const filterDigit   = 'all';
-  const filterPeriod  = 'all';
-  const filterCompany = 'all';
   const [filterMonth,   setFilterMonth]         = useState('all');
   const [viewMode,      setViewMode]            = useState<'upcoming' | 'past' | 'paid'>('upcoming');
   const [vencidosFrom,  setVencidosFrom]        = useState('2026-06-01');
@@ -269,8 +279,53 @@ export const TaxCalendarPage = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const attachFileRef = useRef<HTMLInputElement>(null);
   const [formProjected,  setFormProjected]  = useState('');
+  const [formPresented,  setFormPresented]  = useState('');
   const [formPaid,       setFormPaid]       = useState('');
   const [formPaidAt,     setFormPaidAt]     = useState('');
+  const [formPresentedAt, setFormPresentedAt] = useState('');
+
+  // ── Carga masiva de vencimientos desde Excel ──────────────────────────────────
+  const [importOpen,       setImportOpen]       = useState(false);
+  const [importPlan,       setImportPlan]       = useState<TaxImportPlan | null>(null);
+  const [importLoading,    setImportLoading]    = useState(false);
+  const [importError,      setImportError]      = useState('');
+  const [applyingImport,   setApplyingImport]   = useState(false);
+
+  const selectImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImportOpen(true); setImportPlan(null); setImportError(''); setImportLoading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { cellDates: true });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!worksheet) throw new Error('El archivo no tiene ninguna hoja legible.');
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: null, raw: false });
+      setImportPlan(buildTaxImportPlan(file.name, rows, firestoreCompanies, obligations));
+    } catch (e: any) {
+      setImportError(e?.message || 'No fue posible analizar el archivo.');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const applyImport = async () => {
+    if (!importPlan) return;
+    if (!window.confirm(`Se crearán ${importPlan.create} y se actualizarán ${importPlan.update} vencimiento(s). ¿Continuar?`)) return;
+    setApplyingImport(true);
+    try {
+      const result = await applyTaxImportPlan(importPlan.rows, currentUserName || user?.email || 'usuario-desconocido');
+      toast.success('Vencimientos actualizados', { description: `${result.created} nuevos, ${result.updated} actualizados.` });
+      setImportOpen(false);
+      await load();
+    } catch (e: any) {
+      setImportError(e?.message || 'No fue posible aplicar la importación.');
+      toast.error('La importación no se completó');
+    } finally {
+      setApplyingImport(false);
+    }
+  };
 
   // ── Load ────────────────────────────────────────────────────────────────────
 
@@ -330,6 +385,7 @@ export const TaxCalendarPage = () => {
   const isFinanciera = currentRole === 'financiera';
   const isAdmin      = currentRole === 'admin';
   const canMarkPaid  = isFinanciera || isAdmin;
+  const canMarkPresented = !isFinanciera;
   // null = rol aún no cargado → mostrar stepper por defecto
   const canStepper   = currentRole === null || currentRole !== 'financiera';
 
@@ -406,8 +462,10 @@ export const TaxCalendarPage = () => {
     setAttachments(obl.attachments ?? []);
     setUploadProgress(0);
     setFormProjected(obl.projected != null ? String(obl.projected) : '');
+    setFormPresented(obl.presented != null ? String(obl.presented) : '');
     setFormPaid(obl.paid != null ? String(obl.paid) : '');
     setFormPaidAt(obl.paidAt ?? '');
+    setFormPresentedAt(obl.presentedAt ? obl.presentedAt.slice(0, 10) : '');
   };
 
   const openNew = () => {
@@ -417,8 +475,10 @@ export const TaxCalendarPage = () => {
     setAttachments([]);
     setUploadProgress(0);
     setFormProjected('');
+    setFormPresented('');
     setFormPaid('');
     setFormPaidAt('');
+    setFormPresentedAt('');
   };
 
   const closeDialog = () => { setEditObl(null); setIsNew(false); setQuickEditMode(false); };
@@ -431,10 +491,14 @@ export const TaxCalendarPage = () => {
     if (isNew || !editObl || editObl.id === '__new__') return;
     try {
       const projNum = formProjected !== '' ? parseFloat(formProjected) : undefined;
-      const presentedAt = newStatus === 'Presentado' ? new Date().toISOString() : undefined;
+      const presentedNum = formPresented !== '' ? parseFloat(formPresented) : undefined;
+      const defaultPresentedAt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      const presentedAt = newStatus === 'Presentado' ? (formPresentedAt || defaultPresentedAt) : undefined;
+      if (presentedAt && !formPresentedAt) setFormPresentedAt(presentedAt);
       const actor = currentUserName || user?.email || 'Sistema';
       const updatePayload: Record<string, unknown> = { status: newStatus };
       if (projNum     != null && !isNaN(projNum)) updatePayload.projected   = projNum;
+      if (presentedNum != null && !isNaN(presentedNum)) updatePayload.presented = presentedNum;
       if (presentedAt != null)                    updatePayload.presentedAt = presentedAt;
       // Registrar quién hizo este paso específico
       updatePayload[`stepOwners.${newStatus}`] = actor;
@@ -452,6 +516,7 @@ export const TaxCalendarPage = () => {
         stepOwners: { ...(editObl as TaxObligation).stepOwners, [newStatus]: actor },
       };
       if (projNum     != null && !isNaN(projNum)) localUpdate.projected   = projNum;
+      if (presentedNum != null && !isNaN(presentedNum)) localUpdate.presented = presentedNum;
       if (presentedAt != null)                    localUpdate.presentedAt = presentedAt;
       if (newStatus === 'Pagado') localUpdate.financieraUser = actor;
       if (newStatus === 'Pagado' && formPaidAt) localUpdate.paidAt = formPaidAt;
@@ -499,12 +564,15 @@ export const TaxCalendarPage = () => {
     setSaving(true);
     try {
       const projected = formProjected !== '' ? parseFloat(formProjected) : undefined;
+      const presented = formPresented !== '' ? parseFloat(formPresented) : undefined;
       const paid      = formPaid      !== '' ? parseFloat(formPaid)      : undefined;
       const data = {
         ...form, attachments,
         ...(projected != null && !isNaN(projected) ? { projected } : {}),
+        ...(presented != null && !isNaN(presented) ? { presented } : {}),
         ...(paid      != null && !isNaN(paid)      ? { paid }      : {}),
         ...(formPaidAt ? { paidAt: formPaidAt } : {}),
+        ...(formPresentedAt ? { presentedAt: formPresentedAt } : {}),
       };
       if (isNew) {
         if (currentUserName && !isFinanciera) (data as any).accountingUser = currentUserName;
@@ -633,6 +701,19 @@ export const TaxCalendarPage = () => {
     }
   };
 
+  // Fecha real de presentación ante DIAN — independiente de la fecha de pago y
+  // editable a mano, para no depender de "cuándo se dio clic" en el estado.
+  const savePresentedAtNow = async (value: string) => {
+    if (isNew || !editObl || editObl.id === '__new__' || !value) return;
+    try {
+      await taxCalendarService.update(editObl.id, { presentedAt: value } as any);
+      setEditObl(prev => prev ? { ...prev, presentedAt: value } : prev);
+      setObligations(prev => prev.map(o => o.id === editObl.id ? { ...o, presentedAt: value } : o));
+    } catch (e: any) {
+      toast.error('Error al guardar fecha de presentación', { description: e.message });
+    }
+  };
+
   // ── DIAN rows ────────────────────────────────────────────────────────────────
 
   interface CompanyDianRow {
@@ -735,17 +816,10 @@ export const TaxCalendarPage = () => {
     // Para filtro por mes usamos todos los vencimientos del año (sin límite de días)
     const effectiveDays = filterMonth !== 'all' ? 400 : dianDays;
 
-    // También incluir empresas que tengan obligaciones manuales en Firestore
-    const companiesWithObls = new Set([
-      ...obligations.map(o => o.nit).filter(Boolean),
-      ...obligations.map(o => o.company.toLowerCase().trim()),
-    ]);
-
     return calendarCompanies
       .filter(c => c.active && (
         c.activeContabilidad ||
-        companiesWithObls.has(c.nit) ||
-        companiesWithObls.has(c.name.toLowerCase().trim())
+        obligations.some(o => belongsToCompany(o, c))
       ))
       .filter(c => {
         if (!dianSearch) return true;
@@ -754,7 +828,6 @@ export const TaxCalendarPage = () => {
         const oblsForCompany = c.nit ? getDianObligationsByNit(c.nit) : [];
         return oblsForCompany.some(o => displayTax(o.taxType).toLowerCase().includes(q) || o.taxType.toLowerCase().includes(q));
       })
-      .filter(c => filterCompany === 'all' || c.id === filterCompany)
       .map(c => {
         const digit    = extractVerificationDigit(c.nit);
         const hidden = new Set(c.excludedTaxTypes);
@@ -787,7 +860,6 @@ export const TaxCalendarPage = () => {
           : [];
 
         // Helper para buscar el estado registrado de una obligación DIAN
-        const isDoneStatus = (s?: string) => s === 'Presentado' || s === 'Pagado' || s === 'No aplica';
         const matchedStatus = (dianObl: DianObligation) => {
           const m = obligations.find(o => {
             return belongsToCompany(o, c) && sameDianObligation(o, dianObl);
@@ -797,7 +869,7 @@ export const TaxCalendarPage = () => {
 
         // nextDue = primera obligación pendiente (no completada)
         const pool = filterMonth !== 'all' ? upcoming : upcomingForNext;
-        const nextDue = pool.find(o => !isDoneStatus(matchedStatus(o))) ?? null;
+        const nextDue = pool.find(o => !isAlertResolved(matchedStatus(o))) ?? null;
 
         const allDianObls = c.nit ? getDianObligationsByNit(c.nit) : [];
         return { company: c, digit, upcoming, allDianObls, nextDue };
@@ -805,11 +877,9 @@ export const TaxCalendarPage = () => {
       .filter(row => {
         const sameCompany = (o: TaxObligation) => belongsToCompany(o, row.company);
 
-        const isComplete = (s?: string) => s === 'Presentado' || s === 'Pagado';
-
         // ── Al día: solo empresas con al menos una obligación completada ────
         if (viewMode === 'paid') {
-          const hasDone = obligations.some(o => sameCompany(o) && isComplete(o.status));
+          const hasDone = obligations.some(o => sameCompany(o) && isAlertResolved(o.status));
           if (!hasDone) return false;
         }
 
@@ -824,13 +894,12 @@ export const TaxCalendarPage = () => {
               sameAutoDueDate(o.dueDate, dianObl.dueDate)
             );
             if (!m) return true; // sin registro = pendiente
-            return !isComplete(m.status) && m.status !== 'No aplica';
+            return !isAlertResolved(m.status);
           });
           // Pendientes manuales de Firestore (no están en el calendario DIAN)
           const hasManualPending = obligations.some(o =>
             sameCompany(o) &&
-            !isComplete(o.status ?? '') &&
-            o.status !== 'No aplica' &&
+            !isAlertResolved(o.status) &&
             (o.dueDate ?? '') < today &&
             (o.dueDate ?? '') >= vencidosFrom &&
             !row.upcoming.some(u =>
@@ -841,14 +910,11 @@ export const TaxCalendarPage = () => {
           if (!hasDianPending && !hasManualPending) return false;
         }
 
-        // ── Digit filter ────────────────────────────────────────────────────
-        if (filterDigit !== 'all' && String(row.digit) !== filterDigit) return false;
-
         // ── Month filter ────────────────────────────────────────────────────
         if (filterMonth !== 'all' && row.upcoming.length === 0) return false;
 
-        // ── Build combined obligation list for urgency/status filters ────────
-        // 1) DIAN calendar obligations with their Firestore match (may be undefined)
+        // ── Build combined obligation list for the urgency filter ────────────
+        // DIAN calendar obligations with their Firestore match (may be undefined)
         const dianPairs = row.upcoming.map(dianObl => {
           const m = obligations.find(o =>
             sameCompany(o) &&
@@ -857,16 +923,7 @@ export const TaxCalendarPage = () => {
           );
           return { dueDate: dianObl.dueDate, period: dianObl.period, status: m?.status ?? '' };
         });
-        // 2) Manual Firestore obligations not matched by any DIAN entry
-        const manualObls = obligations.filter(o =>
-          sameCompany(o) &&
-          !row.upcoming.some(u =>
-            normTax(u.taxType) === normTax(o.taxType) &&
-            sameAutoDueDate(o.dueDate, u.dueDate)
-          )
-        ).map(o => ({ dueDate: o.dueDate, period: o.period ?? '', status: o.status ?? '' }));
 
-        const isDone  = (s: string) => s === 'Presentado' || s === 'Pagado' || s === 'No aplica';
 
         // ── Urgency filter ──────────────────────────────────────────────────
         if (filterUrgency !== 'all') {
@@ -874,33 +931,18 @@ export const TaxCalendarPage = () => {
             // Al día: tiene DIAN obls Y ninguna rastreada (status≠'') está vencida sin completar
             // Y tiene al menos una completada
             if (dianPairs.length === 0) return false;
-            if (!dianPairs.some(o => isDone(o.status))) return false;
-            if (dianPairs.some(o => o.status !== '' && !isDone(o.status) && dianUrgency(o.dueDate) === 'overdue')) return false;
+            if (!dianPairs.some(o => isAlertResolved(o.status))) return false;
+            if (dianPairs.some(o => o.status !== '' && !isAlertResolved(o.status) && dianUrgency(o.dueDate) === 'overdue')) return false;
           } else {
             // Vencidas / Urgentes / Próximas
-            if (!dianPairs.some(o => !isDone(o.status) && dianUrgency(o.dueDate) === filterUrgency)) return false;
+            if (!dianPairs.some(o => !isAlertResolved(o.status) && dianUrgency(o.dueDate) === filterUrgency)) return false;
           }
-        }
-
-        // ── Period filter ───────────────────────────────────────────────────
-        if (filterPeriod !== 'all') {
-          if (!row.upcoming.some(o => o.period === filterPeriod) &&
-              !manualObls.some(o => o.period === filterPeriod)) return false;
-        }
-
-        // ── Status filter ───────────────────────────────────────────────────
-        if (filterStatus !== 'all') {
-          const fsObls = obligations.filter(sameCompany);
-          const hasMatch = filterStatus === '__none'
-            ? dianPairs.some(o => !o.status)
-            : fsObls.some(o => (o.status ?? '') === filterStatus);
-          if (!hasMatch) return false;
         }
 
         return true;
       })
       .sort((a, b) => companyOrderIndex(a.company.name) - companyOrderIndex(b.company.name));
-  }, [calendarCompanies, dianSearch, dianDays, filterDigit, filterUrgency, filterPeriod, filterStatus, filterCompany, filterMonth, obligations, viewMode, vencidosFrom]);
+  }, [calendarCompanies, dianSearch, dianDays, filterUrgency, filterMonth, obligations, viewMode, vencidosFrom]);
 
   const URGENCY_BADGE: Record<string, string> = {
     overdue: 'bg-red-100 text-red-700',
@@ -911,23 +953,19 @@ export const TaxCalendarPage = () => {
 
   // ── Excel export del calendario ──────────────────────────────────────────────
   const handleExportCalendar = () => {
-    const cleanNit = (n: string) => (n ?? '').replace(/[^0-9]/g, '');
     type ExRow = {
       Empresa: string; NIT: string; 'Tipo de obligación': string;
       Período: string; Vencimiento: string; Estado: string;
+      'Fecha de presentación': string;
       Contabilidad: string; Financiera: string;
-      Proyectado: number | string; Pagado: number | string;
+      Proyectado: number | string; 'Valor presentado': number | string; Pagado: number | string;
       Observación: string;
     };
     const exRows: ExRow[] = [];
+    const dateOnly = (v?: string) => (v ? v.slice(0, 10) : '');
 
     dianRows.forEach(({ company, upcoming }) => {
-      const cNitC  = cleanNit(company.nit ?? '');
-      const cNameN = normalize(company.name);
-      const match = (o: TaxObligation) => {
-        const oNitC = cleanNit(o.nit ?? '');
-        return (cNitC && oNitC && cNitC === oNitC) || normalize(o.company) === cNameN;
-      };
+      const match = (o: TaxObligation) => belongsToCompany(o, company);
 
       // DIAN entries
       upcoming.forEach(dianObl => {
@@ -940,9 +978,10 @@ export const TaxCalendarPage = () => {
           Empresa:              company.name,
           NIT:                  company.nit ?? '',
           'Tipo de obligación': displayTax(dianObl.taxType),
-          Período:              dianObl.period,
+          Período:              normalizePeriod(dianObl.period),
           Vencimiento:          dianObl.dueDate,
           Estado:               fs?.status ?? '',
+          'Fecha de presentación': dateOnly(fs?.presentedAt),
           Contabilidad:         (() => {
             const s = fs?.stepOwners ?? {};
             const names = [...new Set(['No iniciado','Revisado','Informe Enviado','Presentado'].map(k => s[k as TaxStatus]).filter(Boolean) as string[])];
@@ -950,6 +989,7 @@ export const TaxCalendarPage = () => {
           })(),
           Financiera:           fs?.stepOwners?.['Pagado'] || (fs?.financieraUser ?? ''),
           Proyectado:           fs?.projected ?? '',
+          'Valor presentado':   fs?.presented ?? '',
           Pagado:               fs?.paid ?? '',
           Observación:          fs?.observation ?? '',
         });
@@ -966,9 +1006,10 @@ export const TaxCalendarPage = () => {
             Empresa:              company.name,
             NIT:                  company.nit ?? '',
             'Tipo de obligación': displayTax(o.taxType),
-            Período:              o.period ?? '',
+            Período:              normalizePeriod(o.period),
             Vencimiento:          o.dueDate,
             Estado:               o.status ?? '',
+            'Fecha de presentación': dateOnly(o.presentedAt),
             Contabilidad:         (() => {
               const s = o.stepOwners ?? {};
               const names = [...new Set(['No iniciado','Revisado','Informe Enviado','Presentado'].map(k => s[k as TaxStatus]).filter(Boolean) as string[])];
@@ -976,6 +1017,7 @@ export const TaxCalendarPage = () => {
             })(),
             Financiera:           o.stepOwners?.['Pagado'] || (o.financieraUser ?? ''),
             Proyectado:           o.projected ?? '',
+            'Valor presentado':   o.presented ?? '',
             Pagado:               o.paid ?? '',
             Observación:          o.observation ?? '',
           });
@@ -985,8 +1027,8 @@ export const TaxCalendarPage = () => {
     const ws = XLSX.utils.json_to_sheet(exRows);
     ws['!cols'] = [
       { wch: 38 }, { wch: 14 }, { wch: 28 }, { wch: 20 },
-      { wch: 14 }, { wch: 22 }, { wch: 22 }, { wch: 22 },
-      { wch: 16 }, { wch: 16 }, { wch: 35 },
+      { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 22 }, { wch: 22 },
+      { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 35 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Calendario');
@@ -1033,6 +1075,15 @@ export const TaxCalendarPage = () => {
             <Download className="w-3.5 h-3.5" /> Exportar Excel
           </button>
           {!isFinanciera && (
+            <div className="flex items-center gap-1">
+              <label className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer">
+                <Upload className="w-3.5 h-3.5" /> Actualizar desde Excel
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={selectImportExcel} />
+              </label>
+              <TaxImportInstructions />
+            </div>
+          )}
+          {!isFinanciera && (
             <Button onClick={openNew} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
               <Plus className="w-4 h-4 mr-2" /> Nuevo vencimiento
             </Button>
@@ -1042,7 +1093,7 @@ export const TaxCalendarPage = () => {
 
       {/* Filter panel */}
       {(() => {
-        const hasFilters = dianSearch || filterUrgency !== 'all' || filterStatus !== 'all' || filterDigit !== 'all' || filterPeriod !== 'all' || filterCompany !== 'all' || filterMonth !== 'all' || viewMode !== 'upcoming';
+        const hasFilters = dianSearch || filterUrgency !== 'all' || filterMonth !== 'all' || viewMode !== 'upcoming';
 
         return (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-4 space-y-3">
@@ -1099,6 +1150,21 @@ export const TaxCalendarPage = () => {
                   />
                 </div>
               )}
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400 whitespace-nowrap">Mes:</span>
+                <Input
+                  type="month"
+                  value={filterMonth === 'all' ? '' : filterMonth}
+                  onChange={e => setFilterMonth(e.target.value || 'all')}
+                  className="h-7 text-xs border border-gray-200 rounded-lg px-2 text-gray-600 focus:outline-none focus:border-[#008C3C]"
+                />
+                {filterMonth !== 'all' && (
+                  <button onClick={() => setFilterMonth('all')} className="text-gray-400 hover:text-gray-600">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
 
@@ -1168,12 +1234,9 @@ export const TaxCalendarPage = () => {
                     </button>
                   {viewMode === 'paid' ? (
                     (() => {
-                      const compNitC = (company.nit ?? '').replace(/[^0-9]/g, '');
-                      const doneCount = obligations.filter(o => {
-                        const oNitC = (o.nit ?? '').replace(/[^0-9]/g, '');
-                        const match = (compNitC && oNitC && compNitC === oNitC) || normalize(o.company) === normalize(company.name);
-                        return match && (o.status === 'Presentado' || o.status === 'Pagado');
-                      }).length;
+                      const doneCount = obligations.filter(o =>
+                        belongsToCompany(o, company) && (o.status === 'Presentado' || o.status === 'Pagado')
+                      ).length;
                       return (
                         <span className="text-[10px] text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full font-semibold">
                           {doneCount} al día
@@ -1303,7 +1366,7 @@ export const TaxCalendarPage = () => {
                                 : <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-gray-200" />}
                               {displayTax(dianObl.taxType)}
                             </div>
-                            <div className="col-span-3 text-gray-400 truncate">{dianObl.period}</div>
+                            <div className="col-span-3 text-gray-400 truncate">{normalizePeriod(dianObl.period)}</div>
                             <div className="col-span-2 text-center font-mono text-gray-500">{fmtDate(effectiveDate)}</div>
                             <div className="col-span-2 text-right">
                               <span
@@ -1318,6 +1381,23 @@ export const TaxCalendarPage = () => {
                           <div className="flex items-center gap-2 px-4 pb-2 pl-8 flex-wrap">
                             <AmountCell field="projected" label="Proyectado" />
                             <AmountCell field="paid" label="Pagado" />
+                            <span
+                              className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]
+                                ${matched?.status === 'Pagado'
+                                  ? 'border-green-100 bg-green-50 text-green-700'
+                                  : 'border-dashed border-gray-200 text-gray-400'}`}
+                            >
+                              <span className="font-medium">¿Pagado?:</span>
+                              <span>{matched?.status === 'Pagado' ? 'Sí' : 'No'}</span>
+                            </span>
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 text-[11px] text-gray-500">
+                              <span className="font-medium">Fecha de pago:</span>
+                              <span>
+                                {matched?.paidAt
+                                  ? new Date(matched.paidAt).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'America/Bogota' })
+                                  : '—'}
+                              </span>
+                            </span>
                             {matched?.presentedAt && (
                               <span className="text-[10px] text-purple-600 flex items-center gap-0.5">
                                 <CheckCircle2 className="w-3 h-3" />
@@ -1350,7 +1430,7 @@ export const TaxCalendarPage = () => {
             </DialogTitle>
             {quickEditMode && editObl && editObl.id !== '__new__' && (
               <p className="text-xs text-gray-400 mt-0.5 truncate">
-                {(editObl as TaxObligation).taxType} · {(editObl as TaxObligation).period} · {fmtDate((editObl as TaxObligation).dueDate)}
+                {(editObl as TaxObligation).taxType} · {normalizePeriod((editObl as TaxObligation).period)} · {fmtDate((editObl as TaxObligation).dueDate)}
               </p>
             )}
           </DialogHeader>
@@ -1717,28 +1797,21 @@ export const TaxCalendarPage = () => {
                   );
                 })()}
 
-                {/* Valores proyectado / pagado / fecha de pago */}
-                <div className="mt-4 grid grid-cols-3 gap-3">
+                {/* Fechas de presentación / pago — independientes entre sí */}
+                <div className="mt-4 grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-gray-700">
-                      Valor proyectado
-                    </Label>
+                    <Label className="text-xs text-gray-500">Fecha de presentación</Label>
                     <Input
-                      type="number" min="0"
-                      value={formProjected}
-                      onChange={e => setFormProjected(e.target.value)}
-                      placeholder="Opcional"
+                      type="date"
+                      value={formPresentedAt}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setFormPresentedAt(v);
+                        savePresentedAtNow(v);
+                      }}
+                      onBlur={e => savePresentedAtNow(e.target.value)}
                       className="text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Valor pagado (COP)</Label>
-                    <Input
-                      type="number" min="0"
-                      value={formPaid}
-                      onChange={e => setFormPaid(e.target.value)}
-                      placeholder="0"
-                      className="text-sm"
+                      disabled={!canMarkPresented}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1754,6 +1827,43 @@ export const TaxCalendarPage = () => {
                       onBlur={e => savePaidAtNow(e.target.value)}
                       className="text-sm"
                       disabled={!canMarkPaid}
+                    />
+                  </div>
+                </div>
+
+                {/* Valores proyectado / presentado / pagado */}
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-gray-700">
+                      Valor proyectado
+                    </Label>
+                    <Input
+                      type="number" min="0"
+                      value={formProjected}
+                      onChange={e => setFormProjected(e.target.value)}
+                      placeholder="Opcional"
+                      className="text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-purple-700">Valor presentado (COP)</Label>
+                    <Input
+                      type="number" min="0"
+                      value={formPresented}
+                      onChange={e => setFormPresented(e.target.value)}
+                      placeholder="0"
+                      className="text-sm"
+                      disabled={!canMarkPresented}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-500">Valor pagado (COP)</Label>
+                    <Input
+                      type="number" min="0"
+                      value={formPaid}
+                      onChange={e => setFormPaid(e.target.value)}
+                      placeholder="0"
+                      className="text-sm"
                     />
                   </div>
                 </div>
@@ -2194,6 +2304,16 @@ export const TaxCalendarPage = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <TaxImportPreviewDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        plan={importPlan}
+        loading={importLoading}
+        error={importError}
+        applying={applyingImport}
+        onApply={applyImport}
+      />
 
     </div>
   );

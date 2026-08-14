@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
-  Building2, Plus, Pencil, Search, Loader2, BarChart2,
+  Building2, Plus, Pencil, Search, Loader2,
   Users, Upload, Download, BriefcaseBusiness, UserRoundX, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -279,9 +279,6 @@ export const CompaniesPage = () => {
                     onClick={() => navigate(`/empresas/${c.id}`)}
                   >
                     <Users className="w-3.5 h-3.5 mr-1" /> Abrir empresa
-                  </Button>
-                  <Button size="sm" variant="outline" className="text-xs" title="Analítica histórica" onClick={() => navigate(`/empresas/${c.id}/analytics`)}>
-                    <BarChart2 className="w-3.5 h-3.5" />
                   </Button>
                   <Button size="sm" variant="outline" className="text-xs" title="Configurar empresa" onClick={() => navigate('/configuraciones/empresas')}><Pencil className="w-3.5 h-3.5" /></Button>
                 </div>

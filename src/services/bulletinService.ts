@@ -123,7 +123,8 @@ class BulletinService {
       const data = d.data();
       return {
         id: d.id,
-        email: data.email ?? '',
+        email: data.email,
+        phone: data.phone,
         name: data.name,
         source: data.source,
         viewedAt: data.viewedAt?.toDate?.()?.toISOString() ?? new Date().toISOString(),

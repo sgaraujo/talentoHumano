@@ -12,9 +12,6 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { functions, storage, db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS } from '@/config/firestoreCollections';
-import { userService } from '@/services/userService';
-import { companyService } from '@/services/companyService';
-import { projectService } from '@/services/projectService';
 import { rolesService } from '@/services/rolesService';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -170,9 +167,33 @@ export const AccountingMessagesPage = () => {
   const cargarEnEditor = (m: any) => {
     setSubject(m.subject || '');
     setBody(m.body || '');
+    setTargetType('manual');
+    setTargetIds([]);
+    const normalizeEmail = (value: string) => String(value || '').trim().toLowerCase();
+    const selectedRecipients = (m.recipients ?? []).map((savedEmail: string, index: number) => {
+      const email = normalizeEmail(savedEmail);
+      const existingUser = allUsers.find(candidate => [
+        candidate.location?.corporateEmail,
+        candidate.location?.personalEmail,
+        candidate.email,
+      ].some(candidateEmail => normalizeEmail(candidateEmail) === email));
+
+      return existingUser ?? {
+        id: `history-${m.id}-${index}`,
+        fullName: email.split('@')[0] || email,
+        role: 'colaborador',
+        email,
+        location: { corporateEmail: email },
+        contractInfo: { assignment: {} },
+      };
+    });
+    setManualUsers(selectedRecipients);
+    setEmpSearch('');
     setSent(false);
     composeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    toast.success('Mensaje cargado en el editor');
+    toast.success('Mensaje y destinatarios cargados', {
+      description: 'Ahora puedes buscar y agregar más colaboradores antes de enviarlo.',
+    });
   };
 
   const reenviar = async (m: any) => {
@@ -229,15 +250,27 @@ export const AccountingMessagesPage = () => {
 
   // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    Promise.all([
-      userService.getAll(),
-      companyService.getAll(),
-      projectService.getAll(),
-    ]).then(([users, comps, projs]) => {
-      setAllUsers(users);
-      setCompanies(comps.filter((c: any) => c.active).sort((a: any, b: any) => a.name.localeCompare(b.name, 'es')));
-      setProjects(projs.sort((a: any, b: any) => a.name.localeCompare(b.name, 'es')));
-    }).catch(() => {}).finally(() => setLoading(false));
+    const loadDirectory = async () => {
+      try {
+        const callable = httpsCallable(functions, 'getAccountingMessageDirectory');
+        const response = await callable();
+        const directory = response.data as { users?: any[]; companies?: any[]; projects?: any[] };
+        setAllUsers(directory.users ?? []);
+        setCompanies((directory.companies ?? [])
+          .filter((company: any) => company.active)
+          .sort((a: any, b: any) => a.name.localeCompare(b.name, 'es')));
+        setProjects((directory.projects ?? [])
+          .sort((a: any, b: any) => a.name.localeCompare(b.name, 'es')));
+      } catch (error: any) {
+        toast.error('No fue posible cargar los destinatarios', {
+          description: error?.details || error?.message || 'Intenta recargar la página.',
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDirectory();
 
     if (user?.email) {
       rolesService.getByEmail(user.email).then(p => { if (p?.name) setSenderName(p.name); }).catch(() => {});
@@ -247,9 +280,18 @@ export const AccountingMessagesPage = () => {
   // ── Resolve recipients ────────────────────────────────────────────────────
   const empResults = useMemo(() => {
     if (empSearch.trim().length < 2) return [];
-    const q = empSearch.toLowerCase();
+    const normalizeSearch = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+    const q = normalizeSearch(empSearch);
     const sel = new Set(manualUsers.map(u => u.id));
-    return allUsers.filter(u => !sel.has(u.id) && u.fullName?.toLowerCase().includes(q)).slice(0, 12);
+    return allUsers
+      .filter(u => u.role === 'colaborador' || u.role === 'lider')
+      .filter(u => !sel.has(u.id) && normalizeSearch(u.fullName || '').includes(q))
+      .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'es'));
   }, [empSearch, allUsers, manualUsers]);
 
   const recipients = useMemo(() => {
@@ -364,11 +406,20 @@ export const AccountingMessagesPage = () => {
         name:  r.userName || r.name || r.userEmail || r.email,
         email: r.userEmail || r.email,
       })).filter((r: any) => r.email);
-      await fn({ subject, body, recipients: recipientList, attachments: atts });
+      const response = await fn({ subject, body, recipients: recipientList, attachments: atts });
+      const result = response.data as { sent?: number; failed?: number; failedRecipients?: string[] };
       setSent(true);
-      toast.success('Mensaje enviado', { description: `${recipients.length} destinatario${recipients.length !== 1 ? 's' : ''}` });
+      if ((result.failed ?? 0) > 0) {
+        toast.warning('Mensaje enviado parcialmente', {
+          description: `${result.sent ?? 0} enviados · ${result.failed} fallidos`,
+        });
+      } else {
+        const sentCount = result.sent ?? recipients.length;
+        toast.success('Mensaje enviado', { description: `${sentCount} destinatario${sentCount !== 1 ? 's' : ''}` });
+      }
     } catch (e: any) {
-      toast.error('Error al enviar', { description: e.message });
+      const description = e?.details || e?.message || 'No fue posible enviar el mensaje.';
+      toast.error('Error al enviar', { description });
     } finally {
       setSending(false);
     }
@@ -501,21 +552,29 @@ export const AccountingMessagesPage = () => {
                       />
                     </div>
                     {empResults.length > 0 && (
-                      <div className="border border-gray-200 rounded-lg mb-2 max-h-40 overflow-y-auto">
-                        {empResults.map(u => (
-                          <button key={u.id} type="button"
-                            onClick={() => { setManualUsers(prev => [...prev, u]); setEmpSearch(''); }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-[#008C3C]/10 flex items-center justify-center text-[10px] font-bold text-[#008C3C] flex-shrink-0">
-                              {u.fullName?.charAt(0)}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-gray-800 truncate">{u.fullName}</p>
-                              <p className="text-[11px] text-gray-400 truncate">{u.contractInfo?.assignment?.company}</p>
-                            </div>
-                          </button>
-                        ))}
+                      <div className="border border-gray-200 rounded-lg mb-2 overflow-hidden">
+                        <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 bg-gray-50 border-b border-gray-100">
+                          {empResults.length} resultado{empResults.length !== 1 ? 's' : ''}
+                        </p>
+                        <div className="max-h-56 overflow-y-auto">
+                          {empResults.map(u => (
+                            <button key={u.id} type="button"
+                              onClick={() => { setManualUsers(prev => [...prev, u]); setEmpSearch(''); }}
+                              className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-[#008C3C]/10 flex items-center justify-center text-[10px] font-bold text-[#008C3C] flex-shrink-0">
+                                {u.fullName?.charAt(0)}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-800 truncate">{u.fullName}</p>
+                                <p className="text-[11px] text-gray-400 truncate">{u.contractInfo?.assignment?.company}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
                       </div>
+                    )}
+                    {empSearch.trim().length >= 2 && empResults.length === 0 && (
+                      <p className="text-xs text-gray-400 text-center py-2">No se encontraron colaboradores activos.</p>
                     )}
                     {manualUsers.length > 0 && (
                       <div className="space-y-1">
@@ -834,12 +893,32 @@ export const AccountingMessagesPage = () => {
                               📎 {(m.attachments as string[]).join(', ')}
                             </p>
                           )}
+                          {m.recipients?.length > 0 && (
+                            <div className="mt-3 bg-white border border-gray-100 rounded-lg overflow-hidden">
+                              <div className="flex items-center justify-between px-3 py-2 bg-blue-50 border-b border-blue-100">
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-blue-600 flex items-center gap-1.5">
+                                  <Users className="w-3 h-3" /> Destinatarios enviados
+                                </p>
+                                <span className="text-[10px] font-semibold text-blue-600">
+                                  {m.recipients.length}
+                                </span>
+                              </div>
+                              <div className="max-h-40 overflow-y-auto divide-y divide-gray-50">
+                                {(m.recipients as string[]).map((email, recipientIndex) => (
+                                  <div key={`${email}-${recipientIndex}`} className="flex items-center gap-2 px-3 py-1.5">
+                                    <Mail className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                                    <span className="text-xs text-gray-600 truncate">{email}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <div className="flex gap-2 mt-3">
                             <button
                               onClick={() => cargarEnEditor(m)}
                               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 transition-colors"
                             >
-                              <Copy className="w-3 h-3" /> Cargar en editor
+                              <Copy className="w-3 h-3" /> Editar y agregar destinatarios
                             </button>
                             <button
                               onClick={() => reenviar(m)}

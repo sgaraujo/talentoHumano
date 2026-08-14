@@ -9,7 +9,7 @@ import {
   AlertTriangle, CheckCircle2, Cake, Clock,
   Filter, X, MapPin, VenusAndMars, UsersRound, BarChart3,
 } from 'lucide-react';
-import { userService } from '@/services/userService';
+import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
 import { analyticsService } from '@/services/analyticsService';
 import { companyService } from '@/services/companyService';
 import { projectService } from '@/services/projectService';
@@ -130,7 +130,7 @@ export const DashboardPage = () => {
     (async () => {
       try {
         const [users, movs, comps, projs] = await Promise.all([
-          userService.getAll(),
+          getEmployeeDirectoryUsers(),
           analyticsService.getMovements(),
           companyService.getAll(),
           projectService.getAll(),
@@ -158,11 +158,17 @@ export const DashboardPage = () => {
     [companies]
   );
 
+  // Un colaborador puede tener varias asignaciones activas (multi-empresa/proyecto);
+  // usar solo contractInfo.assignment (la primera) subcontaba a esas personas en
+  // el resto de sus empresas/proyectos y descuadraba los totales frente a
+  // "Empresas y dotación", que sí recorre todas las relaciones activas.
+  const assignmentsOf = (u: any): Array<{ company?: string; project?: string }> =>
+    u._assignments?.length ? u._assignments : [u.contractInfo?.assignment].filter(Boolean);
+
   const companyOptions = useMemo(() => {
     const names = new Set<string>();
     allUsers.filter(u => u.role === 'colaborador').forEach(u => {
-      const c = u.contractInfo?.assignment?.company?.trim();
-      if (c) names.add(c);
+      assignmentsOf(u).forEach(a => { const c = a.company?.trim(); if (c) names.add(c); });
     });
     return [...names].sort((a, b) => a.localeCompare(b, 'es'));
   }, [allUsers]);
@@ -170,8 +176,7 @@ export const DashboardPage = () => {
   const projectOptions = useMemo(() => {
     const names = new Set<string>();
     allUsers.filter(u => u.role === 'colaborador').forEach(u => {
-      const p = u.contractInfo?.assignment?.project?.trim();
-      if (p) names.add(p);
+      assignmentsOf(u).forEach(a => { const p = a.project?.trim(); if (p) names.add(p); });
     });
     return [...names].sort((a, b) => a.localeCompare(b, 'es'));
   }, [allUsers]);
@@ -188,7 +193,7 @@ export const DashboardPage = () => {
   const activeUsers = useMemo(() =>
     allUsers.filter(u => {
       if (u.role !== 'colaborador') return false;
-      if (filterCompany !== 'all' && u.contractInfo?.assignment?.company?.trim() !== filterCompany) return false;
+      if (filterCompany !== 'all' && !assignmentsOf(u).some(a => a.company?.trim() === filterCompany)) return false;
       return true;
     }),
     [allUsers, filterCompany]
@@ -265,26 +270,43 @@ export const DashboardPage = () => {
   );
 
   // ── Company headcount (for cards) ──────────────────────────────────────────
+  // Se cuenta cada colaborador una sola vez por empresa (Set de ids), aunque
+  // tenga varias asignaciones activas en ella.
   const companyHeadcount = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, Set<string>>();
     allUsers.filter(u => u.role === 'colaborador').forEach(u => {
-      const c = u.contractInfo?.assignment?.company?.trim();
-      if (c) map.set(c, (map.get(c) ?? 0) + 1);
+      const companiesForUser = new Set(assignmentsOf(u).map(a => a.company?.trim()).filter(Boolean) as string[]);
+      companiesForUser.forEach(c => {
+        if (!map.has(c)) map.set(c, new Set());
+        map.get(c)!.add(u.id);
+      });
     });
-    return map;
+    return new Map([...map.entries()].map(([c, ids]) => [c, ids.size]));
   }, [allUsers]);
 
   // ── Demographic breakdowns ──────────────────────────────────────────────────
   const byCompany = useMemo(() => {
-    const map = new Map<string, number>();
-    activeUsers.forEach(u => { const c = u.contractInfo?.assignment?.company?.trim() || 'Sin empresa'; map.set(c, (map.get(c) ?? 0) + 1); });
-    return [...map.entries()].map(([name, value]) => ({ name: name.length > 28 ? name.slice(0, 26) + '…' : name, value })).sort((a, b) => b.value - a.value);
+    const map = new Map<string, Set<string>>();
+    activeUsers.forEach(u => {
+      const companiesForUser = new Set(assignmentsOf(u).map(a => a.company?.trim()).filter(Boolean) as string[]);
+      (companiesForUser.size ? companiesForUser : new Set(['Sin empresa'])).forEach(c => {
+        if (!map.has(c)) map.set(c, new Set());
+        map.get(c)!.add(u.id);
+      });
+    });
+    return [...map.entries()].map(([name, ids]) => ({ name: name.length > 28 ? name.slice(0, 26) + '…' : name, value: ids.size })).sort((a, b) => b.value - a.value);
   }, [activeUsers]);
 
   const byProject = useMemo(() => {
-    const map = new Map<string, number>();
-    activeUsers.forEach(u => { const p = u.contractInfo?.assignment?.project?.trim() || 'Sin proyecto'; map.set(p, (map.get(p) ?? 0) + 1); });
-    return [...map.entries()].map(([name, value]) => ({ name: name.length > 28 ? name.slice(0, 26) + '…' : name, value })).sort((a, b) => b.value - a.value);
+    const map = new Map<string, Set<string>>();
+    activeUsers.forEach(u => {
+      const projectsForUser = new Set(assignmentsOf(u).map(a => a.project?.trim()).filter(Boolean) as string[]);
+      (projectsForUser.size ? projectsForUser : new Set(['Sin proyecto'])).forEach(p => {
+        if (!map.has(p)) map.set(p, new Set());
+        map.get(p)!.add(u.id);
+      });
+    });
+    return [...map.entries()].map(([name, ids]) => ({ name: name.length > 28 ? name.slice(0, 26) + '…' : name, value: ids.size })).sort((a, b) => b.value - a.value);
   }, [activeUsers]);
 
   const byGender = useMemo(() => {

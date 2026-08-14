@@ -17,7 +17,6 @@ import ExportQueueTable from './views/Exporter/ExporterPage';
 import { CompaniesPage } from './views/Companies/CompaniesPage';
 import { CompanyWorkforcePage } from './views/Companies/CompanyWorkforcePage';
 import { CompanySettingsPage } from './views/Companies/CompanySettingsPage';
-import { CompanyAnalyticsPage } from './views/Companies/CompanyAnalyticsPage';
 import { ProjectsPage } from './views/Projects/ProjectsPage';
 import { CommunicationsPage } from './views/Communications/CommunicationsPage';
 import { ReadCommunicationPage } from './views/Public/ReadCommunicationPage';
@@ -30,6 +29,7 @@ import { QuestionnaireSendStatsPage } from './views/Questionnaires/Questionnaire
 import { PublicFormPage } from './views/Public/PublicFormPage';
 import { EmailSendStatsPage } from './views/Questionnaires/EmailSendStatsPage';
 import { WhatsAppPage } from './views/WhatsApp/WhatsAppPage';
+import { WhatsAppStatsPage } from './views/WhatsApp/WhatsAppStatsPage';
 import { BulletinsPage } from './views/Bulletins/BulletinsPage';
 import { BulletinEditorPage } from './views/Bulletins/BulletinEditorPage';
 import { BulletinViewPage } from './views/Bulletins/BulletinViewPage';
@@ -212,15 +212,6 @@ function App() {
         />
 
         <Route
-          path="/empresas/:companyId/analytics"
-          element={
-            loading ? null
-            : isAuthenticated ? <MainLayout><CompanyAnalyticsPage /></MainLayout>
-            : <Navigate to="/login" />
-          }
-        />
-
-        <Route
           path="/empresas/:companyId"
           element={
             loading ? null
@@ -286,6 +277,15 @@ function App() {
           element={
             loading ? null
             : isAuthenticated ? <MainLayout><WhatsAppPage /></MainLayout>
+            : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/estadisticas-whatsapp"
+          element={
+            loading ? null
+            : isAuthenticated ? <MainLayout><WhatsAppStatsPage /></MainLayout>
             : <Navigate to="/login" />
           }
         />

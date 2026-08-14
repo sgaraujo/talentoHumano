@@ -29,7 +29,7 @@ export const ROLE_MODULES: Record<AppRole, string[]> = {
   admin: ['*'],   // todos
   talento_humano: [
     '/dashboard', '/talento-humano/control', '/empresas', '/proyectos',
-    '/comunicaciones', '/boletines', '/whatsapp', '/notificaciones', '/rotacion-talento',
+    '/comunicaciones', '/boletines', '/whatsapp', '/estadisticas-whatsapp', '/notificaciones', '/rotacion-talento',
     '/chatbot', '/busqueda', '/exportador', '/questionarios',
     '/archivo', '/configuraciones', '/manual',
   ],

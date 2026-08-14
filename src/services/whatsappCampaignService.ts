@@ -1,8 +1,9 @@
-import { collection, collectionGroup, getDocs, limit, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import * as XLSX from "xlsx";
 import { db, functions } from "@/config/firebase";
 import { FIRESTORE_COLLECTIONS } from "@/config/firestoreCollections";
+import { getEmployeeDirectoryUsers } from "@/services/employeeDirectoryService";
 import type { Company } from "@/models/types/Company";
 import type { Project } from "@/models/types/Project";
 import type { User } from "@/models/types/User";
@@ -16,67 +17,19 @@ export function normalizeWhatsAppPhone(value: unknown): string | null {
   return phone;
 }
 
-function mapUser(d: any): User {
-  return { id: d.id, ...d.data() } as User;
-}
-
 export async function getCampaignAudienceData(): Promise<{
   companies: Company[]; projects: Project[]; users: User[];
   contents: Array<{ id: string; type: "bulletin" | "questionnaire"; title: string; url: string }>;
 }> {
-  const [companiesSnap, projectsSnap, usersSnap, employeesSnap, employmentsSnap, bulletinsSnap, questionnairesSnap] = await Promise.all([
+  const [companiesSnap, projectsSnap, canonicalUsers, bulletinsSnap, questionnairesSnap] = await Promise.all([
     getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.projects)),
-    getDocs(collection(db, FIRESTORE_COLLECTIONS.users)),
-    getDocs(collection(db, FIRESTORE_COLLECTIONS.employees)),
-    getDocs(collectionGroup(db, "employments")),
+    getEmployeeDirectoryUsers(),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.bulletins)),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaires)),
   ]);
   const companies = companiesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company));
   const projects = projectsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
-  // Clave de comparación, no de presentación: hace equivalentes, por ejemplo,
-  // "INTEEGRA S.A.S BIC" e "INTEEGRA SAS BIC".
-  const normalize = (value: unknown) => String(value ?? "").trim().normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").replace(/[^a-z0-9]/g, "");
-  const companyIdByName = new Map(companies.map(company => [normalize(company.name), company.id]));
-  const projectIdByCompanyAndName = new Map(projects.map(project => [
-    `${project.companyId}|${normalize(project.name)}`, project.id,
-  ]));
-  const employmentsByEmployee = new Map<string, any[]>();
-  employmentsSnap.docs.forEach(snapshot => {
-    const relationship = snapshot.data() as any;
-    const employeeId = relationship.employeeId || snapshot.ref.parent.parent?.id;
-    if (!employeeId) return;
-    if (!employmentsByEmployee.has(employeeId)) employmentsByEmployee.set(employeeId, []);
-    employmentsByEmployee.get(employeeId)!.push(relationship);
-  });
-  const canonicalUsers = employeesSnap.docs.map(snapshot => {
-    const employee = snapshot.data() as any;
-    const activeRelationships = (employmentsByEmployee.get(snapshot.id) ?? []).filter(item => item.status === "active");
-    const assignments = activeRelationships.map(relationship => {
-      const companyId = companyIdByName.get(normalize(relationship.companyName));
-      const projectId = companyId
-        ? projectIdByCompanyAndName.get(`${companyId}|${normalize(relationship.projectName)}`)
-        : undefined;
-      return { companyId, projectId, company: relationship.companyName, project: relationship.projectName };
-    });
-    return {
-      id: employee.identityUserId || `employee:${snapshot.id}`,
-      fullName: employee.fullName,
-      email: employee.corporateEmail || employee.personalEmail || "",
-      role: activeRelationships.length ? "colaborador" : "excolaborador",
-      profileCompleted: false, completedOnboardings: [],
-      companyIds: [...new Set(assignments.map(item => item.companyId).filter(Boolean))],
-      projectIds: [...new Set(assignments.map(item => item.projectId).filter(Boolean))],
-      personalData: { documentNumber: employee.documentNumber, phone: employee.personalPhone },
-      location: { corporatePhone: employee.corporatePhone },
-      contractInfo: { assignment: assignments[0] ?? {} },
-      _assignments: assignments,
-    } as any as User;
-  });
-  const canonicalIdentityIds = new Set(canonicalUsers.map(user => user.id).filter(id => !id.startsWith("employee:")));
-  const legacyFallback = usersSnap.docs.map(mapUser).filter(user => !canonicalIdentityIds.has(user.id));
   const baseUrl = (import.meta.env.VITE_APP_URL ?? window.location.origin).replace(/\/$/, "");
   const contents = [
     ...bulletinsSnap.docs
@@ -89,7 +42,7 @@ export async function getCampaignAudienceData(): Promise<{
   return {
     companies: companies.sort((a, b) => a.name.localeCompare(b.name)),
     projects: projects.sort((a, b) => a.name.localeCompare(b.name)),
-    users: [...canonicalUsers, ...legacyFallback],
+    users: canonicalUsers,
     contents,
   };
 }
@@ -143,6 +96,7 @@ export async function parseExternalContacts(file: File): Promise<WaCampaignRecip
 
 export type WaCampaignResult = {
   id: string; name: string; status: string; total: number; sent: number; failed: number;
+  skipped?: number; error?: string;
   delivered?: number; read?: number; deliveryFailed?: number;
   createdAt?: Date;
 };
@@ -164,8 +118,8 @@ export async function getCampaignRecipients(campaignId: string): Promise<WaCampa
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as WaCampaignRecipientResult));
 }
 
-export async function sendCampaign(draft: WaCampaignDraft): Promise<{ campaignId: string; queued: number; sent: number; failed: number }> {
-  const fn = httpsCallable<WaCampaignDraft, { campaignId: string; queued: number; sent: number; failed: number }>(functions, "sendWaCampaign");
+export async function sendCampaign(draft: WaCampaignDraft): Promise<{ campaignId: string; queued: number; sent: number; failed: number; skipped?: number; error?: string }> {
+  const fn = httpsCallable<WaCampaignDraft, { campaignId: string; queued: number; sent: number; failed: number; skipped?: number; error?: string }>(functions, "sendWaCampaign");
   const result = await fn(draft);
   return result.data;
 }

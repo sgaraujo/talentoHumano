@@ -112,7 +112,9 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
         name: campaignName.trim(), numberId, companyId: companyId || undefined,
         projectId: projectId || undefined, templateId, parameterValues, recipients,
       });
-      if (result.failed > 0) {
+      if (result.error) {
+        toast.error("La campaña se detuvo", { description: result.error, duration: 12000 });
+      } else if (result.failed > 0) {
         toast.warning(`Envío terminado: ${result.sent} aceptados por Meta y ${result.failed} con error.`);
       } else {
         toast.success(`${result.sent} mensajes aceptados por Meta. Consulta abajo si fueron entregados o leídos.`);
@@ -301,12 +303,15 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
             {campaigns.map(campaign => (
               <div key={campaign.id} className="border border-gray-200 rounded-lg overflow-hidden">
                 <button type="button" onClick={() => toggleCampaign(campaign.id)} className="w-full p-3 text-left hover:bg-gray-50 flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center ${campaign.failed ? "bg-amber-50 text-amber-600" : "bg-green-50 text-green-600"}`}>
-                    {campaign.failed ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center ${campaign.status === "stopped" ? "bg-red-50 text-red-600" : campaign.failed ? "bg-amber-50 text-amber-600" : "bg-green-50 text-green-600"}`}>
+                    {campaign.status === "stopped" || campaign.failed ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-gray-800 truncate">{campaign.name}</p>
-                    <p className="text-xs text-gray-500">{campaign.total} destinatarios · {campaign.sent} aceptados · {campaign.failed} errores</p>
+                    <p className="text-xs text-gray-500">
+                      {campaign.total} destinatarios · {campaign.sent} aceptados · {campaign.failed} errores
+                      {(campaign.skipped ?? 0) > 0 && ` · ${campaign.skipped} omitidos`}
+                    </p>
                   </div>
                   <div className="hidden sm:flex gap-2 text-[11px]">
                     <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700">Entregados {campaign.delivered ?? 0}</span>
@@ -315,15 +320,21 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
                   </div>
                   {expandedCampaignId === campaign.id ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                 </button>
+                {campaign.error && (
+                  <div className="px-3 py-2 bg-red-50 border-t border-red-100 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-700">{campaign.error}</p>
+                  </div>
+                )}
                 {expandedCampaignId === campaign.id && (
                   <div className="border-t border-gray-100 max-h-72 overflow-y-auto">
                     {loadingRecipients ? <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-[#00a884]" /></div> : campaignRecipients.map(recipient => {
                       const state = recipient.deliveryStatus || recipient.status;
-                      const label = state === "read" ? "Leído" : state === "delivered" ? "Entregado" : state === "failed" ? "Fallido" : state === "sent" || state === "pending" ? "Aceptado" : state;
+                      const label = state === "read" ? "Leído" : state === "delivered" ? "Entregado" : state === "failed" ? "Fallido" : state === "skipped" ? "Omitido" : state === "sent" || state === "pending" ? "Aceptado" : state;
                       return <div key={recipient.id} className="px-3 py-2 border-b last:border-0 border-gray-100 flex items-center gap-3">
                         <div className="min-w-0 flex-1"><p className="text-sm text-gray-700 truncate">{recipient.name || recipient.phone}</p><p className="text-xs text-gray-400">+{recipient.phone}</p></div>
-                        <span className={`text-xs font-medium ${state === "failed" ? "text-red-600" : state === "read" ? "text-green-600" : state === "delivered" ? "text-blue-600" : "text-gray-500"}`}>{state === "read" && <Eye className="inline w-3.5 h-3.5 mr-1" />}{label}</span>
-                        {recipient.error && <span title={recipient.error} className="text-red-500"><AlertCircle className="w-4 h-4" /></span>}
+                        <span className={`text-xs font-medium ${state === "failed" ? "text-red-600" : state === "skipped" ? "text-gray-400" : state === "read" ? "text-green-600" : state === "delivered" ? "text-blue-600" : "text-gray-500"}`} title={recipient.error}>{state === "read" && <Eye className="inline w-3.5 h-3.5 mr-1" />}{label}</span>
+                        {recipient.error && state !== "skipped" && <span title={recipient.error} className="text-red-500"><AlertCircle className="w-4 h-4" /></span>}
                       </div>;
                     })}
                   </div>

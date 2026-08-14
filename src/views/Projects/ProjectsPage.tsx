@@ -13,7 +13,7 @@ import {
 import {
   Loader2, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
   Users, UserMinus, FolderKanban, Crown, X, Check, Search,
-  Building2, MapPin, Download,
+  Building2, MapPin, Download, Power, Ban,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { projectService } from '@/services/projectService';
@@ -247,6 +247,17 @@ export const ProjectsPage = () => {
     }
   };
 
+  const handleToggleStatus = async (p: Project) => {
+    const newStatus: Project['status'] = p.status === 'inactivo' ? 'activo' : 'inactivo';
+    try {
+      await projectService.update(p.id, { status: newStatus });
+      setProjects(prev => prev.map(x => x.id === p.id ? { ...x, status: newStatus } : x));
+      toast.success(newStatus === 'inactivo' ? 'Proyecto inactivado' : 'Proyecto reactivado');
+    } catch (e: any) {
+      toast.error('Error', { description: e.message });
+    }
+  };
+
   // ── Leader ────────────────────────────────────────────────────────────────
   const startEditLeader = (p: Project) => {
     setEditingLeader(p.id);
@@ -387,8 +398,8 @@ export const ProjectsPage = () => {
             <SelectContent>
               <SelectItem value="all">Todos los estados</SelectItem>
               <SelectItem value="activo">Activo</SelectItem>
-              <SelectItem value="pausado">Pausado</SelectItem>
-              <SelectItem value="finalizado">Finalizado</SelectItem>
+              <SelectItem value="inactivo">Inactivo</SelectItem>
+              <SelectItem value="completado">Completado</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -439,8 +450,12 @@ export const ProjectsPage = () => {
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-[#4A4A4A]">{p.name}</span>
-                      <Badge variant="outline" className="text-[10px] px-1.5 capitalize text-[#008C3C] border-[#008C3C]/30">
+                      <span className={`font-semibold ${p.status === 'inactivo' ? 'text-gray-400' : 'text-[#4A4A4A]'}`}>{p.name}</span>
+                      <Badge variant="outline" className={`text-[10px] px-1.5 capitalize ${
+                        p.status === 'inactivo' ? 'text-gray-500 border-gray-300 bg-gray-50'
+                        : p.status === 'completado' ? 'text-blue-600 border-blue-300 bg-blue-50'
+                        : 'text-[#008C3C] border-[#008C3C]/30'
+                      }`}>
                         {p.status}
                       </Badge>
                       {p.priority && (
@@ -529,6 +544,17 @@ export const ProjectsPage = () => {
                     <button onClick={() => openEdit(p)}
                       className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#1F8FBF] hover:bg-[#1F8FBF]/10 transition-colors">
                       <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleToggleStatus(p)}
+                      title={p.status === 'inactivo' ? 'Reactivar proyecto' : 'Inactivar proyecto'}
+                      className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                        p.status === 'inactivo'
+                          ? 'text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10'
+                          : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'
+                      }`}
+                    >
+                      {p.status === 'inactivo' ? <Power className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
                     </button>
                     <button onClick={() => handleDelete(p)}
                       className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">

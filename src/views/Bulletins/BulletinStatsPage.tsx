@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
 } from 'recharts';
 import {
-  ArrowLeft, Eye, Users, Mail, LogIn, TrendingUp, Calendar, Loader2,
+  ArrowLeft, Eye, Users, Mail, LogIn, MessageCircle, TrendingUp, Calendar, Loader2,
 } from 'lucide-react';
 import { bulletinService } from '@/services/bulletinService';
 import type { Bulletin, BulletinViewEntry } from '@/models/types/Bulletin';
@@ -39,9 +39,20 @@ function initials(email: string) {
     .split(' ').slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('');
 }
 
+// La identidad de la vista: email si vino por correo o sesión, teléfono si
+// vino por WhatsApp (esos envíos no siempre tienen email disponible).
+function identityOf(v: BulletinViewEntry) {
+  return v.email || (v.phone ? `+${v.phone}` : '') || 'Desconocido';
+}
+
+function avatarLabel(v: BulletinViewEntry) {
+  return v.source === 'whatsapp' ? 'WA' : initials(v.email || '');
+}
+
 const GREEN   = '#008C3C';
 const LBLUE   = '#3b82f6';
-const PIE_COLORS = [GREEN, LBLUE, '#f59e0b', '#8b5cf6'];
+const WA_TEAL = '#00a884';
+const PIE_COLORS = [GREEN, WA_TEAL, LBLUE, '#8b5cf6'];
 
 // ── stat card ────────────────────────────────────────────────────────────────
 
@@ -99,9 +110,10 @@ export function BulletinStatsPage() {
 
   // ── derived data ────────────────────────────────────────────────────────────
 
-  const unique   = useMemo(() => new Set(views.map(v => v.email)).size, [views]);
-  const byEmail  = useMemo(() => views.filter(v => v.source === 'email').length, [views]);
-  const byAuth   = useMemo(() => views.filter(v => v.source === 'auth').length, [views]);
+  const unique     = useMemo(() => new Set(views.map(identityOf)).size, [views]);
+  const byEmail    = useMemo(() => views.filter(v => v.source === 'email').length, [views]);
+  const byAuth     = useMemo(() => views.filter(v => v.source === 'auth').length, [views]);
+  const byWhatsapp = useMemo(() => views.filter(v => v.source === 'whatsapp').length, [views]);
 
   // Views grouped by day for area chart
   const viewsByDay = useMemo(() => {
@@ -128,17 +140,18 @@ export function BulletinStatsPage() {
   // Source pie data
   const pieData = useMemo(() => [
     { name: 'Email', value: byEmail },
+    { name: 'WhatsApp', value: byWhatsapp },
     { name: 'Sesión', value: byAuth },
-  ].filter(d => d.value > 0), [byEmail, byAuth]);
+  ].filter(d => d.value > 0), [byEmail, byWhatsapp, byAuth]);
 
-  // Top viewers (most views per email)
+  // Top viewers (most views per person)
   const topViewers = useMemo(() => {
     const map = new Map<string, number>();
-    views.forEach(v => map.set(v.email, (map.get(v.email) ?? 0) + 1));
+    views.forEach(v => { const key = identityOf(v); map.set(key, (map.get(key) ?? 0) + 1); });
     return Array.from(map.entries())
       .sort(([, a], [, b]) => b - a)
       .slice(0, 5)
-      .map(([email, count]) => ({ email, count }));
+      .map(([identity, count]) => ({ identity, count }));
   }, [views]);
 
   // ── loading / empty ─────────────────────────────────────────────────────────
@@ -177,11 +190,12 @@ export function BulletinStatsPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard icon={Eye}      label="Vistas totales"   value={views.length}  color={GREEN}  />
-        <StatCard icon={Users}    label="Personas únicas"  value={unique}         color="#3b82f6" />
-        <StatCard icon={Mail}     label="Por email"        value={byEmail}        color="#f59e0b" />
-        <StatCard icon={LogIn}    label="Por sesión"       value={byAuth}         color="#8b5cf6" />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        <StatCard icon={Eye}           label="Vistas totales"   value={views.length}  color={GREEN}  />
+        <StatCard icon={Users}         label="Personas únicas"  value={unique}         color="#3b82f6" />
+        <StatCard icon={Mail}          label="Por email"        value={byEmail}        color="#f59e0b" />
+        <StatCard icon={MessageCircle} label="Por WhatsApp"     value={byWhatsapp}     color={WA_TEAL} />
+        <StatCard icon={LogIn}         label="Por sesión"       value={byAuth}         color="#8b5cf6" />
       </div>
 
       {views.length === 0 ? (
@@ -189,7 +203,7 @@ export function BulletinStatsPage() {
           <Eye className="w-12 h-12 text-gray-200 mx-auto mb-4" />
           <p className="text-gray-500 font-medium">Aún no hay vistas registradas</p>
           <p className="text-sm text-gray-400 mt-1">
-            Las vistas aparecerán aquí cuando alguien abra el boletín por email o sesión
+            Las vistas aparecerán aquí cuando alguien abra el boletín por email, WhatsApp o sesión
           </p>
         </div>
       ) : (
@@ -293,15 +307,15 @@ export function BulletinStatsPage() {
                 </h2>
                 <div className="space-y-3">
                   {topViewers.map((v, i) => (
-                    <div key={v.email} className="flex items-center gap-3">
+                    <div key={v.identity} className="flex items-center gap-3">
                       <span className="w-5 text-xs text-gray-400 text-right flex-shrink-0">
                         {i + 1}
                       </span>
                       <div className="w-8 h-8 rounded-full bg-[#008C3C]/10 text-[#008C3C]
                                       flex items-center justify-center text-xs font-bold flex-shrink-0">
-                        {initials(v.email)}
+                        {initials(v.identity)}
                       </div>
-                      <p className="flex-1 text-sm text-gray-700 truncate">{v.email}</p>
+                      <p className="flex-1 text-sm text-gray-700 truncate">{v.identity}</p>
                       <span className="text-sm font-bold text-gray-900 flex-shrink-0">
                         {v.count}×
                       </span>
@@ -321,19 +335,19 @@ export function BulletinStatsPage() {
                   <div key={v.id ?? i} className="flex items-center gap-3 px-4 py-2.5">
                     <div className="w-7 h-7 rounded-full bg-[#008C3C]/10 text-[#008C3C]
                                     flex items-center justify-center text-[10px] font-bold flex-shrink-0">
-                      {initials(v.email)}
+                      {avatarLabel(v)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800 truncate">{v.email}</p>
+                      <p className="text-sm text-gray-800 truncate">{identityOf(v)}</p>
                       <p className="text-[10px] text-gray-400">{fmtDateTime(v.viewedAt)}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                        v.source === 'email'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-blue-100 text-blue-700'
+                        v.source === 'email' ? 'bg-emerald-100 text-emerald-700'
+                        : v.source === 'whatsapp' ? 'bg-teal-100 text-teal-700'
+                        : 'bg-blue-100 text-blue-700'
                       }`}>
-                        {v.source === 'email' ? 'Email' : 'Sesión'}
+                        {v.source === 'email' ? 'Email' : v.source === 'whatsapp' ? 'WhatsApp' : 'Sesión'}
                       </span>
                       <span className="text-[10px] text-gray-400 whitespace-nowrap">
                         {timeAgo(v.viewedAt)}

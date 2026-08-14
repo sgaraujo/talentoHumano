@@ -40,6 +40,7 @@ const GROUPS: MenuGroup[] = [
       { icon: MessageCircle, label: 'WhatsApp',           path: '/whatsapp' },
       { icon: Bell,          label: 'Notificaciones',     path: '/notificaciones' },
       { icon: Mail,          label: 'Estadísticas de correo', path: '/estadisticas-correos' },
+      { icon: BarChart2,     label: 'Estadísticas de WhatsApp', path: '/estadisticas-whatsapp' },
     ],
   },
   {

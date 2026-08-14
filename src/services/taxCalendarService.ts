@@ -3,9 +3,9 @@ import {
   query, orderBy, writeBatch, serverTimestamp, arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '../config/firestoreCollections';
+import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { TaxObligation, TaxStatus, StatusHistoryEntry } from '../models/types/TaxObligation';
-import type { Company } from '../models/types/Company';
+import { sameCompany, normTax, displayTax, correctDueDateAgainstCalendar, normalizePeriod } from '../domain/tax/taxIdentity';
 
 function toDate(v: any): Date | undefined {
   if (!v) return undefined;
@@ -56,31 +56,16 @@ class TaxCalendarService {
   }
 
   async update(id: string, data: Partial<Omit<TaxObligation, 'id' | 'createdAt'>>): Promise<void> {
-    await updateDoc(doc(db, this.col, id), { ...data, updatedAt: serverTimestamp() });
+    const normalized = data.period !== undefined ? { ...data, period: normalizePeriod(data.period) } : data;
+    await updateDoc(doc(db, this.col, id), { ...normalized, updatedAt: serverTimestamp() });
   }
 
+  /** El array statusHistory es la única fuente leída por la UI (panel de historial). */
   async appendStatusHistory(id: string, entry: StatusHistoryEntry): Promise<void> {
-    const batch = writeBatch(db);
-    const obligationRef = doc(db, this.col, id);
-    const historyRef = doc(collection(
-      db,
-      this.col,
-      id,
-      FIRESTORE_SUBCOLLECTIONS.taxObligationHistory,
-    ));
-
-    // Escritura dual temporal: la subcolección será la fuente oficial y el
-    // array mantiene compatibilidad con la interfaz durante la migración.
-    batch.update(obligationRef, {
+    await updateDoc(doc(db, this.col, id), {
       statusHistory: arrayUnion(entry),
       updatedAt: serverTimestamp(),
     });
-    batch.set(historyRef, {
-      ...entry,
-      obligationId: id,
-      createdAt: serverTimestamp(),
-    });
-    await batch.commit();
   }
 
   async getCompanyTaxSettings(): Promise<Record<string, string[]>> {
@@ -123,9 +108,28 @@ class TaxCalendarService {
     await deleteDoc(doc(db, this.col, id));
   }
 
+  /** Evita duplicados por doble clic o reintento de red: misma empresa, tipo de impuesto y vencimiento. */
   async create(obl: Omit<TaxObligation, 'id'>): Promise<string> {
+    // Si el vencimiento ingresado se desvía de la fecha oficial DIAN para el NIT
+    // de la empresa (p. ej. se tipeó la fecha del dígito de verificación
+    // equivocado), se corrige automáticamente antes de guardar.
+    const correction = correctDueDateAgainstCalendar(obl.nit, obl.taxType, obl.period, obl.dueDate);
+    const withCanonicalPeriod = { ...obl, period: normalizePeriod(obl.period) };
+    const finalObl = correction.corrected
+      ? { ...withCanonicalPeriod, dueDate: correction.dueDate, year: correction.dueDate.slice(0, 4) }
+      : withCanonicalPeriod;
+
+    const existing = await this.getAll();
+    const duplicate = existing.find(o =>
+      sameCompany(o, { id: finalObl.companyId, name: finalObl.company, nit: finalObl.nit }) &&
+      normTax(o.taxType) === normTax(finalObl.taxType) &&
+      o.dueDate === finalObl.dueDate,
+    );
+    if (duplicate) {
+      throw new Error(`Ya existe una obligación de "${displayTax(finalObl.taxType)}" con vencimiento ${finalObl.dueDate} para ${finalObl.company}.`);
+    }
     const ref = await addDoc(collection(db, this.col), {
-      ...obl,
+      ...finalObl,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -162,43 +166,6 @@ class TaxCalendarService {
     return docs.length;
   }
 
-  /**
-   * Compares tax obligations with companies by name (case-insensitive, trimmed).
-   * For each match, updates the obligation's `company` and `nit` fields with
-   * the values from the Company model.
-   * Returns the number of updated records.
-   */
-  async syncWithCompanies(companies: Company[]): Promise<number> {
-    const obligations = await this.getAll();
-
-    // Build a normalized name → company map
-    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
-    const companyMap = new Map<string, Company>();
-    companies.forEach(c => companyMap.set(normalize(c.name), c));
-
-    const BATCH_SIZE = 400;
-    let updated = 0;
-    const toUpdate: { id: string; company: string; nit: string }[] = [];
-
-    for (const obl of obligations) {
-      const match = companyMap.get(normalize(obl.company));
-      if (!match) continue;
-      // Only update if something actually differs
-      if (obl.nit === match.nit && obl.company === match.name) continue;
-      toUpdate.push({ id: obl.id, company: match.name, nit: match.nit });
-    }
-
-    for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
-      const batch = writeBatch(db);
-      toUpdate.slice(i, i + BATCH_SIZE).forEach(({ id, company, nit }) => {
-        batch.update(doc(db, this.col, id), { company, nit, updatedAt: serverTimestamp() });
-      });
-      await batch.commit();
-      updated += Math.min(BATCH_SIZE, toUpdate.length - i);
-    }
-
-    return updated;
-  }
 }
 
 export const taxCalendarService = new TaxCalendarService();

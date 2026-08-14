@@ -12,7 +12,18 @@
       "Bash(curl -s \"http://localhost:5184/src/services/analyticsService.ts\")",
       "Bash(curl -s \"http://localhost:5184/src/views/Companies/CompanyAnalyticsPage.tsx\")",
       "PowerShell(Stop-Process -Id 32656 -Force -Confirm:$false)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 5184 -State Listen -ErrorAction SilentlyContinue)"
+      "PowerShell(Get-NetTCPConnection -LocalPort 5184 -State Listen -ErrorAction SilentlyContinue)",
+      "Skill(dataviz)",
+      "Skill(dataviz:*)",
+      "Bash(npx vite --port 5185 > /tmp/vite3.log 2>&1 & *)",
+      "Bash(xargs grep -ln \"GoogleAuthProvider\\\\|signInWithPopup\\\\|signInWithRedirect\")",
+      "Bash(node scripts/find-ut-itac.mjs)",
+      "Bash(node scripts/find-ut-itac-detail.mjs)",
+      "Bash(node scripts/merge-ut-itac.mjs)",
+      "Bash(node scripts/merge-ut-itac.mjs --run)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }

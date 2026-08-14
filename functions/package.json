@@ -3,6 +3,7 @@
   "scripts": {
     "lint": "eslint \"src/**/*.{ts,js}\"",
     "build": "tsc",
+    "test": "npm run build && node --test test/taxAlertLogic.test.mjs",
     "type": "module",
     "build:watch": "tsc --watch",
     "serve": "firebase emulators:start --only functions",

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(grep -n \"replace\\(/\\\\[\" \"c:\\\\Users\\\\hp\\\\nelyoda\\\\src\\\\services\\\\employeeDirectoryService.ts\")",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(node find-advanced-sterilization.mjs)",
+      "Bash(node fix-advanced-sterilization-employments.mjs)",
+      "Bash(node fix-advanced-sterilization-employments.mjs --apply)",
+      "Bash(node find-multi-company-employees.mjs)",
+      "Bash(node -e \"require.resolve\\('tsx'\\)\")",
+      "Bash(npx tsx *)"
+    ]
+  }
+}

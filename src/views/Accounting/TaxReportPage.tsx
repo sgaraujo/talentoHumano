@@ -4,6 +4,7 @@ import { BarChart3, Calendar, Download, Loader2, ChevronDown } from 'lucide-reac
 import * as XLSX from 'xlsx';
 import { taxCalendarService } from '@/services/taxCalendarService';
 import type { TaxObligation } from '@/models/types/TaxObligation';
+import { displayTax, cleanNit, normalizePeriod } from '@/domain/tax/taxIdentity';
 import { toast } from 'sonner';
 
 // ── Orden oficial de empresas ─────────────────────────────────────────────────
@@ -27,18 +28,6 @@ const COMPANY_ORDER = [
   'red empresarial',
 ];
 
-const TAX_TYPE_ALIASES: Record<string, string> = {
-  'retención en la fuente': 'Retención en la Fuente',
-  'retencion en la fuente': 'Retención en la Fuente',
-  'retención de ica':       'ReteICA',
-  'retencion de ica':       'ReteICA',
-  'reteica':                'ReteICA',
-};
-
-function normalizeTaxType(t: string): string {
-  return TAX_TYPE_ALIASES[t?.toLowerCase()] ?? t;
-}
-
 function normalizeCompany(s: string) {
   return (s ?? '')
     .toLowerCase()
@@ -51,11 +40,10 @@ function normalizeCompany(s: string) {
     .trim();
 }
 
-function cleanNit(nit?: string) {
-  return (nit ?? '').replace(/[^0-9]/g, '');
-}
-
 function rawCompanyKey(o: TaxObligation) {
+  // companyId es la identidad canónica. Evita separar una empresa en dos filas
+  // cuando sobreviven formatos históricos del nombre o del NIT.
+  if (o.companyId) return `id:${o.companyId}`;
   const nit = cleanNit(o.nit);
   return nit ? `nit:${nit}` : `name:${normalizeCompany(o.company)}`;
 }
@@ -101,8 +89,38 @@ function fmtCOPShort(v: number | undefined) {
   return v.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
 }
 
-interface Cell { projected: number; paid: number }
-type PivotRow = { key: string; company: string; cells: Record<string, Cell>; totalProj: number; totalPaid: number };
+/** presentedAt/paidAt pueden venir como 'YYYY-MM-DD' o como ISO datetime completo. */
+function fmtFlexDate(value?: string) {
+  if (!value) return '';
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const d = isDateOnly ? new Date(`${value}T12:00:00`) : new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+interface Cell { projected: number; presented: number; paid: number; count: number; lastPresentedAt?: string }
+type PivotRow = {
+  key: string; company: string; cells: Record<string, Cell>;
+  totalProj: number; totalPresented: number; totalPaid: number; totalCount: number; totalLastPresentedAt?: string;
+};
+
+/** Se queda con la fecha más reciente entre dos valores de fecha (algún lado puede venir vacío). */
+function laterDate(a?: string, b?: string): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return new Date(b) > new Date(a) ? b : a;
+}
+
+const STATUS_OPTIONS: Array<[string, string]> = [
+  ['', 'Sin iniciar'],
+  ['No iniciado', 'No iniciado'],
+  ['En revisión', 'En revisión'],
+  ['Revisado', 'Revisado'],
+  ['Informe Enviado', 'Informe Enviado'],
+  ['Presentado', 'Presentado'],
+  ['Pagado', 'Pagado'],
+  ['No aplica', 'No aplica'],
+];
 
 // ── component ─────────────────────────────────────────────────────────────────
 export const TaxReportPage = () => {
@@ -112,11 +130,16 @@ export const TaxReportPage = () => {
   const [filterYear,     setFilterYear]     = useState(String(new Date().getFullYear()));
   const [expanded,       setExpanded]       = useState<Set<string>>(new Set());
   const [selectedTypes,  setSelectedTypes]  = useState<Set<string>>(new Set());
-  const [filterHasProj,  setFilterHasProj]  = useState(false);
-  const [filterHasPaid,  setFilterHasPaid]  = useState(false);
+  // Controlan si las columnas Proyectado / Pagado (+ Valor presentado/Fecha de
+  // presentado) se muestran en el cuadro — no filtran filas, solo ocultan columnas.
+  const [showProjected,  setShowProjected]  = useState(true);
+  const [showPaid,       setShowPaid]       = useState(true);
   const [filterMonth,    setFilterMonth]    = useState('all');
-  const [filterStatus,   setFilterStatus]   = useState('all');
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
   const [filterCompany,  setFilterCompany]  = useState('all');
+
+  const toggleStatus = (status: string) =>
+    setFilterStatuses(prev => { const n = new Set(prev); n.has(status) ? n.delete(status) : n.add(status); return n; });
 
   useEffect(() => {
     taxCalendarService.getAll()
@@ -136,7 +159,7 @@ export const TaxReportPage = () => {
     obligations
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
       .filter(o => o.obligationType !== 'Reportes')
-      .forEach(o => s.add(normalizeTaxType(o.taxType)));
+      .forEach(o => s.add(displayTax(o.taxType)));
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'es'));
   }, [obligations, filterYear]);
 
@@ -163,13 +186,14 @@ export const TaxReportPage = () => {
     obligations.forEach(o => {
       const nameKey = normalizeCompany(o.company);
       const nit = cleanNit(o.nit);
-      if (nameKey && nit && !map.has(nameKey)) map.set(nameKey, `nit:${nit}`);
+      const canonicalKey = o.companyId ? `id:${o.companyId}` : (nit ? `nit:${nit}` : '');
+      if (nameKey && canonicalKey && !map.has(nameKey)) map.set(nameKey, canonicalKey);
     });
     return map;
   }, [obligations]);
 
   const getCompanyKey = (o: TaxObligation) =>
-    companyKeyByName.get(normalizeCompany(o.company)) ?? rawCompanyKey(o);
+    (o.companyId ? `id:${o.companyId}` : companyKeyByName.get(normalizeCompany(o.company))) ?? rawCompanyKey(o);
 
   // Pivot
   const { rows } = useMemo(() => {
@@ -179,37 +203,48 @@ export const TaxReportPage = () => {
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
       .filter(o => filterMonth === 'all' || o.dueDate?.slice(0, 7) === filterMonth)
       .filter(o => o.obligationType !== 'Reportes')
-      .filter(o => selectedTypes.has(normalizeTaxType(o.taxType)))
-      .filter(o => filterStatus === 'all' || (o.status || '') === filterStatus)
+      .filter(o => selectedTypes.has(displayTax(o.taxType)))
+      .filter(o => filterStatuses.size === 0 || filterStatuses.has(o.status || ''))
       .filter(o => filterCompany === 'all' || getCompanyKey(o) === filterCompany)
       .forEach(o => {
         const proj = o.projected ?? 0;
+        const presented = o.presented ?? 0;
         const paid = o.paid ?? 0;
         const key = getCompanyKey(o);
-        const taxKey = normalizeTaxType(o.taxType);
+        const taxKey = displayTax(o.taxType);
         if (!byCompany.has(key))
-          byCompany.set(key, { key, company: o.company, cells: {}, totalProj: 0, totalPaid: 0 });
+          byCompany.set(key, { key, company: o.company, cells: {}, totalProj: 0, totalPresented: 0, totalPaid: 0, totalCount: 0 });
         const row = byCompany.get(key)!;
         row.company = preferredCompanyName(row.company, o.company);
-        if (!row.cells[taxKey]) row.cells[taxKey] = { projected: 0, paid: 0 };
-        row.cells[taxKey].projected += proj;
-        row.cells[taxKey].paid      += paid;
+        if (!row.cells[taxKey]) row.cells[taxKey] = { projected: 0, presented: 0, paid: 0, count: 0 };
+        const cell = row.cells[taxKey];
+        cell.projected += proj;
+        cell.presented += presented;
+        cell.paid      += paid;
+        cell.count     += 1;
+        cell.lastPresentedAt = laterDate(cell.lastPresentedAt, o.presentedAt);
+
         row.totalProj += proj;
+        row.totalPresented += presented;
         row.totalPaid += paid;
+        row.totalCount += 1;
+        row.totalLastPresentedAt = laterDate(row.totalLastPresentedAt, o.presentedAt);
       });
 
     const sorted = Array.from(byCompany.values())
       .sort((a, b) => companyIdx(a.company) - companyIdx(b.company));
 
     return { rows: sorted };
-  }, [obligations, filterYear, filterMonth, filterStatus, filterCompany, selectedTypes, visibleTypes, companyKeyByName]);
+  }, [obligations, filterYear, filterMonth, filterStatuses, filterCompany, selectedTypes, visibleTypes, companyKeyByName]);
 
-  const filteredRows = useMemo(() => {
-    let r = rows;
-    if (filterHasProj) r = r.filter(row => row.totalProj > 0);
-    if (filterHasPaid)  r = r.filter(row => row.totalPaid  > 0);
-    return r;
-  }, [rows, filterHasProj, filterHasPaid]);
+  // El filtro de estado (Presentado, Pagado, etc.) ya se aplica dentro del
+  // pivote — el cuadro tipo Excel se muestra siempre, filtrado o no.
+  const filteredRows = rows;
+
+  // Cuántas sub-columnas van visibles por tipo de impuesto (y en el bloque Total):
+  // Proyectado (1) + Pagado/Valor presentado/Fecha de presentado (3), según lo que el
+  // usuario decida mostrar con los botones "Con Proyectado" / "Con Pagado".
+  const typeColSpan = (showProjected ? 1 : 0) + (showPaid ? 3 : 0);
 
   // ── Status summary ────────────────────────────────────────────────────────────
   const statusSummary = useMemo(() => {
@@ -244,8 +279,8 @@ export const TaxReportPage = () => {
         (o.year || o.dueDate?.slice(0, 4)) === filterYear &&
         (filterMonth === 'all' || o.dueDate?.slice(0, 7) === filterMonth) &&
         o.obligationType !== 'Reportes' &&
-        selectedTypes.has(normalizeTaxType(o.taxType)) &&
-        (filterStatus === 'all' || (o.status || '') === filterStatus))
+        selectedTypes.has(displayTax(o.taxType)) &&
+        (filterStatuses.size === 0 || filterStatuses.has(o.status || '')))
       .sort((a, b) => a.taxType.localeCompare(b.taxType));
 
   // Companies for filter dropdown
@@ -294,27 +329,48 @@ export const TaxReportPage = () => {
     const TITLE_ROWS = 4; // filas de cabecera antes de los encabezados de tabla
     const headerRow1: (string | null)[] = ['Empresa'];
     const headerRow2: string[] = [''];
-    visibleTypes.forEach(t => { headerRow1.push(t, null); headerRow2.push('Proyectado', 'Pagado'); });
-    headerRow1.push('Total', null);
-    headerRow2.push('Proy. Total', 'Pag. Total');
+    visibleTypes.forEach(t => {
+      const subheaders: string[] = [];
+      if (showProjected) subheaders.push('Proyectado');
+      if (showPaid) subheaders.push('Pagado', 'Valor presentado', 'Fecha valor presentado');
+      subheaders.forEach((header, index) => {
+        headerRow1.push(index === 0 ? t : null);
+        headerRow2.push(header);
+      });
+    });
+    const totalSubheaders: string[] = [];
+    if (showProjected) totalSubheaders.push('Proy. Total');
+    if (showPaid) totalSubheaders.push('Pag. Total', 'Valor presentado total', 'Última fecha presentada');
+    totalSubheaders.forEach((header, index) => {
+      headerRow1.push(index === 0 ? 'Total' : null);
+      headerRow2.push(header);
+    });
     const numCols = headerRow1.length;
 
     const dataRows = filteredRows.map(r => {
       const cells: (string | number)[] = [r.company];
-      visibleTypes.forEach(t => { cells.push(r.cells[t]?.projected ?? 0, r.cells[t]?.paid ?? 0); });
-      cells.push(r.totalProj, r.totalPaid);
+      visibleTypes.forEach(t => {
+        if (showProjected) cells.push(r.cells[t]?.projected ?? 0);
+        if (showPaid) cells.push(r.cells[t]?.paid ?? 0, r.cells[t]?.presented ?? 0, r.cells[t]?.lastPresentedAt ? fmtFlexDate(r.cells[t]?.lastPresentedAt) : '');
+      });
+      if (showProjected) cells.push(r.totalProj);
+      if (showPaid) cells.push(r.totalPaid, r.totalPresented, r.totalLastPresentedAt ? fmtFlexDate(r.totalLastPresentedAt) : '');
       return cells;
     });
     const totalRow: (string | number)[] = ['TOTAL'];
     visibleTypes.forEach(t => {
-      totalRow.push(
-        filteredRows.reduce((s, r) => s + (r.cells[t]?.projected ?? 0), 0),
+      if (showProjected) totalRow.push(filteredRows.reduce((s, r) => s + (r.cells[t]?.projected ?? 0), 0));
+      if (showPaid) totalRow.push(
         filteredRows.reduce((s, r) => s + (r.cells[t]?.paid ?? 0), 0),
+        filteredRows.reduce((s, r) => s + (r.cells[t]?.presented ?? 0), 0),
+        fmtFlexDate(filteredRows.reduce((date: string | undefined, r) => laterDate(date, r.cells[t]?.lastPresentedAt), undefined)),
       );
     });
-    totalRow.push(
-      filteredRows.reduce((s, r) => s + r.totalProj, 0),
+    if (showProjected) totalRow.push(filteredRows.reduce((s, r) => s + r.totalProj, 0));
+    if (showPaid) totalRow.push(
       filteredRows.reduce((s, r) => s + r.totalPaid, 0),
+      filteredRows.reduce((s, r) => s + r.totalPresented, 0),
+      fmtFlexDate(filteredRows.reduce((date: string | undefined, r) => laterDate(date, r.totalLastPresentedAt), undefined)),
     );
 
     const ws = XLSX.utils.aoa_to_sheet([
@@ -341,15 +397,19 @@ export const TaxReportPage = () => {
     ];
     let col = 1;
     visibleTypes.forEach(() => {
-      merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + 1 } });
-      col += 2;
+      merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + typeColSpan - 1 } });
+      col += typeColSpan;
     });
-    merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + 1 } });
+    merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + typeColSpan - 1 } });
     ws['!merges'] = merges;
 
     const colWidths = [{ wch: 38 }];
-    visibleTypes.forEach(() => colWidths.push({ wch: 20 }, { wch: 20 }));
-    colWidths.push({ wch: 20 }, { wch: 20 });
+    visibleTypes.forEach(() => {
+      if (showProjected) colWidths.push({ wch: 20 });
+      if (showPaid) colWidths.push({ wch: 20 }, { wch: 22 }, { wch: 22 });
+    });
+    if (showProjected) colWidths.push({ wch: 20 });
+    if (showPaid) colWidths.push({ wch: 20 }, { wch: 22 }, { wch: 22 });
     ws['!cols'] = colWidths;
     ws['!rows'] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 14 }, { hpt: 6 }, { hpt: 20 }, { hpt: 16 }];
 
@@ -361,23 +421,25 @@ export const TaxReportPage = () => {
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
       .filter(o => filterMonth === 'all' || o.dueDate?.slice(0, 7) === filterMonth)
       .filter(o => o.obligationType !== 'Reportes')
-      .filter(o => selectedTypes.has(normalizeTaxType(o.taxType)))
-      .filter(o => filterStatus === 'all' || (o.status || '') === filterStatus)
+      .filter(o => selectedTypes.has(displayTax(o.taxType)))
+      .filter(o => filterStatuses.size === 0 || filterStatuses.has(o.status || ''))
       .filter(o => filterCompany === 'all' || getCompanyKey(o) === filterCompany)
       .sort((a, b) => companyIdx(a.company) - companyIdx(b.company) || a.dueDate.localeCompare(b.dueDate));
 
     const ACCOUNTING_STEPS = ['No iniciado', 'Revisado', 'Informe Enviado', 'Presentado'] as const;
     const detailHeader = [
       'Empresa', 'NIT', 'Tipo de obligación', 'Período', 'Vencimiento',
-      'Estado', 'Proyectado (COP)', 'Pagado (COP)', 'Contabilidad', 'Financiera',
+      'Estado', 'Fecha valor presentado', 'Fecha de pago', 'Proyectado (COP)', 'Valor presentado (COP)', 'Pagado (COP)', 'Contabilidad', 'Financiera',
     ];
     const detailData = detailObls.map(o => {
       const sw = (o as any).stepOwners ?? {};
       const accounting = [...new Set(ACCOUNTING_STEPS.map(s => sw[s]).filter(Boolean) as string[])];
       return [
-        o.company, o.nit ?? '', normalizeTaxType(o.taxType), o.period ?? '', o.dueDate,
+        o.company, o.nit ?? '', displayTax(o.taxType), normalizePeriod(o.period), o.dueDate,
         o.status || '',
+        fmtFlexDate(o.presentedAt), fmtFlexDate(o.paidAt),
         o.projected ?? 0,
+        o.presented ?? 0,
         o.paid ?? 0,
         accounting.length ? accounting.join(', ') : (o.accountingUser ?? ''),
         sw['Pagado'] || o.financieraUser || '',
@@ -393,17 +455,17 @@ export const TaxReportPage = () => {
       ...detailData,
     ]);
 
-    // Formato moneda en columnas 6 y 7 (Proyectado / Pagado)
-    applyFmt(ws2, 5, 4 + detailData.length, [6, 7]);
+    // Formato moneda en las columnas de Proyectado / Pagado
+    applyFmt(ws2, 5, 4 + detailData.length, [8, 9, 10]);
 
     ws2['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 9 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: detailHeader.length - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: detailHeader.length - 1 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: detailHeader.length - 1 } },
     ];
     ws2['!cols'] = [
       { wch: 38 }, { wch: 16 }, { wch: 30 }, { wch: 18 }, { wch: 14 },
-      { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 30 },
+      { wch: 22 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 22 }, { wch: 20 }, { wch: 30 }, { wch: 30 },
     ];
     ws2['!rows'] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 14 }, { hpt: 6 }, { hpt: 20 }];
     XLSX.utils.book_append_sheet(wb, ws2, 'Detalle');
@@ -564,21 +626,23 @@ export const TaxReportPage = () => {
 
       {/* Filtros estado / empresa */}
       <div className="flex gap-2 mb-3 items-center flex-wrap">
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
-          className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-[#4A4A4A] focus:outline-none focus:ring-1 focus:ring-[#008C3C]"
-        >
-          <option value="all">Todos los estados</option>
-          <option value="">Sin iniciar</option>
-          <option value="No iniciado">No iniciado</option>
-          <option value="En revisión">En revisión</option>
-          <option value="Revisado">Revisado</option>
-          <option value="Informe Enviado">Informe Enviado</option>
-          <option value="Presentado">Presentado</option>
-          <option value="Pagado">Pagado</option>
-          <option value="No aplica">No aplica</option>
-        </select>
+        <span className="text-xs font-semibold text-gray-500 shrink-0">Estado:</span>
+        {STATUS_OPTIONS.map(([value, label]) => {
+          const active = filterStatuses.has(value);
+          return (
+            <button
+              key={value || '__sin_iniciar__'}
+              onClick={() => toggleStatus(value)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+                active
+                  ? 'bg-[#008C3C] text-white border-[#008C3C]'
+                  : 'bg-white text-gray-500 border-gray-200 hover:border-[#008C3C] hover:text-[#008C3C]'
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
         <select
           value={filterCompany}
           onChange={e => setFilterCompany(e.target.value)}
@@ -589,9 +653,9 @@ export const TaxReportPage = () => {
             <option key={key} value={key}>{shortCompany(name)}</option>
           ))}
         </select>
-        {(filterStatus !== 'all' || filterCompany !== 'all') && (
+        {(filterStatuses.size > 0 || filterCompany !== 'all') && (
           <button
-            onClick={() => { setFilterStatus('all'); setFilterCompany('all'); }}
+            onClick={() => { setFilterStatuses(new Set()); setFilterCompany('all'); }}
             className="text-xs text-gray-400 hover:text-gray-600 underline"
           >
             Limpiar
@@ -599,50 +663,56 @@ export const TaxReportPage = () => {
         )}
       </div>
 
-      {/* Filtros proyectado / pagado */}
+      {/* Mostrar / ocultar columnas de proyectado y pagado */}
       <div className="flex gap-2 mb-4 items-center flex-wrap">
         <span className="text-xs font-semibold text-gray-500 shrink-0">Mostrar:</span>
         <button
-          onClick={() => setFilterHasProj(v => !v)}
+          onClick={() => setShowProjected(v => !v)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-            filterHasProj
+            showProjected
               ? 'bg-yellow-500 text-white border-yellow-500'
-              : 'bg-white text-yellow-700 border-yellow-300 hover:border-yellow-500'
+              : 'bg-white text-gray-400 border-gray-200 hover:border-yellow-400'
           }`}
         >
           <span className="w-2 h-2 rounded-full bg-current" />
           Con Proyectado
         </button>
         <button
-          onClick={() => setFilterHasPaid(v => !v)}
+          onClick={() => setShowPaid(v => !v)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-            filterHasPaid
+            showPaid
               ? 'bg-green-600 text-white border-green-600'
-              : 'bg-white text-green-700 border-green-300 hover:border-green-500'
+              : 'bg-white text-gray-400 border-gray-200 hover:border-green-400'
           }`}
         >
           <span className="w-2 h-2 rounded-full bg-current" />
           Con Pagado
         </button>
-        {(filterHasProj || filterHasPaid) && (
+        {(!showProjected || !showPaid) && (
           <button
-            onClick={() => { setFilterHasProj(false); setFilterHasPaid(false); }}
+            onClick={() => { setShowProjected(true); setShowPaid(true); }}
             className="text-xs text-gray-400 hover:text-gray-600 underline"
           >
-            Limpiar
+            Mostrar todo
           </button>
         )}
-        <span className="ml-auto text-xs text-gray-400">{filteredRows.length} empresa{filteredRows.length !== 1 ? 's' : ''}</span>
+        <span className="ml-auto text-xs text-gray-400">
+          {filteredRows.length} empresa{filteredRows.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
       {/* Leyenda */}
       <div className="flex gap-4 mb-4 text-xs text-gray-500">
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300" /> Proyectado
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-green-100 border border-green-300" /> Pagado
-        </span>
+        {showProjected && (
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300" /> Proyectado
+          </span>
+        )}
+        {showPaid && (
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded bg-green-100 border border-green-300" /> Pagado
+          </span>
+        )}
         <span className="flex items-center gap-1.5 ml-auto text-gray-400">
           Clic en empresa para ver detalle
         </span>
@@ -662,34 +732,60 @@ export const TaxReportPage = () => {
                   <th className="px-4 py-3 text-left font-semibold text-gray-500 bg-gray-50 sticky left-0 z-10 min-w-[160px]">
                     Empresa
                   </th>
-                  {visibleTypes.map(t => (
-                    <th key={t} colSpan={2}
+                  {typeColSpan > 0 && visibleTypes.map(t => (
+                    <th key={t} colSpan={typeColSpan}
                       className="px-2 py-3 text-center font-semibold text-gray-600 bg-gray-50 border-l border-gray-200 min-w-[180px]">
                       {t}
                     </th>
                   ))}
-                  <th colSpan={2} className="px-2 py-3 text-center font-semibold text-gray-700 bg-gray-100 border-l border-gray-300 min-w-[180px]">
-                    Total
-                  </th>
+                  {typeColSpan > 0 && (
+                    <th colSpan={typeColSpan} className="px-2 py-3 text-center font-semibold text-gray-700 bg-gray-100 border-l border-gray-300 min-w-[180px]">
+                      Total
+                    </th>
+                  )}
                 </tr>
                 <tr className="border-b border-gray-200">
                   <th className="px-4 py-2 bg-gray-50 sticky left-0 z-10" />
                   {visibleTypes.map(t => (
                     <>
-                      <th key={`${t}-p`} className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 border-l border-gray-200 text-[10px] uppercase tracking-wide">
-                        Proyectado
-                      </th>
-                      <th key={`${t}-a`} className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
-                        Pagado
-                      </th>
+                      {showProjected && (
+                        <th key={`${t}-p`} className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 border-l border-gray-200 text-[10px] uppercase tracking-wide">
+                          Proyectado
+                        </th>
+                      )}
+                      {showPaid && (
+                        <>
+                          <th key={`${t}-a`} className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
+                            Pagado
+                          </th>
+                          <th key={`${t}-sp`} className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
+                            Valor presentado
+                          </th>
+                          <th key={`${t}-fp`} className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
+                            Fecha de presentado
+                          </th>
+                        </>
+                      )}
                     </>
                   ))}
-                  <th className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 border-l border-gray-300 text-[10px] uppercase tracking-wide">
-                    Proy. Total
-                  </th>
-                  <th className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
-                    Pag. Total
-                  </th>
+                  {showProjected && (
+                    <th className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 border-l border-gray-300 text-[10px] uppercase tracking-wide">
+                      Proy. Total
+                    </th>
+                  )}
+                  {showPaid && (
+                    <>
+                      <th className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
+                        Pag. Total
+                      </th>
+                      <th className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
+                        Valor presentado total
+                      </th>
+                      <th className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
+                        Fecha de presentado
+                      </th>
+                    </>
+                  )}
                 </tr>
               </thead>
 
@@ -711,47 +807,95 @@ export const TaxReportPage = () => {
                           const c = row.cells[t];
                           return (
                             <>
-                              <td key={`${t}-p`} className="px-3 py-3 text-right text-yellow-700 bg-yellow-50/50 border-l border-gray-100 font-mono">
-                                {c?.projected ? fmtCOPShort(c.projected) : <span className="text-gray-200">—</span>}
-                              </td>
-                              <td key={`${t}-a`} className="px-3 py-3 text-right text-green-700 bg-green-50/50 font-mono">
-                                {c?.paid ? fmtCOPShort(c.paid) : <span className="text-gray-200">—</span>}
-                              </td>
+                              {showProjected && (
+                                <td key={`${t}-p`} className="px-3 py-3 text-right text-yellow-700 bg-yellow-50/50 border-l border-gray-100 font-mono">
+                                  {c?.projected ? fmtCOPShort(c.projected) : <span className="text-gray-200">—</span>}
+                                </td>
+                              )}
+                              {showPaid && (
+                                <>
+                                  <td key={`${t}-a`} className="px-3 py-3 text-right text-green-700 bg-green-50/50 font-mono">
+                                    {c?.paid ? fmtCOPShort(c.paid) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                  <td key={`${t}-sp`} className="px-3 py-3 text-center bg-blue-50/40 text-[11px] font-medium text-blue-700">
+                                    {c?.presented ? fmtCOPShort(c.presented) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                  <td key={`${t}-fp`} className="px-3 py-3 text-center bg-blue-50/40 text-[11px] text-gray-500 whitespace-nowrap">
+                                    {c?.lastPresentedAt ? fmtFlexDate(c.lastPresentedAt) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                </>
+                              )}
                             </>
                           );
                         })}
-                        <td className="px-3 py-3 text-right text-yellow-800 bg-yellow-50 border-l border-gray-300 font-mono font-semibold">
-                          {row.totalProj ? fmtCOPShort(row.totalProj) : <span className="text-gray-200">—</span>}
-                        </td>
-                        <td className="px-3 py-3 text-right text-green-800 bg-green-50 font-mono font-semibold">
-                          {row.totalPaid ? fmtCOPShort(row.totalPaid) : <span className="text-gray-200">—</span>}
-                        </td>
+                        {showProjected && (
+                          <td className="px-3 py-3 text-right text-yellow-800 bg-yellow-50 border-l border-gray-300 font-mono font-semibold">
+                            {row.totalProj ? fmtCOPShort(row.totalProj) : <span className="text-gray-200">—</span>}
+                          </td>
+                        )}
+                        {showPaid && (
+                          <>
+                            <td className="px-3 py-3 text-right text-green-800 bg-green-50 font-mono font-semibold">
+                              {row.totalPaid ? fmtCOPShort(row.totalPaid) : <span className="text-gray-200">—</span>}
+                            </td>
+                            <td className="px-3 py-3 text-center bg-blue-50 text-[11px] font-semibold text-blue-800">
+                              {row.totalPresented ? fmtCOPShort(row.totalPresented) : <span className="text-gray-200">—</span>}
+                            </td>
+                            <td className="px-3 py-3 text-center bg-blue-50 text-[11px] text-gray-600 whitespace-nowrap">
+                              {row.totalLastPresentedAt ? fmtFlexDate(row.totalLastPresentedAt) : <span className="text-gray-200">—</span>}
+                            </td>
+                          </>
+                        )}
                       </tr>
 
                       {isExp && detail.map(obl => (
                         <tr key={obl.id} className="bg-gray-50/80 text-[10px]">
                           <td className="pl-10 pr-4 py-2 text-gray-500 sticky left-0 bg-gray-50/80 z-10 italic">
-                            {obl.taxType} — {obl.period}
+                            {obl.taxType} — {normalizePeriod(obl.period)}
                           </td>
                           {visibleTypes.map(t => {
                             const isThis = obl.taxType === t;
                             return (
                               <>
-                                <td key={`d-${t}-p`} className="px-3 py-2 text-right border-l border-gray-100 bg-yellow-50/30 font-mono text-yellow-700">
-                                  {isThis && obl.projected ? fmtCOPShort(obl.projected) : ''}
-                                </td>
-                                <td key={`d-${t}-a`} className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
-                                  {isThis && obl.paid ? fmtCOPShort(obl.paid) : ''}
-                                </td>
+                                {showProjected && (
+                                  <td key={`d-${t}-p`} className="px-3 py-2 text-right border-l border-gray-100 bg-yellow-50/30 font-mono text-yellow-700">
+                                    {isThis && obl.projected ? fmtCOPShort(obl.projected) : ''}
+                                  </td>
+                                )}
+                                {showPaid && (
+                                  <>
+                                    <td key={`d-${t}-a`} className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
+                                      {isThis && obl.paid ? fmtCOPShort(obl.paid) : ''}
+                                    </td>
+                                    <td key={`d-${t}-sp`} className="px-3 py-2 text-center bg-blue-50/20 text-blue-700">
+                                      {isThis && obl.presented ? fmtCOPShort(obl.presented) : ''}
+                                    </td>
+                                    <td key={`d-${t}-fp`} className="px-3 py-2 text-center bg-blue-50/20 text-gray-500 whitespace-nowrap">
+                                      {isThis && obl.presentedAt ? fmtFlexDate(obl.presentedAt) : ''}
+                                    </td>
+                                  </>
+                                )}
                               </>
                             );
                           })}
-                          <td className="px-3 py-2 text-right border-l border-gray-300 bg-yellow-50/30 font-mono text-yellow-700">
-                            {obl.projected ? fmtCOPShort(obl.projected) : ''}
-                          </td>
-                          <td className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
-                            {obl.paid ? fmtCOPShort(obl.paid) : ''}
-                          </td>
+                          {showProjected && (
+                            <td className="px-3 py-2 text-right border-l border-gray-300 bg-yellow-50/30 font-mono text-yellow-700">
+                              {obl.projected ? fmtCOPShort(obl.projected) : ''}
+                            </td>
+                          )}
+                          {showPaid && (
+                            <>
+                              <td className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
+                                {obl.paid ? fmtCOPShort(obl.paid) : ''}
+                              </td>
+                              <td className="px-3 py-2 text-center bg-blue-50/20 text-blue-700">
+                                {obl.presented ? fmtCOPShort(obl.presented) : ''}
+                              </td>
+                              <td className="px-3 py-2 text-center bg-blue-50/20 text-gray-500 whitespace-nowrap">
+                                {obl.presentedAt ? fmtFlexDate(obl.presentedAt) : ''}
+                              </td>
+                            </>
+                          )}
                         </tr>
                       ))}
                     </>
@@ -767,23 +911,52 @@ export const TaxReportPage = () => {
                   {visibleTypes.map(t => {
                     const proj = filteredRows.reduce((s, r) => s + (r.cells[t]?.projected ?? 0), 0);
                     const paid  = filteredRows.reduce((s, r) => s + (r.cells[t]?.paid  ?? 0), 0);
+                    const presented = filteredRows.reduce((s, r) => s + (r.cells[t]?.presented ?? 0), 0);
+                    const lastPresentedAt = filteredRows.reduce((acc: string | undefined, r) => laterDate(acc, r.cells[t]?.lastPresentedAt), undefined as string | undefined);
                     return (
                       <>
-                        <td key={`t-${t}-p`} className="px-3 py-3 text-right text-yellow-300 font-bold font-mono border-l border-gray-700 text-xs">
-                          {proj ? fmtCOP(proj) : '—'}
-                        </td>
-                        <td key={`t-${t}-a`} className="px-3 py-3 text-right text-green-300 font-bold font-mono text-xs">
-                          {paid ? fmtCOP(paid) : '—'}
-                        </td>
+                        {showProjected && (
+                          <td key={`t-${t}-p`} className="px-3 py-3 text-right text-yellow-300 font-bold font-mono border-l border-gray-700 text-xs">
+                            {proj ? fmtCOP(proj) : '—'}
+                          </td>
+                        )}
+                        {showPaid && (
+                          <>
+                            <td key={`t-${t}-a`} className="px-3 py-3 text-right text-green-300 font-bold font-mono text-xs">
+                              {paid ? fmtCOP(paid) : '—'}
+                            </td>
+                            <td key={`t-${t}-sp`} className="px-3 py-3 text-center text-blue-300 font-bold text-[11px]">
+                              {presented ? fmtCOP(presented) : '—'}
+                            </td>
+                            <td key={`t-${t}-fp`} className="px-3 py-3 text-center text-blue-200 text-[11px] whitespace-nowrap">
+                              {lastPresentedAt ? fmtFlexDate(lastPresentedAt) : '—'}
+                            </td>
+                          </>
+                        )}
                       </>
                     );
                   })}
-                  <td className="px-3 py-3 text-right text-yellow-200 font-bold font-mono border-l border-gray-600 text-xs">
-                    {fmtCOP(filteredRows.reduce((s, r) => s + r.totalProj, 0))}
-                  </td>
-                  <td className="px-3 py-3 text-right text-green-200 font-bold font-mono text-xs">
-                    {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPaid, 0))}
-                  </td>
+                  {showProjected && (
+                    <td className="px-3 py-3 text-right text-yellow-200 font-bold font-mono border-l border-gray-600 text-xs">
+                      {fmtCOP(filteredRows.reduce((s, r) => s + r.totalProj, 0))}
+                    </td>
+                  )}
+                  {showPaid && (
+                    <>
+                      <td className="px-3 py-3 text-right text-green-200 font-bold font-mono text-xs">
+                        {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPaid, 0))}
+                      </td>
+                      <td className="px-3 py-3 text-center text-blue-300 font-bold text-[11px]">
+                        {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPresented, 0))}
+                      </td>
+                      <td className="px-3 py-3 text-center text-blue-200 text-[11px] whitespace-nowrap">
+                        {(() => {
+                          const d = filteredRows.reduce((acc: string | undefined, r) => laterDate(acc, r.totalLastPresentedAt), undefined as string | undefined);
+                          return d ? fmtFlexDate(d) : '—';
+                        })()}
+                      </td>
+                    </>
+                  )}
                 </tr>
               </tfoot>
             </table>

@@ -1,7 +1,12 @@
 /**
  * debug-email-vencidos.mjs
  * Replica la lógica del correo de alertas y muestra por qué cada entrada aparece.
- * Uso: node scripts/debug-email-vencidos.mjs
+ * Uso:
+ *   npm --prefix functions run build
+ *   node scripts/debug-email-vencidos.mjs
+ *
+ * Es de solo lectura. Usa las colecciones canónicas y el calendario compilado
+ * de Functions para evitar que el diagnóstico diverja del correo productivo.
  */
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -17,7 +22,7 @@ const db = getFirestore(app);
 const TODAY     = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 const today     = new Date(TODAY + 'T00:00:00');
 const OVERDUE_FROM   = '2026-06-01';
-const UPCOMING_WINDOW = 15;
+const UPCOMING_WINDOW = 7;
 const COMPLETED = new Set(['Pagado', 'No aplica', 'Informe Enviado', 'Presentado']);
 
 const norm  = s => (s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[.,\-]/g, '').replace(/\s+/g, ' ').trim();
@@ -26,7 +31,7 @@ const cComp = s => norm(s);
 
 const TAX_ALIASES = {
   'reteica': 'reteica', 'retencion de ica': 'reteica', 'retencion ica': 'reteica',
-  'impuesto de industria y comercio': 'reteica', 'ica': 'reteica',
+  'impuesto de industria y comercio': 'ica', 'ica': 'ica',
   'iva bimestral': 'iva', 'iva cuatrimestral': 'iva', 'impuesto a las ventas': 'iva', 'iva': 'iva',
   'retencion en la fuente': 'retencion en la fuente', 'retencion fuente': 'retencion en la fuente', 'retefuente': 'retencion en la fuente',
 };
@@ -34,7 +39,7 @@ const normTax = t => { const n = norm(t); return TAX_ALIASES[n] ?? n; };
 const sameDate = (a, b) => {
   if (a === b) return true;
   const [ay,am,ad] = a.split('-').map(Number), [by,bm,bd] = b.split('-').map(Number);
-  return Math.abs(Date.UTC(ay,am-1,ad) - Date.UTC(by,bm-1,bd)) <= 3*86400000;
+  return Math.abs(Date.UTC(ay,am-1,ad) - Date.UTC(by,bm-1,bd)) <= 5*86400000;
 };
 const daysLeft = d => Math.round((new Date(d+'T00:00:00').getTime() - today.getTime()) / 86400000);
 
@@ -42,9 +47,10 @@ async function main() {
   console.log(`\n📅 Hoy: ${TODAY}  |  Desde: ${OVERDUE_FROM}  |  Próximos: ${UPCOMING_WINDOW}d\n`);
 
   // Cargar datos
-  const [oblSnap, compSnap] = await Promise.all([
-    db.collection('tax_obligations').get(),
-    db.collection('companies').where('active','==',true).where('activeContabilidad','==',true).get(),
+  const [oblSnap, compSnap, settingsSnap] = await Promise.all([
+    db.collection('accounting/data/tax_obligations').get(),
+    db.collection('organization/data/companies').where('active','==',true).where('activeContabilidad','==',true).get(),
+    db.collection('accounting/data/company_tax_settings').get(),
   ]);
 
   const allDocs = oblSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -52,8 +58,9 @@ async function main() {
   console.log('─'.repeat(80));
 
   // Importar calendario dinámicamente
-  const { getDianObligationsByNit } = await import('../functions/src/dianCalendar2026.js').catch(() => null) ?? {};
-  const { ALL_BOGOTA_2026 } = await import('../functions/src/bogotaCalendar2026.js').catch(() => null) ?? {};
+  const settings = new Map(settingsSnap.docs.map(d => [d.id, d.data()]));
+  const { getDianObligationsByNit } = await import('../functions/lib/dianCalendar2026.js').catch(() => null) ?? {};
+  const { ALL_BOGOTA_2026 } = await import('../functions/lib/bogotaCalendar2026.js').catch(() => null) ?? {};
 
   if (!getDianObligationsByNit) {
     console.log('⚠️  No se pudo importar el calendario. Mostrando solo análisis de Firestore.\n');
@@ -70,7 +77,7 @@ async function main() {
 
     const compNitC = nitC(nit);
     const compN    = cComp(comp.name ?? '');
-    const hidden   = new Set(comp.hiddenTaxTypes ?? []);
+    const hidden   = new Set(settings.get(doc.id)?.excludedTaxTypes ?? []);
 
     const dianObls   = getDianObligationsByNit(nit).filter(o => !hidden.has(o.taxType));
     const bogotaObls = (ALL_BOGOTA_2026 ?? []).filter(o => !hidden.has(o.taxType));
@@ -90,7 +97,10 @@ async function main() {
 
       const matched = allDocs.filter(o => {
         const oNitC = nitC(o.nit ?? '');
-        return ((compNitC && oNitC && compNitC === oNitC) || cComp(o.company ?? '') === compN)
+        const companyMatch = o.companyId
+          ? o.companyId === doc.id
+          : ((compNitC && oNitC && compNitC === oNitC) || cComp(o.company ?? '') === compN);
+        return companyMatch
           && normTax(o.taxType) === normTax(cal.taxType)
           && sameDate(o.dueDate, cal.dueDate);
       });
@@ -105,13 +115,29 @@ async function main() {
         taxType: cal.taxType, period: cal.period ?? '', dueDate: cal.dueDate, dl,
         fsStatus: matched[0]?.status ?? '(sin registro)',
         fsNit: matched[0]?.nit ?? '',
+        fsId: matched[0]?.id ?? '',
+        companyId: matched[0]?.companyId ?? '',
         matchCount: matched.length,
       });
     }
 
-    if (hasVisible) {
-      results.push({ company: comp.name, nit, pending });
-    }
+    const manual = allDocs.filter(o => {
+      const oNitC = nitC(o.nit ?? '');
+      const companyMatch = o.companyId
+        ? o.companyId === doc.id
+        : ((compNitC && oNitC && compNitC === oNitC) || cComp(o.company ?? '') === compN);
+      if (!companyMatch || COMPLETED.has(o.status ?? '') || o.status === 'No aplica') return false;
+      if (allCalObls.some(cal => normTax(cal.taxType) === normTax(o.taxType) && sameDate(cal.dueDate, o.dueDate))) return false;
+      const dl = daysLeft(o.dueDate);
+      return (dl < 0 && o.dueDate >= OVERDUE_FROM) || (dl >= 0 && dl <= UPCOMING_WINDOW);
+    }).map(o => ({
+      taxType: o.taxType, period: o.period ?? '', dueDate: o.dueDate,
+      dl: daysLeft(o.dueDate), fsStatus: o.status ?? '(sin estado)',
+      fsNit: o.nit ?? '', fsId: o.id, companyId: o.companyId ?? '',
+      matchCount: 1, source: 'manual',
+    }));
+
+    if (hasVisible || manual.length > 0) results.push({ company: comp.name, nit, pending: [...pending, ...manual] });
   }
 
   if (results.length === 0) {
@@ -124,7 +150,8 @@ async function main() {
     console.log(`📌 ${r.company}  NIT: ${r.nit}`);
     for (const p of r.pending) {
       const label = p.dl < 0 ? `Vencido hace ${Math.abs(p.dl)}d` : `En ${p.dl}d`;
-      console.log(`   • ${p.taxType} / ${p.period} / ${p.dueDate}  →  Estado FS: "${p.fsStatus}"  [${label}]`);
+      console.log(`   • ${p.taxType} / ${p.period} / ${p.dueDate}  →  Estado FS: "${p.fsStatus}"  [${label}]${p.source === 'manual' ? ' [manual]' : ''}`);
+      if (p.fsId) console.log(`     id:${p.fsId}  companyId:${p.companyId || '—'}  nit:${p.fsNit || '—'}`);
       if (p.matchCount > 1) console.log(`     ⚠️  ${p.matchCount} registros Firestore encontrados para esta entrada`);
       if (p.matchCount === 0) console.log(`     ℹ️  Sin registro en Firestore (solo en calendario DIAN)`);
     }

@@ -27,7 +27,7 @@ import { communicationService } from '@/services/communicationService';
 import { EditCommunicationDialog } from '@/components/communications/EditCommunicationDialog';
 import { companyService } from '@/services/companyService';
 import { projectService } from '@/services/projectService';
-import { userService } from '@/services/userService';
+import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
 import type { Communication, CommunicationRecipient } from '@/models/types/Communication';
 import { questionnaireService } from '@/services/questionnaireService';
 import type { Questionnaire } from '@/models/types/Questionnaire';
@@ -290,6 +290,13 @@ function ChartsPanel({
   );
 }
 
+// Compara nombres de empresa ignorando puntos, may/min y espacios extra —
+// evita que un usuario quede fuera del envío masivo por una diferencia de
+// formato entre su perfil y el nombre canónico en `companies` (ver caso Inteegra).
+const normalizeCompanyName = (name?: string | null) =>
+  (name ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[.\-,]/g, '').replace(/\s+/g, ' ').trim();
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 export const CommunicationsPage = () => {
@@ -341,7 +348,7 @@ export const CommunicationsPage = () => {
       const [comps, projs, users, quests] = await Promise.all([
         companyService.getAll(),
         projectService.getAll(),
-        userService.getAll(),
+        getEmployeeDirectoryUsers(),
         questionnaireService.getAll(),
       ]);
       setCompanies(comps);
@@ -488,8 +495,13 @@ export const CommunicationsPage = () => {
     }
     let users = allUsers.filter(u => u.role === 'colaborador' || u.role === 'aspirante' || u.role === 'lider');
     if (form.targetType === 'company' && form.targetIds.length > 0) {
-      const names = form.targetIds.map(id => companies.find(c => c.id === id)?.name).filter(Boolean);
-      users = users.filter(u => names.includes(u.contractInfo?.assignment?.company));
+      const names = form.targetIds.map(id => normalizeCompanyName(companies.find(c => c.id === id)?.name)).filter(Boolean);
+      // Una persona puede tener asignaciones activas en varias empresas — no basta
+      // con mirar solo la asignación primaria (contractInfo.assignment).
+      users = users.filter(u =>
+        form.targetIds.some(id => u.companyIds?.includes(id)) ||
+        names.includes(normalizeCompanyName(u.contractInfo?.assignment?.company))
+      );
     }
     if (form.targetType === 'project' && form.targetIds.length > 0) {
       const projectNames = form.targetIds.map(id => projects.find(p => p.id === id)?.name).filter(Boolean);
@@ -1522,14 +1534,15 @@ export const CommunicationsPage = () => {
                     <p className="text-xs text-gray-400 text-center py-4">No hay empresas activas en TH</p>
                   )}
                   {companies.filter(c => c.activeTH).map(c => {
+                    const belongsToCompany = (u: any) => u.companyIds?.includes(c.id) || u.contractInfo?.assignment?.company === c.name;
                     const count = allUsers.filter(u =>
                       u.role === 'colaborador' && !existing.has(u.id) &&
-                      u.contractInfo?.assignment?.company === c.name &&
+                      belongsToCompany(u) &&
                       (u.location?.corporateEmail || u.location?.personalEmail || u.email)
                     ).length;
                     return (
                       <button key={c.id} disabled={addingPerson || count === 0}
-                        onClick={() => handleAddBulk(u => u.contractInfo?.assignment?.company === c.name, c.name)}
+                        onClick={() => handleAddBulk(belongsToCompany, c.name)}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-50 transition-colors text-left disabled:opacity-40">
                         <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
                           {c.logo ? <img src={c.logo} alt={c.name} className="w-6 h-6 object-contain rounded" /> : <Building2 className="w-4 h-4 text-emerald-600" />}
@@ -1555,15 +1568,16 @@ export const CommunicationsPage = () => {
                     <p className="text-xs text-gray-400 text-center py-4">No hay proyectos</p>
                   )}
                   {projects.map(p => {
+                    const belongsToProject = (u: any) =>
+                      u.projectIds?.includes(p.id) || u.contractInfo?.assignment?.projectId === p.id || u.contractInfo?.assignment?.project === p.name;
                     const count = allUsers.filter(u =>
                       u.role === 'colaborador' && !existing.has(u.id) &&
-                      (u.contractInfo?.assignment?.projectId === p.id || u.contractInfo?.assignment?.project === p.name) &&
+                      belongsToProject(u) &&
                       (u.location?.corporateEmail || u.location?.personalEmail || u.email)
                     ).length;
                     return (
                       <button key={p.id} disabled={addingPerson || count === 0}
-                        onClick={() => handleAddBulk(u =>
-                          u.contractInfo?.assignment?.projectId === p.id || u.contractInfo?.assignment?.project === p.name, p.name)}
+                        onClick={() => handleAddBulk(belongsToProject, p.name)}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-blue-50 transition-colors text-left disabled:opacity-40">
                         <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
                           <FolderKanban className="w-4 h-4 text-blue-600" />

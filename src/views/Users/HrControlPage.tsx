@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, BriefcaseBusiness, CheckCircle2, FileClock, Loader2, RefreshCw, Search, Upload, UserRoundX, Users } from 'lucide-react';
+import { AlertCircle, BriefcaseBusiness, CheckCircle2, FileClock, Loader2, RefreshCw, Search, Upload, UserPlus, UserRoundX, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getHrControlData, type HrControlEmployee, type HrImportRunSummary } from '@/services/hrControlService';
@@ -12,6 +12,7 @@ import { auth } from '@/config/firebase';
 import { toast } from 'sonner';
 import { HrEmployeeDetailDialog } from '@/components/users/HrEmployeeDetailDialog';
 import { HrPartialUpdateDialog } from '@/components/users/HrPartialUpdateDialog';
+import { HrCreateEmployeeDialog } from '@/components/users/HrCreateEmployeeDialog';
 
 const dateLabel = (value: any) => value?.toDate?.().toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) ?? '—';
 
@@ -33,6 +34,7 @@ export function HrControlPage() {
   const { users: platformUsers } = useUsers();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [partialUpdateOpen, setPartialUpdateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const load = async () => {
     setLoading(true); setError('');
@@ -95,6 +97,9 @@ export function HrControlPage() {
           <Button variant="outline" onClick={load} disabled={loading}>
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Actualizar
           </Button>
+          <Button className="bg-[#008C3C] hover:bg-[#006C2F]" onClick={() => setCreateOpen(true)}>
+            <UserPlus className="w-4 h-4 mr-2" />Nueva persona
+          </Button>
           <label className="inline-flex items-center rounded-md bg-[#008C3C] hover:bg-[#006C2F] text-white px-4 py-2 text-sm font-medium cursor-pointer">
             <Upload className="w-4 h-4 mr-2" />Actualizar desde Excel
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={selectExcel} />
@@ -146,6 +151,7 @@ export function HrControlPage() {
       <HrImportPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} preview={preview} loading={previewLoading} loadingLabel={previewLabel} error={previewError} applying={applying} applyProgress={applyProgress} onApply={applyImport} />
       <HrEmployeeDetailDialog employeeId={selectedEmployeeId} open={!!selectedEmployeeId} onOpenChange={open => { if (!open) setSelectedEmployeeId(null); }} onUpdated={load} />
       <HrPartialUpdateDialog open={partialUpdateOpen} onOpenChange={setPartialUpdateOpen} onCompleted={load} />
+      <HrCreateEmployeeDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />
     </div>
   );
 }

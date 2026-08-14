@@ -411,6 +411,15 @@ export function BulletinViewPage() {
       } catch {}
       return;
     }
+    const wr = searchParams.get('wr');
+    if (wr) {
+      try {
+        const phone = atob(wr.replace(/-/g, '+').replace(/_/g, '/'));
+        viewLoggedRef.current = true;
+        bulletinService.logView(id, { phone, source: 'whatsapp' }).catch(() => {});
+      } catch {}
+      return;
+    }
     if (user?.email) {
       viewLoggedRef.current = true;
       bulletinService.logView(id, { email: user.email, source: 'auth' }).catch(() => {});

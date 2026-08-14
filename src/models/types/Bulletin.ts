@@ -116,9 +116,10 @@ export type BulletinSection =
 
 export interface BulletinViewEntry {
   id?: string;
-  email: string;
+  email?: string;
+  phone?: string;
   name?: string;
-  source: 'email' | 'auth';
+  source: 'email' | 'auth' | 'whatsapp';
   viewedAt: string; // ISO string
 }
 
