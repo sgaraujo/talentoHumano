@@ -319,7 +319,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
             <Card className="group relative border-[#E7E9EE] shadow-sm rounded-xl cursor-help" tabIndex={0}>
               <CardHeader className="pb-1 pt-4 px-4">
                 <CardTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">% Rot. General <CircleHelp className="h-3.5 w-3.5" /></CardTitle>
-                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros del período / Headcount promedio</CardDescription>
+                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros del período / Headcount</CardDescription>
               </CardHeader>
               <CardContent className="px-4 pb-4">
                 <div className="flex items-center gap-2">
@@ -334,9 +334,9 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
               <CalculationTooltip
                 title="Cálculo de rotación general"
                 formula="(Renuncias voluntarias ÷ HT del período, sin aprendices SENA) × 100"
-                operation={metrics.headcountPromedio > 0
-                  ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.headcountPromedio}) × 100 = ${metrics.rotacionGeneral}%`
-                  : 'Sin headcount promedio disponible = 0%'}
+                operation={metrics.headcountBase > 0
+                  ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.headcountBase}) × 100 = ${metrics.rotacionGeneral}%`
+                  : 'Sin headcount disponible = 0%'}
                 note={metrics.headcountBaseLabel}
               />
             </Card>
@@ -344,7 +344,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
             <Card className="group relative border-[#E7E9EE] shadow-sm rounded-xl cursor-help" tabIndex={0}>
               <CardHeader className="pb-1 pt-4 px-4">
                 <CardTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">% Rot. Voluntaria <CircleHelp className="h-3.5 w-3.5" /></CardTitle>
-                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros voluntarios del período / Headcount promedio</CardDescription>
+                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros voluntarios del período / Headcount</CardDescription>
               </CardHeader>
               <CardContent className="px-4 pb-4">
                 <div className="text-xl sm:text-2xl font-bold text-[#14171C] tracking-tight">{metrics.rotacionVoluntaria}%</div>
@@ -352,10 +352,10 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
               </CardContent>
               <CalculationTooltip
                 title="Cálculo de rotación voluntaria"
-                formula="(Retiros voluntarios ÷ Headcount promedio) × 100"
-                operation={metrics.headcountPromedio > 0
-                  ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.headcountPromedio}) × 100 = ${metrics.rotacionVoluntaria}%`
-                  : 'Sin headcount promedio disponible = 0%'}
+                formula="(Retiros voluntarios ÷ Headcount) × 100"
+                operation={metrics.headcountBase > 0
+                  ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.headcountBase}) × 100 = ${metrics.rotacionVoluntaria}%`
+                  : 'Sin headcount disponible = 0%'}
                 note={metrics.headcountBaseLabel}
               />
             </Card>

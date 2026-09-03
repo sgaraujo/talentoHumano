@@ -14,9 +14,9 @@ export interface RotationMetrics {
   cubrimiento: number;
 
   // Base de headcount usada en rotacionGeneral/rotacionVoluntaria (para mostrar
-  // debajo de las tarjetas, ej. "Base: headcount promedio Ene–Ago 2026")
+  // debajo de las tarjetas, ej. "Base: headcount al cierre de Agosto 2026")
   headcountBaseLabel: string;
-  headcountPromedio: number;
+  headcountBase: number;
   
   // Comparativas
   voluntarioVsInvoluntario: {

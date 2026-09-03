@@ -79,11 +79,6 @@ function shortCompany(name: string) {
     .replace(/Inversiones /gi, 'Inv. ').trim();
 }
 
-function fmtCOP(v: number | undefined) {
-  if (!v) return '—';
-  return v.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
-}
-
 function fmtCOPShort(v: number | undefined) {
   if (!v) return '—';
   return v.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
@@ -98,10 +93,13 @@ function fmtFlexDate(value?: string) {
   return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-interface Cell { projected: number; presented: number; paid: number; count: number; lastPresentedAt?: string }
+interface Cell {
+  projected: number; presented: number; paid: number; count: number;
+  lastPresentedAt?: string; lastDueDate?: string; lastPaidAt?: string;
+}
 type PivotRow = {
   key: string; company: string; cells: Record<string, Cell>;
-  totalProj: number; totalPresented: number; totalPaid: number; totalCount: number; totalLastPresentedAt?: string;
+  totalProj: number; totalPresented: number;
   noAplicaCount: number;
 };
 
@@ -225,7 +223,7 @@ export const TaxReportPage = () => {
         const key = getCompanyKey(o);
         const taxKey = displayTax(o.taxType);
         if (!byCompany.has(key))
-          byCompany.set(key, { key, company: o.company, cells: {}, totalProj: 0, totalPresented: 0, totalPaid: 0, totalCount: 0, noAplicaCount: 0 });
+          byCompany.set(key, { key, company: o.company, cells: {}, totalProj: 0, totalPresented: 0, noAplicaCount: 0 });
         const row = byCompany.get(key)!;
         row.company = preferredCompanyName(row.company, o.company);
         if (o.status === 'No aplica') row.noAplicaCount += 1;
@@ -236,12 +234,11 @@ export const TaxReportPage = () => {
         cell.paid      += paid;
         cell.count     += 1;
         cell.lastPresentedAt = laterDate(cell.lastPresentedAt, o.presentedAt);
+        cell.lastDueDate     = laterDate(cell.lastDueDate, o.dueDate);
+        cell.lastPaidAt      = laterDate(cell.lastPaidAt, o.paidAt);
 
         row.totalProj += proj;
         row.totalPresented += presented;
-        row.totalPaid += paid;
-        row.totalCount += 1;
-        row.totalLastPresentedAt = laterDate(row.totalLastPresentedAt, o.presentedAt);
       });
 
     const sorted = Array.from(byCompany.values())
@@ -262,7 +259,7 @@ export const TaxReportPage = () => {
   );
 
   // Cuántas sub-columnas van visibles por tipo de impuesto (y en el bloque Total):
-  const typeColSpan = (showProjected ? 1 : 0) + (showPresented ? 2 : 0) + (showPaid ? 1 : 0);
+  const typeColSpan = (showProjected ? 2 : 0) + (showPresented ? 2 : 0) + (showPaid ? 2 : 0);
 
   // ── Status summary ────────────────────────────────────────────────────────────
   const statusSummary = useMemo(() => {
@@ -349,21 +346,13 @@ export const TaxReportPage = () => {
     const headerRow2: string[] = [''];
     visibleTypes.forEach(t => {
       const subheaders: string[] = [];
-      if (showProjected) subheaders.push('Proyectado');
+      if (showProjected) subheaders.push('Proyectado', 'Fecha de vencimiento');
       if (showPresented) subheaders.push('Valor presentado', 'Fecha valor presentado');
-      if (showPaid) subheaders.push('Pagado');
+      if (showPaid) subheaders.push('Valor pagado', 'Fecha de pago');
       subheaders.forEach((header, index) => {
         headerRow1.push(index === 0 ? t : null);
         headerRow2.push(header);
       });
-    });
-    const totalSubheaders: string[] = [];
-    if (showProjected) totalSubheaders.push('Proy. Total');
-    if (showPresented) totalSubheaders.push('Valor presentado total', 'Última fecha presentada');
-    if (showPaid) totalSubheaders.push('Pag. Total');
-    totalSubheaders.forEach((header, index) => {
-      headerRow1.push(index === 0 ? 'Total' : null);
-      headerRow2.push(header);
     });
     const numCols = headerRow1.length;
 
@@ -371,30 +360,12 @@ export const TaxReportPage = () => {
       const noAplicaLabel = r.noAplicaCount > 0 ? ` — NO APLICA (${r.noAplicaCount})` : '';
       const cells: (string | number)[] = [`${r.company}${noAplicaLabel}`];
       visibleTypes.forEach(t => {
-        if (showProjected) cells.push(r.cells[t]?.projected ?? 0);
+        if (showProjected) cells.push(r.cells[t]?.projected ?? 0, r.cells[t]?.lastDueDate ? fmtFlexDate(r.cells[t]?.lastDueDate) : '');
         if (showPresented) cells.push(r.cells[t]?.presented ?? 0, r.cells[t]?.lastPresentedAt ? fmtFlexDate(r.cells[t]?.lastPresentedAt) : '');
-        if (showPaid) cells.push(r.cells[t]?.paid ?? 0);
+        if (showPaid) cells.push(r.cells[t]?.paid ?? 0, r.cells[t]?.lastPaidAt ? fmtFlexDate(r.cells[t]?.lastPaidAt) : '');
       });
-      if (showProjected) cells.push(r.totalProj);
-      if (showPresented) cells.push(r.totalPresented, r.totalLastPresentedAt ? fmtFlexDate(r.totalLastPresentedAt) : '');
-      if (showPaid) cells.push(r.totalPaid);
       return cells;
     });
-    const totalRow: (string | number)[] = ['TOTAL'];
-    visibleTypes.forEach(t => {
-      if (showProjected) totalRow.push(filteredRows.reduce((s, r) => s + (r.cells[t]?.projected ?? 0), 0));
-      if (showPresented) totalRow.push(
-        filteredRows.reduce((s, r) => s + (r.cells[t]?.presented ?? 0), 0),
-        fmtFlexDate(filteredRows.reduce((date: string | undefined, r) => laterDate(date, r.cells[t]?.lastPresentedAt), undefined)),
-      );
-      if (showPaid) totalRow.push(filteredRows.reduce((s, r) => s + (r.cells[t]?.paid ?? 0), 0));
-    });
-    if (showProjected) totalRow.push(filteredRows.reduce((s, r) => s + r.totalProj, 0));
-    if (showPresented) totalRow.push(
-      filteredRows.reduce((s, r) => s + r.totalPresented, 0),
-      fmtFlexDate(filteredRows.reduce((date: string | undefined, r) => laterDate(date, r.totalLastPresentedAt), undefined)),
-    );
-    if (showPaid) totalRow.push(filteredRows.reduce((s, r) => s + r.totalPaid, 0));
 
     const ws = XLSX.utils.aoa_to_sheet([
       ['INTEEGRADOS — Informe Tributario'],
@@ -404,12 +375,11 @@ export const TaxReportPage = () => {
       headerRow1,
       headerRow2,
       ...dataRows,
-      totalRow,
     ]);
 
-    // Formato moneda en columnas 1..numCols-1 de las filas de datos y total
+    // Formato moneda en columnas 1..numCols-1 de las filas de datos
     const dataStart = TITLE_ROWS + 2; // 0-based: 4 título + 2 encabezados
-    applyFmt(ws, dataStart, dataStart + dataRows.length, Array.from({ length: numCols - 1 }, (_, i) => i + 1));
+    applyFmt(ws, dataStart, dataStart + dataRows.length - 1, Array.from({ length: numCols - 1 }, (_, i) => i + 1));
 
     // Merges: título abarca todo el ancho, encabezados de tipo por pares
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -423,18 +393,14 @@ export const TaxReportPage = () => {
       merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + typeColSpan - 1 } });
       col += typeColSpan;
     });
-    merges.push({ s: { r: TITLE_ROWS, c: col }, e: { r: TITLE_ROWS, c: col + typeColSpan - 1 } });
     ws['!merges'] = merges;
 
     const colWidths = [{ wch: 38 }];
     visibleTypes.forEach(() => {
-      if (showProjected) colWidths.push({ wch: 20 });
+      if (showProjected) colWidths.push({ wch: 20 }, { wch: 18 });
       if (showPresented) colWidths.push({ wch: 22 }, { wch: 22 });
-      if (showPaid) colWidths.push({ wch: 20 });
+      if (showPaid) colWidths.push({ wch: 20 }, { wch: 18 });
     });
-    if (showProjected) colWidths.push({ wch: 20 });
-    if (showPresented) colWidths.push({ wch: 22 }, { wch: 22 });
-    if (showPaid) colWidths.push({ wch: 20 });
     ws['!cols'] = colWidths;
     ws['!rows'] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 14 }, { hpt: 6 }, { hpt: 20 }, { hpt: 16 }];
 
@@ -783,20 +749,20 @@ export const TaxReportPage = () => {
                       {t}
                     </th>
                   ))}
-                  {typeColSpan > 0 && (
-                    <th colSpan={typeColSpan} className="px-2 py-3 text-center font-semibold text-gray-700 bg-gray-100 border-l border-gray-300 min-w-[180px]">
-                      Total
-                    </th>
-                  )}
                 </tr>
                 <tr className="border-b border-gray-200">
                   <th className="px-4 py-2 bg-gray-50 sticky left-0 z-10" />
                   {visibleTypes.map(t => (
                     <>
                       {showProjected && (
-                        <th key={`${t}-p`} className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 border-l border-gray-200 text-[10px] uppercase tracking-wide">
-                          Proyectado
-                        </th>
+                        <>
+                          <th key={`${t}-p`} className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 border-l border-gray-200 text-[10px] uppercase tracking-wide">
+                            Proyectado
+                          </th>
+                          <th key={`${t}-vd`} className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 text-[10px] uppercase tracking-wide">
+                            Fecha de vencimiento
+                          </th>
+                        </>
                       )}
                       {showPresented && (
                         <>
@@ -809,32 +775,17 @@ export const TaxReportPage = () => {
                         </>
                       )}
                       {showPaid && (
-                        <th key={`${t}-a`} className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
-                          Pagado
-                        </th>
+                        <>
+                          <th key={`${t}-a`} className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
+                            Pagado
+                          </th>
+                          <th key={`${t}-fpg`} className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
+                            Fecha de pago
+                          </th>
+                        </>
                       )}
                     </>
                   ))}
-                  {showProjected && (
-                    <th className="px-3 py-2 text-center font-semibold text-yellow-700 bg-yellow-50 border-l border-gray-300 text-[10px] uppercase tracking-wide">
-                      Proy. Total
-                    </th>
-                  )}
-                  {showPresented && (
-                    <>
-                      <th className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
-                        Valor presentado total
-                      </th>
-                      <th className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
-                        Fecha de presentado
-                      </th>
-                    </>
-                  )}
-                  {showPaid && (
-                    <th className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
-                      Pag. Total
-                    </th>
-                  )}
                 </tr>
               </thead>
 
@@ -862,9 +813,14 @@ export const TaxReportPage = () => {
                           return (
                             <>
                               {showProjected && (
-                                <td key={`${t}-p`} className="px-3 py-3 text-right text-yellow-700 bg-yellow-50/50 border-l border-gray-100 font-mono">
-                                  {c?.projected ? fmtCOPShort(c.projected) : <span className="text-gray-200">—</span>}
-                                </td>
+                                <>
+                                  <td key={`${t}-p`} className="px-3 py-3 text-right text-yellow-700 bg-yellow-50/50 border-l border-gray-100 font-mono">
+                                    {c?.projected ? fmtCOPShort(c.projected) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                  <td key={`${t}-vd`} className="px-3 py-3 text-center bg-yellow-50/50 text-[11px] text-gray-500 whitespace-nowrap">
+                                    {c?.lastDueDate ? fmtFlexDate(c.lastDueDate) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                </>
                               )}
                               {showPresented && (
                                 <>
@@ -877,33 +833,18 @@ export const TaxReportPage = () => {
                                 </>
                               )}
                               {showPaid && (
-                                <td key={`${t}-a`} className="px-3 py-3 text-right text-green-700 bg-green-50/50 font-mono">
-                                  {c?.paid ? fmtCOPShort(c.paid) : <span className="text-gray-200">—</span>}
-                                </td>
+                                <>
+                                  <td key={`${t}-a`} className="px-3 py-3 text-right text-green-700 bg-green-50/50 font-mono">
+                                    {c?.paid ? fmtCOPShort(c.paid) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                  <td key={`${t}-fpg`} className="px-3 py-3 text-center bg-green-50/50 text-[11px] text-gray-500 whitespace-nowrap">
+                                    {c?.lastPaidAt ? fmtFlexDate(c.lastPaidAt) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                </>
                               )}
                             </>
                           );
                         })}
-                        {showProjected && (
-                          <td className="px-3 py-3 text-right text-yellow-800 bg-yellow-50 border-l border-gray-300 font-mono font-semibold">
-                            {row.totalProj ? fmtCOPShort(row.totalProj) : <span className="text-gray-200">—</span>}
-                          </td>
-                        )}
-                        {showPresented && (
-                          <>
-                            <td className="px-3 py-3 text-center bg-blue-50 text-[11px] font-semibold text-blue-800">
-                              {row.totalPresented ? fmtCOPShort(row.totalPresented) : <span className="text-gray-200">—</span>}
-                            </td>
-                            <td className="px-3 py-3 text-center bg-blue-50 text-[11px] text-gray-600 whitespace-nowrap">
-                              {row.totalLastPresentedAt ? fmtFlexDate(row.totalLastPresentedAt) : <span className="text-gray-200">—</span>}
-                            </td>
-                          </>
-                        )}
-                        {showPaid && (
-                          <td className="px-3 py-3 text-right text-green-800 bg-green-50 font-mono font-semibold">
-                            {row.totalPaid ? fmtCOPShort(row.totalPaid) : <span className="text-gray-200">—</span>}
-                          </td>
-                        )}
                       </tr>
 
                       {isExp && detail.map(obl => (
@@ -921,9 +862,14 @@ export const TaxReportPage = () => {
                             return (
                               <>
                                 {showProjected && (
-                                  <td key={`d-${t}-p`} className="px-3 py-2 text-right border-l border-gray-100 bg-yellow-50/30 font-mono text-yellow-700">
-                                    {isThis && obl.projected ? fmtCOPShort(obl.projected) : ''}
-                                  </td>
+                                  <>
+                                    <td key={`d-${t}-p`} className="px-3 py-2 text-right border-l border-gray-100 bg-yellow-50/30 font-mono text-yellow-700">
+                                      {isThis && obl.projected ? fmtCOPShort(obl.projected) : ''}
+                                    </td>
+                                    <td key={`d-${t}-vd`} className="px-3 py-2 text-center bg-yellow-50/30 text-gray-500 whitespace-nowrap">
+                                      {isThis && obl.dueDate ? fmtFlexDate(obl.dueDate) : ''}
+                                    </td>
+                                  </>
                                 )}
                                 {showPresented && (
                                   <>
@@ -936,100 +882,24 @@ export const TaxReportPage = () => {
                                   </>
                                 )}
                                 {showPaid && (
-                                  <td key={`d-${t}-a`} className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
-                                    {isThis && obl.paid ? fmtCOPShort(obl.paid) : ''}
-                                  </td>
+                                  <>
+                                    <td key={`d-${t}-a`} className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
+                                      {isThis && obl.paid ? fmtCOPShort(obl.paid) : ''}
+                                    </td>
+                                    <td key={`d-${t}-fpg`} className="px-3 py-2 text-center bg-green-50/30 text-gray-500 whitespace-nowrap">
+                                      {isThis && obl.paidAt ? fmtFlexDate(obl.paidAt) : ''}
+                                    </td>
+                                  </>
                                 )}
                               </>
                             );
                           })}
-                          {showProjected && (
-                            <td className="px-3 py-2 text-right border-l border-gray-300 bg-yellow-50/30 font-mono text-yellow-700">
-                              {obl.projected ? fmtCOPShort(obl.projected) : ''}
-                            </td>
-                          )}
-                          {showPresented && (
-                            <>
-                              <td className="px-3 py-2 text-center bg-blue-50/20 text-blue-700">
-                                {obl.presented ? fmtCOPShort(obl.presented) : ''}
-                              </td>
-                              <td className="px-3 py-2 text-center bg-blue-50/20 text-gray-500 whitespace-nowrap">
-                                {obl.presentedAt ? fmtFlexDate(obl.presentedAt) : ''}
-                              </td>
-                            </>
-                          )}
-                          {showPaid && (
-                            <td className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
-                              {obl.paid ? fmtCOPShort(obl.paid) : ''}
-                            </td>
-                          )}
                         </tr>
                       ))}
                     </>
                   );
                 })}
               </tbody>
-
-              <tfoot>
-                <tr className="border-t-2 border-gray-300 bg-gray-900">
-                  <td className="px-4 py-3 font-bold text-white sticky left-0 bg-gray-900 z-10 text-xs uppercase tracking-wider">
-                    TOTAL
-                  </td>
-                  {visibleTypes.map(t => {
-                    const proj = filteredRows.reduce((s, r) => s + (r.cells[t]?.projected ?? 0), 0);
-                    const paid  = filteredRows.reduce((s, r) => s + (r.cells[t]?.paid  ?? 0), 0);
-                    const presented = filteredRows.reduce((s, r) => s + (r.cells[t]?.presented ?? 0), 0);
-                    const lastPresentedAt = filteredRows.reduce((acc: string | undefined, r) => laterDate(acc, r.cells[t]?.lastPresentedAt), undefined as string | undefined);
-                    return (
-                      <>
-                        {showProjected && (
-                          <td key={`t-${t}-p`} className="px-3 py-3 text-right text-yellow-300 font-bold font-mono border-l border-gray-700 text-xs">
-                            {proj ? fmtCOP(proj) : '—'}
-                          </td>
-                        )}
-                        {showPresented && (
-                          <>
-                            <td key={`t-${t}-sp`} className="px-3 py-3 text-center text-blue-300 font-bold text-[11px]">
-                              {presented ? fmtCOP(presented) : '—'}
-                            </td>
-                            <td key={`t-${t}-fp`} className="px-3 py-3 text-center text-blue-200 text-[11px] whitespace-nowrap">
-                              {lastPresentedAt ? fmtFlexDate(lastPresentedAt) : '—'}
-                            </td>
-                          </>
-                        )}
-                        {showPaid && (
-                          <td key={`t-${t}-a`} className="px-3 py-3 text-right text-green-300 font-bold font-mono text-xs">
-                            {paid ? fmtCOP(paid) : '—'}
-                          </td>
-                        )}
-                      </>
-                    );
-                  })}
-                  {showProjected && (
-                    <td className="px-3 py-3 text-right text-yellow-200 font-bold font-mono border-l border-gray-600 text-xs">
-                      {fmtCOP(filteredRows.reduce((s, r) => s + r.totalProj, 0))}
-                    </td>
-                  )}
-                  {showPresented && (
-                    <>
-                      <td className="px-3 py-3 text-center text-blue-300 font-bold text-[11px]">
-                        {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPresented, 0))}
-                      </td>
-                      <td className="px-3 py-3 text-center text-blue-200 text-[11px] whitespace-nowrap">
-                        {(() => {
-                          const d = filteredRows.reduce((acc: string | undefined, r) => laterDate(acc, r.totalLastPresentedAt), undefined as string | undefined);
-                          return d ? fmtFlexDate(d) : '—';
-                        })()}
-                      </td>
-                    </>
-                  )}
-                  {showPaid && (
-                    <td className="px-3 py-3 text-right text-green-200 font-bold font-mono text-xs">
-                      {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPaid, 0))}
-                    </td>
-                  )}
-                </tr>
-              </tfoot>
             </table>
           </div>
 

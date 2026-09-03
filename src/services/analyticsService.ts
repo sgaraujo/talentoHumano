@@ -281,9 +281,6 @@ class AnalyticsService {
           : new Date(currentYear, 11, 31);
         return end < today ? end : today;
       })();
-      const periodStart = filters?.mes !== undefined
-        ? new Date(currentYear, currentMonth, 1)
-        : new Date(currentYear, 0, 1);
 
       // Fotografía de relaciones vigentes al cierre del período. En meses pasados
       // incluye a quien seguía vinculado entonces aunque hoy ya esté retirado.
@@ -306,44 +303,25 @@ class AnalyticsService {
       });
       const headcount = new Set(activeRelations.map(r => r.employeeId)).size;
 
-      // Reconstrucción histórica — SOLO para el promedio del denominador de rotación,
-      // nunca se muestra como "headcount". El campo status es el estado ACTUAL de la
-      // relación, no una foto por fecha: para saber quién seguía vinculado a una
-      // fecha pasada (ej. 1-ene) hay que incluir también a quien ya está retirado hoy
-      // pero cuyo endDate era posterior a esa fecha pasada — si no, cualquiera que se
-      // haya ido después se borra también de la foto de meses atrás, hundiendo el
-      // denominador y disparando la tasa de rotación en vez de corregirla.
-      const headcountAtPast = (refDate: Date) => new Set(
-        relations.filter(r => isActiveAt(r, refDate)).map(r => r.employeeId)
-      ).size;
-      // Headcount promedio de UN mes puntual: promedio de su inicio y su fin (capado
-      // a hoy si es el mes en curso).
-      const monthlyHeadcountAvg = (year: number, month: number) => {
-        const mStart = new Date(year, month, 1);
+      // Headcount de UN mes puntual: al cierre de ese mes (capado a hoy si es el mes
+      // en curso). Reconstruye el estado histórico porque el campo status es el
+      // estado ACTUAL de la relación, no una foto por fecha: para saber quién seguía
+      // vinculado al cierre de un mes pasado hay que incluir también a quien ya está
+      // retirado hoy pero cuyo endDate era posterior a esa fecha — si no, cualquiera
+      // que se haya ido después se borra también de la foto de meses atrás.
+      const monthlyHeadcount = (year: number, month: number) => {
         const mEndRaw = new Date(year, month + 1, 0);
         const mEnd = mEndRaw < today ? mEndRaw : today;
-        return (headcountAtPast(mStart) + headcountAtPast(mEnd)) / 2;
+        return new Set(
+          relations.filter(r => isActiveAt(r, mEnd)).map(r => r.employeeId)
+        ).size;
       };
 
-      // Denominador de las tasas de rotación. Ingresos y Retiros son flujo (se suman
-      // en todo el período), pero Headcount es una foto puntual — no puede usarse el
-      // headcount de un solo mes cuando el numerador cubre varios meses, o la tasa se
-      // dispara (ej. retiros de todo el año / headcount de agosto). Por eso:
-      //   • Un solo mes filtrado → headcount promedio de ESE mes (sin cambios).
-      //   • "Todos" o rango de varios meses → promedio de los headcounts mensuales
-      //     de cada mes incluido en el rango: (H_ene + H_feb + ... + H_n) / n.
-      const includedMonths = filters?.mes !== undefined
-        ? [currentMonth]
-        : Array.from({ length: periodEnd.getMonth() + 1 }, (_, m) => m);
-      const avgHeadcount = filters?.mes !== undefined
-        ? (headcountAtPast(periodStart) + headcountAtPast(periodEnd)) / 2
-        : includedMonths.reduce((sum, m) => sum + monthlyHeadcountAvg(currentYear, m), 0) / includedMonths.length;
-
+      // Denominador de las tasas de rotación: headcount normal (sin promediar) al
+      // cierre del período filtrado — ya calculado arriba como `headcount`.
       const headcountBaseLabel = filters?.mes !== undefined
         ? `Base: headcount de ${this.getMonthName(currentMonth)} ${currentYear}`
-        : includedMonths.length === 1
-          ? `Base: headcount promedio de ${this.getMonthName(includedMonths[0])} ${currentYear}`
-          : `Base: headcount promedio ${this.getMonthName(includedMonths[0]).slice(0, 3)}–${this.getMonthName(includedMonths[includedMonths.length - 1]).slice(0, 3)} ${currentYear}`;
+        : `Base: headcount al cierre de ${this.getMonthName(periodEnd.getMonth())} ${currentYear}`;
 
       // Un ingreso/retiro con fecha futura (ej. una terminación ya registrada con
       // preaviso) todavía no ocurrió — no debe sumar en el conteo del período hasta
@@ -371,8 +349,8 @@ class AnalyticsService {
       const retirosInvoluntarios = retiros.length - retirosVoluntarios;
 
       // Fórmula oficial: renuncias voluntarias / HT del período, sin aprendices.
-      const rotacionGeneral    = avgHeadcount > 0 ? round2((retirosVoluntarios / avgHeadcount) * 100) : 0;
-      const rotacionVoluntaria = avgHeadcount > 0 ? round2((retirosVoluntarios / avgHeadcount) * 100) : 0;
+      const rotacionGeneral    = headcount > 0 ? round2((retirosVoluntarios / headcount) * 100) : 0;
+      const rotacionVoluntaria = headcount > 0 ? round2((retirosVoluntarios / headcount) * 100) : 0;
       const rotacionEvitable   = rotacionVoluntaria;
       const tasaVoluntaria     = retiros.length > 0 ? round2((retirosVoluntarios / retiros.length) * 100) : 0;
       const cubrimiento        = retiros.length > 0 ? round2((ingresos.length / retiros.length) * 100) : 0;
@@ -394,10 +372,10 @@ class AnalyticsService {
           && sameMonth(toDate(r.endDate))
           && esVoluntario(r.terminationReason)
         ).length;
-        // Headcount promedio de ESE mes, no el headcount global del período filtrado
-        // — si no, enero se divide entre el headcount de diciembre.
-        const monthAvgHeadcount = monthlyHeadcountAvg(year, month);
-        const monthRotacion = monthAvgHeadcount > 0 ? round2((monthRetirosVoluntarios / monthAvgHeadcount) * 100) : 0;
+        // Headcount de ESE mes, no el headcount global del período filtrado — si no,
+        // enero se divide entre el headcount de diciembre.
+        const monthHeadcount = monthlyHeadcount(year, month);
+        const monthRotacion = monthHeadcount > 0 ? round2((monthRetirosVoluntarios / monthHeadcount) * 100) : 0;
         monthlyData.push({ month: this.getMonthName(month), year, ingresos: monthIngresos, retiros: monthRetiros, rotacion: monthRotacion, rotacionEvitable: monthRotacion });
       }
 
@@ -437,7 +415,7 @@ class AnalyticsService {
         rotacionVoluntaria,
         rotacionEvitable,
         headcountBaseLabel,
-        headcountPromedio: round2(avgHeadcount),
+        headcountBase: headcount,
         tasaVoluntaria,
         tasaVoluntariaExterna: tasaVoluntaria,
         cubrimiento,
