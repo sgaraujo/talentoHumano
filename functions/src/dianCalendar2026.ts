@@ -2,7 +2,7 @@
 // Fuente: Decreto 2229 del 22 de diciembre de 2023
 // El dígito que determina el turno es el ÚLTIMO dígito del NIT antes del guión verificador.
 // Ej: NIT 901193667-1 → último dígito = 7
-import { ALL_BOGOTA_2026 } from './bogotaCalendar2026';
+import { ALL_BOGOTA_2026, getBogotaObligationsByNit } from './bogotaCalendar2026';
 
 export type NitDigit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
@@ -516,7 +516,7 @@ export function getUpcomingObligationsByNit(nit: string, daysAhead = 60): DianOb
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const limit = new Date(today); limit.setDate(limit.getDate() + daysAhead);
   const nacional = getDianObligationsByNit(nit);
-  const bogota: DianObligation[] = ALL_BOGOTA_2026.map(o => ({
+  const bogota: DianObligation[] = [...ALL_BOGOTA_2026, ...getBogotaObligationsByNit(nit)].map(o => ({
     taxType: o.taxType,
     category: 'ICA' as const,
     period: o.period,

@@ -247,7 +247,7 @@ export function useQuestionnaireStats() {
             user?.contractInfo?.assignment?.projectId
               ? user.contractInfo.assignment.projectId
               : user?.projectIds?.[0] ?? "sin-proyecto";
-          const pname = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin proyecto" : pid);
+          const pname = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin cuenta analítica" : pid);
           if (!projAcc2.has(pid)) projAcc2.set(pid, { name: pname, assigned: 0, completed: 0 });
           const pe = projAcc2.get(pid)!;
           pe.assigned++;
@@ -327,7 +327,7 @@ export function useQuestionnaireStats() {
 
         for (const pid of pids) {
           const name =
-            projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin proyecto" : pid);
+            projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin cuenta analítica" : pid);
           if (!projAcc.has(pid)) projAcc.set(pid, { name, assigned: 0, completed: 0 });
           const e = projAcc.get(pid)!;
           e.assigned++;

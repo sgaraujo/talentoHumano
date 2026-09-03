@@ -4,7 +4,7 @@ import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import { getDianObligationsByNit } from "./dianCalendar2026";
-import { ALL_BOGOTA_2026 } from "./bogotaCalendar2026";
+import { ALL_BOGOTA_2026, getBogotaObligationsByNit } from "./bogotaCalendar2026";
 import { compareAlertCuts, displayPeriod, shouldIncludeManualAlert, type PreviousAlertSnapshot } from "./taxAlertLogic";
 
 admin.initializeApp();
@@ -1494,7 +1494,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
 
     // Obtener todas las obligaciones del calendario para esta empresa
     const dianObls = getDianObligationsByNit(nit).filter(o => !hidden.has(o.taxType));
-    const bogotaObls = ALL_BOGOTA_2026.filter(o => !hidden.has(o.taxType));
+    const bogotaObls = [...ALL_BOGOTA_2026, ...getBogotaObligationsByNit(nit)].filter(o => !hidden.has(o.taxType));
     const allCalObls = [
       ...dianObls.map(o => ({ ...o, company: comp.name || nit, nit })),
       ...bogotaObls.map(o => ({ taxType: o.taxType, period: o.period, dueDate: o.dueDate, company: comp.name || nit, nit })),
@@ -1584,6 +1584,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
         resolved: COMPLETED_STATUSES.has(o.status ?? "") || o.status === "No aplica",
         representedByCalendar,
         hasCompletedDuplicate,
+        excludedByCompany: hidden.has(o.taxType),
         dueDate: o.dueDate,
         today: todayStr,
         overdueFrom: OVERDUE_FROM,
@@ -1612,7 +1613,13 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
     }
   }
 
-  if (recipientMap.size === 0) return { sent: 0, skipped, failed: 0 };
+  // Si no hay ningún vencimiento que reportar, igual se envía el correo diario
+  // a contabilidad/admin (con las tablas vacías) para confirmar que la alerta
+  // corrió correctamente — un día sin novedades no debe leerse como que el
+  // sistema dejó de enviar el reporte.
+  if (recipientMap.size === 0) {
+    for (const gr of globalRecipients) ensureRecipient(gr.email, gr.name);
+  }
 
   // Mapa: índice canónico → NIT limpio (para rellenar NITs vacíos en entradas manuales)
   const canonicalNitMap = new Map<number, string>();
@@ -1662,6 +1669,9 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
         </td>`;
       });
       rows.push(`<tr>${cells.join("")}</tr>`);
+    }
+    if (rows.length === 0) {
+      return `<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6b7280;text-align:center">&#x2705; Todas las empresas est&#xE1;n al d&#xED;a. No hay vencimientos pendientes ni pr&#xF3;ximos.</p>`;
     }
     return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows.join("")}</table>`;
   };
@@ -1717,7 +1727,8 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   let failed = 0;
 
   for (const recipient of recipientMap.values()) {
-    if (recipient.obligations.length === 0) continue;
+    // Un destinatario solo llega aquí con 0 obligaciones en el caso "sin
+    // novedades" (ver arriba) — se envía igual, con las secciones vacías.
 
     // Agrupar primero por empresa (orden de prioridad del negocio) y solo dentro
     // de cada empresa ordenar por urgencia — así todas las obligaciones de una
@@ -1980,7 +1991,7 @@ export const findDuplicateAlerts = onCall(
       if (!nit) continue;
       const hidden = new Set<string>(excludedTaxTypesByCompany.get(compDoc.id) ?? []);
       const dianObls = getDianObligationsByNit(nit).filter((o: any) => !hidden.has(o.taxType));
-      const bogotaObls = ALL_BOGOTA_2026.filter((o: any) => !hidden.has(o.taxType));
+      const bogotaObls = [...ALL_BOGOTA_2026, ...getBogotaObligationsByNit(nit)].filter((o: any) => !hidden.has(o.taxType));
 
       for (const calObl of [...dianObls, ...bogotaObls]) {
         const key = `${nit}__${(calObl.taxType as string).toLowerCase().trim()}__${calObl.dueDate}`;

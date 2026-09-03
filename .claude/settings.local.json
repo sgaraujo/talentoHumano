@@ -20,7 +20,20 @@
       "Bash(node scripts/find-ut-itac.mjs)",
       "Bash(node scripts/find-ut-itac-detail.mjs)",
       "Bash(node scripts/merge-ut-itac.mjs)",
-      "Bash(node scripts/merge-ut-itac.mjs --run)"
+      "Bash(node scripts/merge-ut-itac.mjs --run)",
+      "Bash(node -e \"console.log\\(require.resolve\\('firebase-admin'\\)\\)\")",
+      "Bash(node \"C:\\\\Users\\\\hp\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-hp-nelyoda\\\\f83f4d42-bbc8-4969-b4da-7fb12c9df54d\\\\scratchpad\\\\diagMovements.cjs\")",
+      "Bash(node scripts/diagMovements.cjs)",
+      "Bash(node -e \"const sa = require\\('./scripts/serviceAccount.json'\\); console.log\\('project_id:', sa.project_id\\); console.log\\('client_email:', sa.client_email\\);\")",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"console.log\\(new Date\\(1781293716*1000\\).toISOString\\(\\)\\)\")",
+      "Bash(node -e \"console.log\\(new Date\\(\\).toString\\(\\)\\); console.log\\(new Date\\(\\).toISOString\\(\\)\\)\")",
+      "Bash(node scripts/scanDupMovements.cjs)",
+      "Bash(node scripts/dedupeMovements.cjs)",
+      "Bash(rm -f scripts/dedupeMovements.cjs scripts/scanDupMovements.cjs)",
+      "Bash(node scripts/diffMovVsEmp.cjs)",
+      "Bash(node scripts/investigate9.cjs)",
+      "Bash(node scripts/fix9cases.cjs)"
     ],
     "additionalDirectories": [
       "\\tmp"

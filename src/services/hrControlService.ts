@@ -1,6 +1,7 @@
 import { collection, collectionGroup, doc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '@/config/firestoreCollections';
+import { parseFirestoreDate } from '@/domain/humanResources/firestoreDate';
 
 export interface HrControlEmployee {
   id: string;
@@ -96,7 +97,7 @@ export async function getHrEmployeeDetail(employeeId: string) {
     socialSecurity: socialSnap.exists() ? socialSnap.data() : null,
     relationships: relationships.sort((a: any, b: any) => {
       if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
-      return String(b.startDate ?? '').localeCompare(String(a.startDate ?? ''));
+      return (parseFirestoreDate(b.startDate)?.getTime() ?? 0) - (parseFirestoreDate(a.startDate)?.getTime() ?? 0);
     }),
   } as any;
 }

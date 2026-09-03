@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '@/config/firestoreCollections';
 
@@ -103,7 +103,7 @@ export async function updateHrEmployeeFields(employeeId: string, values: HrEdita
 }
 
 export async function updateEmploymentTermination(
-  employeeId: string, employmentId: string, values: { terminationReason?: string; terminationCost?: number }, actor: string,
+  employeeId: string, employmentId: string, values: { terminationReason?: string; terminationCost?: number; endDate?: string }, actor: string,
 ) {
   const employmentRef = doc(db, FIRESTORE_COLLECTIONS.employees, employeeId, FIRESTORE_SUBCOLLECTIONS.employeeEmployments, employmentId);
   const snapshot = await getDoc(employmentRef);
@@ -119,10 +119,52 @@ export async function updateEmploymentTermination(
     const next = values.terminationCost;
     if (next !== current.terminationCost) { patch.terminationCost = next ?? null; changes.push({ field: 'terminationCost', previousValue: current.terminationCost ?? null, newValue: next ?? null }); }
   }
+  if ('endDate' in values) {
+    const next = clean(values.endDate);
+    if (next !== clean(current.endDate)) { patch.endDate = next; changes.push({ field: 'endDate', previousValue: current.endDate ?? null, newValue: next }); }
+  }
   if (!changes.length) return 0;
   await updateDoc(employmentRef, { ...patch, updatedAt: serverTimestamp() });
   await addDoc(collection(employmentRef, 'audit'), { source: 'manual', changedBy: actor, changedAt: serverTimestamp(), changes });
   return changes.length;
+}
+
+export async function updateEmploymentStatus(
+  employeeId: string,
+  employmentId: string,
+  status: 'active' | 'retired',
+  values: { terminationReason?: string; terminationCost?: number; endDate?: string },
+  actor: string,
+) {
+  const employeeRef = doc(db, FIRESTORE_COLLECTIONS.employees, employeeId);
+  const employmentRef = doc(employeeRef, FIRESTORE_SUBCOLLECTIONS.employeeEmployments, employmentId);
+  const snapshot = await getDoc(employmentRef);
+  if (!snapshot.exists()) throw new Error('La relación laboral ya no existe.');
+  const current = snapshot.data() as any;
+  if (status === 'retired' && !clean(values.endDate)) throw new Error('La fecha de retiro es obligatoria.');
+  if (status === 'retired' && !clean(values.terminationReason)) throw new Error('El motivo de retiro es obligatorio.');
+
+  const patch: Record<string, unknown> = status === 'active'
+    ? { status: 'active', endDate: null, terminationReason: null, terminationCost: null, updatedAt: serverTimestamp() }
+    : {
+        status: 'retired', endDate: clean(values.endDate), terminationReason: clean(values.terminationReason),
+        terminationCost: values.terminationCost ?? null, updatedAt: serverTimestamp(),
+      };
+  const relationships = await getDocs(collection(employeeRef, FIRESTORE_SUBCOLLECTIONS.employeeEmployments));
+  const hasActiveRelationship = relationships.docs.some(item =>
+    item.id === employmentId ? status === 'active' : item.data().status === 'active');
+  const auditRef = doc(collection(employmentRef, 'audit'));
+  const batch = writeBatch(db);
+  batch.update(employmentRef, patch);
+  batch.set(auditRef, {
+    source: 'manual_status_change', changedBy: actor, changedAt: serverTimestamp(),
+    changes: [{ field: 'status', previousValue: current.status ?? null, newValue: status }],
+  });
+  batch.update(employeeRef, {
+    status: hasActiveRelationship ? 'active' : 'retired',
+    updatedAt: serverTimestamp(),
+  });
+  await batch.commit();
 }
 
 export const HR_PARTIAL_COLUMNS: Record<string, keyof HrEditableValues> = {

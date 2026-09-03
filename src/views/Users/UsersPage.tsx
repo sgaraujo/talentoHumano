@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useUsers } from '@/hooks/useUsers';
+import { firestoreDateLabel } from '@/domain/humanResources/firestoreDate';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -189,7 +190,7 @@ export const UsersPage = () => {
       'ROL':                         u.role  || '',
       'CEDULA':                      u.personalData?.documentNumber   || '',
       'TIPO DOCUMENTO':              u.personalData?.documentType     || '',
-      'FECHA DE NACIMIENTO':         u.personalData?.birthDate ? new Date(u.personalData.birthDate).toLocaleDateString('es-CO') : '',
+      'FECHA DE NACIMIENTO':         u.personalData?.birthDate ? firestoreDateLabel(u.personalData.birthDate) : '',
       'EDAD':                        u.personalData?.age       || '',
       'GENERO':                      u.personalData?.gender    || '',
       'ESTADO CIVIL':                u.personalData?.maritalStatus || '',
@@ -202,7 +203,7 @@ export const UsersPage = () => {
       'PERFIL':                      u.contractInfo?.assignment?.profile           || '',
       'PERFIL CONTABLE':             u.contractInfo?.assignment?.accountingProfile || '',
       'TIPO DE CONTRATO':            u.contractInfo?.contract?.contractType        || '',
-      'FECHA DE INGRESO':            u.contractInfo?.contract?.startDate ? new Date(u.contractInfo.contract.startDate).toLocaleDateString('es-CO') : '',
+      'FECHA DE INGRESO':            u.contractInfo?.contract?.startDate ? firestoreDateLabel(u.contractInfo.contract.startDate) : '',
       'MODALIDAD':                   u.contractInfo?.workConditions?.workModality  || '',
       'JORNADA':                     u.contractInfo?.workConditions?.workday       || '',
       'Sueldo':                      u.salaryInfo?.baseSalary          || '',
@@ -225,7 +226,7 @@ export const UsersPage = () => {
       'DEPARTAMENTO DE RESIDENCIA':  u.location?.state                 || '',
       'CIUDAD DE RESIDENCIA':        u.location?.city                  || '',
       'DIRECCION VIVIENDA':          u.location?.address               || '',
-      'FECHA RETIRO':                u.administrativeRecord?.terminationDate ? new Date(u.administrativeRecord.terminationDate).toLocaleDateString('es-CO') : '',
+      'FECHA RETIRO':                u.administrativeRecord?.terminationDate ? firestoreDateLabel(u.administrativeRecord.terminationDate) : '',
       'MOTIVO':                      u.administrativeRecord?.terminationReason         || '',
       'JUSTIFICACION RETIRO':        u.administrativeRecord?.terminationJustification  || '',
     }));
@@ -334,10 +335,10 @@ export const UsersPage = () => {
           <Select value={filterProject} onValueChange={setFilterProject}>
             <SelectTrigger className="w-52 border-gray-200 focus:ring-[#008C3C] shrink-0">
               <FolderOpen className="w-3.5 h-3.5 mr-1.5 text-gray-400 flex-shrink-0" />
-              <SelectValue placeholder="Proyecto" />
+              <SelectValue placeholder="Cuenta analítica" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todos los proyectos</SelectItem>
+              <SelectItem value="all">Todas las cuentas analíticas</SelectItem>
               {projectOptions.map(([name, count]) => (
                 <SelectItem key={name} value={name}>
                   <span className="flex items-center justify-between w-full gap-3">
@@ -449,7 +450,7 @@ export const UsersPage = () => {
                     <th className="px-3 py-3 text-left text-xs text-[#4A4A4A] font-semibold hidden sm:table-cell">Email</th>
                     <th className="px-3 py-3 text-left text-xs text-[#4A4A4A] font-semibold">Rol</th>
                     <th className="px-3 py-3 text-left text-xs text-[#4A4A4A] font-semibold hidden lg:table-cell">Empresa</th>
-                    <th className="px-3 py-3 text-left text-xs text-[#4A4A4A] font-semibold hidden lg:table-cell">Proyecto</th>
+                    <th className="px-3 py-3 text-left text-xs text-[#4A4A4A] font-semibold hidden lg:table-cell">Cuenta analítica</th>
                     <th className="px-3 py-3 text-left text-xs text-[#4A4A4A] font-semibold hidden md:table-cell">Perfil</th>
                     <th className="px-3 py-3 text-right text-xs text-[#4A4A4A] font-semibold">Acciones</th>
                   </tr>

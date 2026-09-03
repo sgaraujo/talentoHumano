@@ -28,7 +28,7 @@ export async function getCampaignAudienceData(): Promise<{
     getDocs(collection(db, FIRESTORE_COLLECTIONS.bulletins)),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaires)),
   ]);
-  const companies = companiesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company));
+  const companies = companiesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)).filter(c => c.active);
   const projects = projectsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
   const baseUrl = (import.meta.env.VITE_APP_URL ?? window.location.origin).replace(/\/$/, "");
   const contents = [

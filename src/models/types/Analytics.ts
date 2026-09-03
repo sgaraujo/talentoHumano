@@ -12,6 +12,11 @@ export interface RotationMetrics {
   tasaVoluntaria: number;
   tasaVoluntariaExterna: number;
   cubrimiento: number;
+
+  // Base de headcount usada en rotacionGeneral/rotacionVoluntaria (para mostrar
+  // debajo de las tarjetas, ej. "Base: headcount promedio Ene–Ago 2026")
+  headcountBaseLabel: string;
+  headcountPromedio: number;
   
   // Comparativas
   voluntarioVsInvoluntario: {
@@ -26,6 +31,7 @@ export interface RotationMetrics {
 
   // Desglose por motivo de retiro
   motivosRetiro: Record<string, number>;
+  retirosPorEmpresa: { empresa: string; count: number }[];
 
   // Headcount por proyecto
   headcountPorProyecto: { proyecto: string; empresa: string; count: number }[];

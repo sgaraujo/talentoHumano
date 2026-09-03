@@ -40,8 +40,8 @@ export function HrCreateEmployeeDialog({ open, onOpenChange, onCreated }: {
     setEmployee({ ...EMPTY_EMPLOYEE });
     setEmployment({ ...EMPTY_EMPLOYMENT });
     Promise.all([companyService.getAll(), projectService.getAll()])
-      .then(([comps, projs]) => { setCompanies(comps); setProjects(projs); })
-      .catch(() => toast.error('No se pudieron cargar empresas y proyectos'));
+      .then(([comps, projs]) => { setCompanies(comps.filter(c => c.active)); setProjects(projs); })
+      .catch(() => toast.error('No se pudieron cargar empresas y cuentas analíticas'));
   }, [open]);
 
   const visibleProjects = useMemo(
@@ -151,9 +151,9 @@ export function HrCreateEmployeeDialog({ open, onOpenChange, onCreated }: {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-gray-500">Proyecto</Label>
+                <Label className="text-xs text-gray-500">Cuenta analítica</Label>
                 <Select disabled={!employment.companyId} value={employment.projectId} onValueChange={v => setRel('projectId', v)}>
-                  <SelectTrigger><SelectValue placeholder="Sin proyecto" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Sin cuenta analítica" /></SelectTrigger>
                   <SelectContent>
                     {visibleProjects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                   </SelectContent>

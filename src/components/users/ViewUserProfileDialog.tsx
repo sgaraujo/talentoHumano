@@ -19,6 +19,7 @@ import { FIRESTORE_COLLECTIONS } from '@/config/firestoreCollections';
 import { companyService } from '@/services/companyService';
 import { projectService } from '@/services/projectService';
 import { userService } from '@/services/userService';
+import { firestoreDateInput } from '@/domain/humanResources/firestoreDate';
 
 const COLOMBIAN_EPS = [
   'Nueva EPS','Sanitas','Compensar','Sura','Famisanar','Coosalud','Mutual Ser',
@@ -70,6 +71,10 @@ const fmtDate = (date: any): string => {
   if (date?.toDate) d = date.toDate();
   else if (timestampSeconds !== null) d = new Date(timestampSeconds * 1000);
   else if (date instanceof Date) d = date;
+  else if (typeof date === 'string' && /Timestamp\s*\(\s*seconds\s*=\s*(-?\d+)/i.test(date)) {
+    const seconds = Number(date.match(/Timestamp\s*\(\s*seconds\s*=\s*(-?\d+)/i)?.[1]);
+    d = new Date(seconds * 1000);
+  }
   else if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date)) {
     const [y, m, day] = date.split('-').map(Number);
     d = new Date(y, m - 1, day);
@@ -84,13 +89,7 @@ const fmtMoney = (v: any): string => {
 };
 
 const toDateInput = (v: any): string => {
-  if (!v) return '';
-  if (v?.toDate) return v.toDate().toISOString().slice(0, 10);
-  const timestampSeconds = getTimestampSeconds(v);
-  if (timestampSeconds !== null) return new Date(timestampSeconds * 1000).toISOString().slice(0, 10);
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
-  if (typeof v === 'string') return v.slice(0, 10);
-  return '';
+  return firestoreDateInput(v);
 };
 
 function Row({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
@@ -208,11 +207,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
 
       if (companyMoved || projectMoved) {
         const isoDate = (v: any): string | undefined => {
-          if (!v) return undefined;
-          if (v?.toDate) return v.toDate().toISOString().slice(0, 10);
-          if (v instanceof Date) return v.toISOString().slice(0, 10);
-          if (typeof v === 'string') return v.slice(0, 10);
-          return undefined;
+          return firestoreDateInput(v) || undefined;
         };
 
         const entryRaw = {
@@ -658,7 +653,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
                         {/* Proyecto — select dinámico */}
                         {isEditing ? (
                           <div>
-                            <p className="text-xs text-gray-500 mb-0.5">Proyecto</p>
+                            <p className="text-xs text-gray-500 mb-0.5">Cuenta analítica</p>
                             <select className={INPUT_CLS}
                               value={get('contractInfo.assignment.project') ?? ''}
                               onChange={e => update('contractInfo.assignment.project', e.target.value)}>
@@ -667,7 +662,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
                             </select>
                           </div>
                         ) : (
-                          <Row label="Proyecto" value={fmt(get('contractInfo.assignment.project'))} />
+                          <Row label="Cuenta analítica" value={fmt(get('contractInfo.assignment.project'))} />
                         )}
                         {F('contractInfo.assignment.location', 'Sede')}
                         {/* Jefe directo — select con líderes globales + empresa */}
@@ -776,7 +771,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
                                       </div>
                                       <div className="text-right shrink-0">
                                         <p className="text-[10px] text-gray-400">
-                                          {h.startDate ? h.startDate : '—'} → {h.endDate ?? '—'}
+                                          {fmtDate(h.startDate)} → {fmtDate(h.endDate)}
                                         </p>
                                       </div>
                                     </div>
@@ -808,7 +803,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
 
                     {isEditing && (user?.employmentHistory ?? []).length === 0 && (
                       <p className="text-xs text-gray-400 italic text-center py-2">
-                        El historial se generará automáticamente cuando se cambie de empresa o proyecto.
+                        El historial se generará automáticamente cuando se cambie de empresa o cuenta analítica.
                       </p>
                     )}
 

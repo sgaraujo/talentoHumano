@@ -61,6 +61,53 @@ export const ALL_BOGOTA_2026: BogotaObligation[] = [
   ...ICA_ANUAL_BOGOTA_2026,
 ].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
+// ── Información Exógena Distrital 2026 (AG 2025) ─────────────────────────────
+// Resolución DDI-024115 del 27 de julio de 2026 — Secretaría Distrital de Hacienda
+// Artículo 28: el plazo depende del último dígito del NIT (antes del guión verificador)
+type NitLastDigit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+const EXOGENA_DISTRITAL_BOGOTA_2026: Record<NitLastDigit, string> = {
+  0: '2026-10-13',
+  1: '2026-10-14',
+  2: '2026-10-15',
+  3: '2026-10-16',
+  4: '2026-10-19',
+  5: '2026-10-20',
+  6: '2026-10-21',
+  7: '2026-10-22',
+  8: '2026-10-23',
+  9: '2026-10-26',
+};
+
+function lastNitDigit(nit: string): NitLastDigit | null {
+  if (!nit) return null;
+  const trimmed = nit.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  const base = trimmed.includes('-')
+    ? trimmed.split('-')[0].replace(/\D/g, '')
+    : digits.length > 9 ? digits.slice(0, -1) : digits;
+  if (!base) return null;
+  return Number(base[base.length - 1]) as NitLastDigit;
+}
+
+/**
+ * Vencimientos de Bogotá que dependen del NIT completo de la empresa (a diferencia
+ * de ALL_BOGOTA_2026, cuyas fechas son iguales para todos los contribuyentes).
+ * Por ahora solo incluye la Información Exógena Distrital (Resolución DDI-024115 de 2026).
+ */
+export function getBogotaObligationsByNit(nit: string): BogotaObligation[] {
+  const digit = lastNitDigit(nit);
+  if (digit === null) return [];
+  return [{
+    taxType: 'Exógena Distrital Bogotá',
+    category: 'ICA',
+    period: 'Exógena Distrital AG 2025',
+    dueDate: EXOGENA_DISTRITAL_BOGOTA_2026[digit],
+    scope: 'Distrital',
+    note: 'Resolución DDI-024115 de 2026',
+  }];
+}
+
 // ── Helper: obtener obligaciones próximas de Bogotá ───────────────────────────
 export function getUpcomingBogotaObligations(daysAhead = 60): BogotaObligation[] {
   const today = new Date(); today.setHours(0, 0, 0, 0);

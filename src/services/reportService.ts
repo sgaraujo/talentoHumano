@@ -1,24 +1,18 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { parseFirestoreDate } from '@/domain/humanResources/firestoreDate';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function toDate(v: any): Date | null {
-  if (!v) return null;
-  if (v instanceof Date) return v;
+  const d = parseFirestoreDate(v);
+  if (!d) return null;
   if (v?.toDate) {
-    const d = v.toDate();
     if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
       return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
     }
-    return d;
   }
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    const [yr, mo, dy] = v.split('-').map(Number);
-    return new Date(yr, mo - 1, dy);
-  }
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? null : d;
+  return d;
 }
 
 function fmt(d: Date | null): string {
@@ -262,7 +256,7 @@ export function generateMonthlyReport(params: {
   // Headcount por proyecto
   const projMap = new Map<string, { empresa: string; count: number }>();
   users.filter(u => u.role === 'colaborador').forEach(u => {
-    const proj = u.contractInfo?.assignment?.project || 'Sin proyecto';
+    const proj = u.contractInfo?.assignment?.project || 'Sin cuenta analítica';
     const emp  = u.contractInfo?.assignment?.company || '';
     if (!projMap.has(proj)) projMap.set(proj, { empresa: emp, count: 0 });
     projMap.get(proj)!.count++;
@@ -374,7 +368,7 @@ export function generateMonthlyReport(params: {
     ['Retiros del mes',        retiros.length.toString()],
     ['% Rot. Voluntaria',      `${rotacionPct}%  ${rotacionLabel(rotacionPct)}`],
     ['Empresas activas',       companies.filter((c: any) => c.active).length.toString()],
-    ['Proyectos activos',      projects.filter((p: any) => p.status === 'activo').length.toString()],
+    ['Cuentas analíticas activas', projects.filter((p: any) => p.status === 'activo').length.toString()],
     ['Total personas',         users.length.toString()],
     ['Cuestionarios activos',  qStats ? qStats.active.toString() : '-'],
     ['Salario promedio',       salarioPromedio > 0 ? `$${Math.round(salarioPromedio / 1000)}k` : '-'],
@@ -446,7 +440,7 @@ export function generateMonthlyReport(params: {
     newPage(`Informe ${monthName} ${year}`);
     curY = 26;
   }
-  sectionTitle('Headcount por Proyecto', curY, BLUE);
+  sectionTitle('Headcount por cuenta analítica', curY, BLUE);
   curY += 6;
   curY = hBarChart(doc, topProyectos, 14, curY, W - 28, 7, 3, BLUE);
 
@@ -511,7 +505,7 @@ export function generateMonthlyReport(params: {
       startY: curY + 5,
       head: [['Indicador', 'Valor', 'Referencia']],
       body: [
-        ['Proyectos activos',      projects.filter((p: any) => p.status === 'activo').toString() || projects.filter((p: any) => p.status === 'activo').length.toString(), `de ${projects.length} totales`],
+        ['Cuentas analíticas activas', projects.filter((p: any) => p.status === 'activo').toString() || projects.filter((p: any) => p.status === 'activo').length.toString(), `de ${projects.length} totales`],
         ['Cuestionarios activos',  qStats ? qStats.active.toString() : '-', qStats ? `${qStats.total} en total` : ''],
         ['Total personas sistema', users.length.toString(), 'Todos los roles'],
         ['Salario promedio',       salarioPromedio > 0 ? `$${salarioPromedio.toLocaleString('es-CO')}` : '-', 'Colaboradores activos'],
@@ -542,7 +536,7 @@ export function generateMonthlyReport(params: {
   } else {
     autoTable(doc, {
       startY: curY + 6,
-      head: [['Nombre', 'Empresa', 'Proyecto', 'Fecha ingreso']],
+      head: [['Nombre', 'Empresa', 'Cuenta analítica', 'Fecha ingreso']],
       body: ingresos.map(m => [m.userName || '-', m.company || '-', m.project || m.area || '-', fmt(toDate(m.date))]),
       theme: 'striped',
       headStyles: { fillColor: GREEN, textColor: [255,255,255], fontSize: 8.5, fontStyle: 'bold' },
@@ -742,12 +736,12 @@ export function generateEmailSendReport(params: {
   newPage('Estadisticas de Correos');
   let curY = 26;
 
-  sectionTitle('Entrega de Correos por Proyecto', curY, GREEN);
+  sectionTitle('Entrega de correos por cuenta analítica', curY, GREEN);
   curY += 5;
 
   autoTable(doc, {
     startY: curY,
-    head: [['Proyecto', 'Asignaciones', 'Entregados', 'Fallidos', 'Sin estado', 'Tasa']],
+    head: [['Cuenta analítica', 'Asignaciones', 'Entregados', 'Fallidos', 'Sin estado', 'Tasa']],
     body: byProject.map(r => [
       r.projectName.length > 30 ? r.projectName.slice(0, 28) + '...' : r.projectName,
       r.total.toString(),
@@ -783,7 +777,7 @@ export function generateEmailSendReport(params: {
   // Gráfico horizontal top proyectos
   const topP = byProject.slice(0, 8).map(r => ({ label: r.projectName, value: r.sent }));
   if (topP.length > 0 && curY + topP.length * 10 + 16 < H - 15) {
-    sectionTitle('Top proyectos — Correos entregados', curY, BLUE);
+    sectionTitle('Top cuentas analíticas — Correos entregados', curY, BLUE);
     curY += 6;
     curY = hBarChart(doc, topP, 14, curY, W - 28, 7, 3, BLUE);
   }

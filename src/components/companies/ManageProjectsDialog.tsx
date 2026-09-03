@@ -65,7 +65,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
       );
       setCompanyUsers(filtered);
     } catch (e: any) {
-      toast.error('Error al cargar proyectos', { description: e.message });
+      toast.error('Error al cargar cuentas analíticas', { description: e.message });
     } finally {
       setLoading(false);
     }
@@ -123,7 +123,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
           sede: form.sede,
           priority: form.priority,
         });
-        toast.success('Proyecto actualizado');
+        toast.success('Cuenta analítica actualizada');
       } else {
         await projectService.create({
           name: form.name.trim(),
@@ -133,7 +133,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
           priority: form.priority,
           sede: form.sede,
         });
-        toast.success('Proyecto creado');
+        toast.success('Cuenta analítica creada');
       }
       setFormOpen(false);
       load();
@@ -145,10 +145,10 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
   };
 
   const handleDeleteProject = async (p: Project) => {
-    if (!confirm(`¿Eliminar el proyecto "${p.name}"?`)) return;
+    if (!confirm(`¿Eliminar la cuenta analítica "${p.name}"?`)) return;
     try {
       await projectService.delete(p.id);
-      toast.success('Proyecto eliminado');
+      toast.success('Cuenta analítica eliminada');
       load();
     } catch (e: any) {
       toast.error('Error', { description: e.message });
@@ -194,7 +194,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
       }));
       setMemberVal('');
       setAddingMember(null);
-      toast.success(`${user.fullName} agregado al proyecto`);
+      toast.success(`${user.fullName} agregado a la cuenta analítica`);
     } catch (e: any) {
       toast.error('Error', { description: e.message });
     } finally {
@@ -209,7 +209,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
         ...prev,
         [projectId]: (prev[projectId] || []).filter((m: any) => m.userId !== userId),
       }));
-      toast.success('Persona removida del proyecto');
+      toast.success('Persona removida de la cuenta analítica');
     } catch (e: any) {
       toast.error('Error', { description: e.message });
     }
@@ -223,15 +223,15 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FolderKanban className="w-5 h-5 text-[#008C3C]" />
-              Proyectos — {companyName}
+              Cuentas analíticas — {companyName}
             </DialogTitle>
           </DialogHeader>
 
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-500">{projects.length} proyecto{projects.length !== 1 ? 's' : ''}</p>
+            <p className="text-sm text-gray-500">{projects.length} cuenta{projects.length !== 1 ? 's analíticas' : ' analítica'}</p>
             <Button size="sm" onClick={openCreate}
               className="bg-[#008C3C] hover:bg-[#006C2F] text-white gap-1">
-              <Plus className="w-4 h-4" /> Nuevo proyecto
+              <Plus className="w-4 h-4" /> Nueva cuenta analítica
             </Button>
           </div>
 
@@ -243,7 +243,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
             ) : projects.length === 0 ? (
               <div className="text-center py-12 text-gray-400">
                 <FolderKanban className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No hay proyectos — crea el primero</p>
+                <p className="text-sm">No hay cuentas analíticas — crea la primera</p>
               </div>
             ) : projects.map(p => {
               const isExpanded = expandedId === p.id;
@@ -324,7 +324,7 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
                   {isExpanded && (
                     <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                        Personas en este proyecto
+                        Personas en esta cuenta analítica
                       </p>
 
                       {members.length === 0 && !isAddingHere ? (
@@ -392,13 +392,13 @@ export const ManageProjectsDialog = ({ open, onOpenChange, companyId, companyNam
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{editingProject ? 'Editar proyecto' : 'Nuevo proyecto'}</DialogTitle>
+            <DialogTitle>{editingProject ? 'Editar cuenta analítica' : 'Nueva cuenta analítica'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-1">
             <div className="space-y-1">
-              <Label className="text-xs text-gray-500">Nombre del proyecto *</Label>
+              <Label className="text-xs text-gray-500">Nombre de la cuenta analítica *</Label>
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Ej: Proyecto Alpha" autoFocus />
+                placeholder="Ej: Cuenta analítica Alpha" autoFocus />
             </div>
             <div className="space-y-1">
               <Label className="text-xs text-gray-500">Sede (opcional)</Label>

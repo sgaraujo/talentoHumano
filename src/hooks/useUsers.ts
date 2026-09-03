@@ -4,6 +4,8 @@ import { analyticsService } from '../services/analyticsService';
 import { companyService } from '../services/companyService';
 import { projectService } from '../services/projectService';
 import type { MovementRecord } from '../models/types/Analytics';
+import { normalizeRetiroReason } from '../domain/humanResources/terminationReasons';
+import { parseExcelDate } from '../domain/humanResources/excelDate';
 
 type ImportProgress = {
     percent: number;
@@ -63,66 +65,6 @@ const FORCE_EXCOLABORADOR_EMAILS = [
 ];
 
 // ========== Helpers para parsear datos del Excel ==========
-
-/** Convierte número serial de Excel, Date o string a Date (medianoche local) */
-function parseExcelDate(
-  val: any,
-  opts: { minYear?: number; maxYear?: number } = {}
-): Date | undefined {
-  if (!val) return undefined;
-  let parsed: Date | undefined;
-  const fromParts = (year: number, month: number, day: number) => {
-    const dt = new Date(year, month - 1, day);
-    if (
-      dt.getFullYear() !== year ||
-      dt.getMonth() !== month - 1 ||
-      dt.getDate() !== day
-    ) return undefined;
-    return dt;
-  };
-
-  if (val instanceof Date) {
-    if (isNaN(val.getTime())) return undefined;
-    // Re-construir en zona local para evitar desfase UTC
-    parsed = new Date(val.getFullYear(), val.getMonth(), val.getDate());
-  } else if (typeof val === 'number') {
-    if (val <= 0) return undefined;
-    const excelEpoch = new Date(1899, 11, 30);
-    const tmp = new Date(excelEpoch.getTime() + Math.floor(val) * 86400000);
-    if (isNaN(tmp.getTime())) return undefined;
-    parsed = new Date(tmp.getFullYear(), tmp.getMonth(), tmp.getDate());
-  } else if (typeof val === 'string') {
-    const s = val.trim().split(/\s+/)[0];
-    if (!s) return undefined;
-
-    // YYYYMMDD
-    if (/^\d{8}$/.test(s)) {
-      const y = Number(s.slice(0, 4));
-      const m = Number(s.slice(4, 6));
-      const d = Number(s.slice(6, 8));
-      parsed = fromParts(y, m, d);
-    }
-
-    const parts = s.split(/[\/\-.]/).map(Number);
-    if (!parsed && parts.length === 3 && parts.every(Number.isFinite)) {
-      let [a, b, c] = parts;
-      if (a > 999) {
-        parsed = fromParts(a, b, c);
-      } else {
-        const year = c < 100 ? (c < 50 ? 2000 + c : 1900 + c) : c;
-        // Colombia: preferir dia/mes/anio. Si no es valido y mes/dia si lo es,
-        // aceptar el formato alterno.
-        parsed = fromParts(year, b, a) || fromParts(year, a, b);
-      }
-    }
-  }
-
-  if (!parsed || isNaN(parsed.getTime())) return undefined;
-  const minYear = opts.minYear ?? 1900;
-  const maxYear = opts.maxYear ?? new Date().getFullYear() + 10;
-  if (parsed.getFullYear() < minYear || parsed.getFullYear() > maxYear) return undefined;
-  return parsed;
-}
 
 /** Normaliza SI/NO/X/1/TRUE a boolean */
 function parseBool(val: any): boolean | undefined {
@@ -244,47 +186,6 @@ function getUserImportKey(user: any): string {
   return `email:${cleanEmail(user.email)}`;
 }
 
-
-const MOTIVOS_RETIRO = [
-  'Fallecimiento',
-  'Anulado',
-  'Renuncia voluntaria',
-  'Sustitución patronal',
-  'Terminación contrato a término fijo',
-  'Terminación contrato con justa causa',
-  'Terminación contrato sin justa causa',
-  'Terminación contrato de aprendizaje',
-  'Terminación de contrato por mutuo acuerdo',
-  'Terminación de contrato por obra o labor',
-  'Terminación de contrato por periodo de prueba',
-  'Terminación de contrato unilateral de aprendizaje',
-];
-
-/** Normaliza MOTIVO del Excel al motivo estándar más cercano */
-function normalizeRetiroReason(motivo: string | undefined): { reason: string; notes?: string } {
-  if (!motivo) return { reason: 'Renuncia voluntaria' };
-  const lower = motivo.toLowerCase().trim();
-
-  if (lower.includes('fallec') || lower.includes('muerte'))           return { reason: 'Fallecimiento' };
-  if (lower.includes('anulad'))                                        return { reason: 'Anulado' };
-  if (lower.includes('renuncia') || lower.includes('voluntar'))       return { reason: 'Renuncia voluntaria' };
-  if (lower.includes('sustit') || lower.includes('patronal'))         return { reason: 'Sustitución patronal' };
-  if (lower.includes('justa causa'))                                   return { reason: 'Terminación contrato con justa causa' };
-  if (lower.includes('sin justa') || lower.includes('injusta'))       return { reason: 'Terminación contrato sin justa causa' };
-  if (lower.includes('aprendiz') && lower.includes('unilateral'))     return { reason: 'Terminación de contrato unilateral de aprendizaje' };
-  if (lower.includes('aprendiz'))                                      return { reason: 'Terminación contrato de aprendizaje' };
-  if (lower.includes('mutuo') || lower.includes('acuerdo'))           return { reason: 'Terminación de contrato por mutuo acuerdo' };
-  if (lower.includes('obra') || lower.includes('labor'))              return { reason: 'Terminación de contrato por obra o labor' };
-  if (lower.includes('prueba') || lower.includes('periodo'))          return { reason: 'Terminación de contrato por periodo de prueba' };
-  if (lower.includes('fijo') || lower.includes('término fijo'))       return { reason: 'Terminación contrato a término fijo' };
-  if (lower.includes('involuntar') || lower.includes('despid'))       return { reason: 'Terminación contrato sin justa causa' };
-
-  // Si el texto del Excel coincide exactamente con algún motivo estándar
-  const exact = MOTIVOS_RETIRO.find(m => m.toLowerCase() === lower);
-  if (exact) return { reason: exact };
-
-  return { reason: 'Renuncia voluntaria', notes: motivo };
-}
 
 /** Elimina recursivamente campos con valor undefined (Firestore los rechaza) */
 function removeUndefined(obj: any): any {
@@ -627,7 +528,7 @@ export const useUsers = () => {
                 new Map(usersToCreate.map(user => [getUserImportKey(user), user])).values()
             );
             const duplicateRowsMerged = usersToCreate.length - usersToImport.length;
-            updateImportProgress(32, 'Preparando empresas y proyectos');
+            updateImportProgress(32, 'Preparando empresas y cuentas analíticas');
 
             // ── Auto-crear empresas y proyectos desde el Excel ──────────────
 
@@ -659,7 +560,7 @@ export const useUsers = () => {
             }
 
             // 3. Crear proyectos que no existan, mapear "empresa::proyecto" → id
-            updateImportProgress(42, 'Validando proyectos');
+            updateImportProgress(42, 'Validando cuentas analíticas');
             const existingProjects = await projectService.getAll();
             const projectKeyToId = new Map<string, string>();
             for (const p of existingProjects) {
@@ -714,14 +615,21 @@ export const useUsers = () => {
             updateImportProgress(72, 'Actualizando movimientos');
             await analyticsService.deleteMovementsBySource('import-excel');
 
+            // Lo que quede tras el borrado es todo movimiento registrado a mano (no de import);
+            // no duplicar un ingreso/retiro que ya fue registrado manualmente para esa persona.
+            const existingMovements = await analyticsService.getMovements();
+            const manualMovementKeys = new Set(
+                existingMovements.map(m => `${(m.userEmail || '').toLowerCase()}|${m.type}`)
+            );
+
             // Solo crear movements para usuarios que fueron creados o actualizados exitosamente
             const successEmails = new Set([...results.success, ...results.updated]);
             const movementsToCreate: Omit<MovementRecord, 'id' | 'createdAt'>[] = [];
             for (const [key, movement] of movementsMap) {
                 const email = key.split('|')[0];
-                if (successEmails.has(email)) {
-                    movementsToCreate.push(movement);
-                }
+                if (!successEmails.has(email)) continue;
+                if (manualMovementKeys.has(`${email}|${movement.type}`)) continue;
+                movementsToCreate.push(movement);
             }
 
             let movementResults = { ingresos: 0, retiros: 0 };
@@ -735,7 +643,7 @@ export const useUsers = () => {
             await loadStats();
 
             // Auto-sincronizar estados de proyectos
-            updateImportProgress(92, 'Sincronizando proyectos');
+            updateImportProgress(92, 'Sincronizando cuentas analíticas');
             const syncResult = await projectService.syncStatuses();
             updateImportProgress(100, 'Importación completada');
 

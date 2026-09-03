@@ -72,7 +72,7 @@ export const ProjectsPage = () => {
         companyService.getAll(),
         userService.getAll(),
       ]);
-      setCompanies(comps);
+      setCompanies(comps.filter(c => c.active));
       setAllUsers(users);
 
       // Auto-migrate: create Firestore docs for projects that only exist as
@@ -117,7 +117,7 @@ export const ProjectsPage = () => {
         setProjects(projs);
       }
     } catch (e: any) {
-      toast.error('Error al cargar proyectos', { description: e.message });
+      toast.error('Error al cargar cuentas analíticas', { description: e.message });
     } finally {
       setLoading(false);
     }
@@ -215,7 +215,7 @@ export const ProjectsPage = () => {
         await projectService.update(editingProject.id, {
           name: form.name.trim(), sede: form.sede, priority: form.priority,
         });
-        toast.success('Proyecto actualizado');
+        toast.success('Cuenta analítica actualizada');
       } else {
         await projectService.create({
           name: form.name.trim(),
@@ -225,7 +225,7 @@ export const ProjectsPage = () => {
           priority: form.priority,
           sede: form.sede,
         });
-        toast.success('Proyecto creado');
+        toast.success('Cuenta analítica creada');
       }
       setFormOpen(false);
       load();
@@ -237,10 +237,10 @@ export const ProjectsPage = () => {
   };
 
   const handleDelete = async (p: Project) => {
-    if (!confirm(`¿Eliminar el proyecto "${p.name}"?`)) return;
+    if (!confirm(`¿Eliminar la cuenta analítica "${p.name}"?`)) return;
     try {
       await projectService.delete(p.id);
-      toast.success('Proyecto eliminado');
+      toast.success('Cuenta analítica eliminada');
       load();
     } catch (e: any) {
       toast.error('Error', { description: e.message });
@@ -252,7 +252,7 @@ export const ProjectsPage = () => {
     try {
       await projectService.update(p.id, { status: newStatus });
       setProjects(prev => prev.map(x => x.id === p.id ? { ...x, status: newStatus } : x));
-      toast.success(newStatus === 'inactivo' ? 'Proyecto inactivado' : 'Proyecto reactivado');
+      toast.success(newStatus === 'inactivo' ? 'Cuenta analítica inactivada' : 'Cuenta analítica reactivada');
     } catch (e: any) {
       toast.error('Error', { description: e.message });
     }
@@ -328,7 +328,7 @@ export const ProjectsPage = () => {
       } catch { return ''; }
     };
     const rows = filtered.map(p => ({
-      'Proyecto':     p.name,
+      'Cuenta analítica': p.name,
       'Empresa':      getCompanyName(p),
       'Sede':         p.sede || '',
       'Líder':        p.leaderName || '',
@@ -342,8 +342,8 @@ export const ProjectsPage = () => {
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Proyectos');
-    XLSX.writeFile(wb, `proyectos_${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Cuentas analíticas');
+    XLSX.writeFile(wb, `cuentas_analiticas_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -353,15 +353,15 @@ export const ProjectsPage = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Proyectos</h1>
-          <p className="text-[#4A4A4A]/70 mt-1 text-sm">Gestión de proyectos por empresa</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Cuentas analíticas</h1>
+          <p className="text-[#4A4A4A]/70 mt-1 text-sm">Gestión de cuentas analíticas por empresa</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={handleExport} variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
             <Download className="w-4 h-4 mr-2" /> Exportar
           </Button>
           <Button onClick={openCreate} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
-            <Plus className="w-4 h-4 mr-2" /> Nuevo Proyecto
+            <Plus className="w-4 h-4 mr-2" /> Nueva cuenta analítica
           </Button>
         </div>
       </div>
@@ -372,7 +372,7 @@ export const ProjectsPage = () => {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
-              placeholder="Buscar proyecto..."
+              placeholder="Buscar cuenta analítica..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="pl-10 border-gray-200"
@@ -408,7 +408,7 @@ export const ProjectsPage = () => {
       {/* Stats */}
       <div className="flex items-center gap-3 mb-4">
         <span className="text-sm text-gray-500">
-          {filtered.length} proyecto{filtered.length !== 1 ? 's' : ''}
+          {filtered.length} cuenta{filtered.length !== 1 ? 's analíticas' : ' analítica'}
           {filtered.length !== projects.length && ` de ${projects.length}`}
         </span>
       </div>
@@ -421,10 +421,10 @@ export const ProjectsPage = () => {
       ) : filtered.length === 0 ? (
         <div className="text-center py-20 text-gray-400">
           <FolderKanban className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p>{projects.length === 0 ? 'No hay proyectos aún' : 'Ningún proyecto coincide con los filtros'}</p>
+          <p>{projects.length === 0 ? 'No hay cuentas analíticas aún' : 'Ninguna cuenta analítica coincide con los filtros'}</p>
           {projects.length === 0 && (
             <Button onClick={openCreate} variant="link" className="text-[#008C3C] mt-2">
-              Crear primer proyecto
+              Crear primera cuenta analítica
             </Button>
           )}
         </div>
@@ -547,7 +547,7 @@ export const ProjectsPage = () => {
                     </button>
                     <button
                       onClick={() => handleToggleStatus(p)}
-                      title={p.status === 'inactivo' ? 'Reactivar proyecto' : 'Inactivar proyecto'}
+                      title={p.status === 'inactivo' ? 'Reactivar cuenta analítica' : 'Inactivar cuenta analítica'}
                       className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                         p.status === 'inactivo'
                           ? 'text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10'
@@ -567,7 +567,7 @@ export const ProjectsPage = () => {
                 {isExpanded && (
                   <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                      Personas en este proyecto
+                      Personas en esta cuenta analítica
                     </p>
 
                     {members.length === 0 && !isAddingHere ? (
@@ -655,7 +655,7 @@ export const ProjectsPage = () => {
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{editingProject ? 'Editar proyecto' : 'Nuevo proyecto'}</DialogTitle>
+            <DialogTitle>{editingProject ? 'Editar cuenta analítica' : 'Nueva cuenta analítica'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-1">
             {!editingProject && (
@@ -672,11 +672,11 @@ export const ProjectsPage = () => {
               </div>
             )}
             <div className="space-y-1">
-              <Label className="text-xs text-gray-500">Nombre del proyecto *</Label>
+              <Label className="text-xs text-gray-500">Nombre de la cuenta analítica *</Label>
               <Input
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Ej: Proyecto Alpha"
+                placeholder="Ej: Cuenta analítica Alpha"
                 autoFocus
               />
             </div>

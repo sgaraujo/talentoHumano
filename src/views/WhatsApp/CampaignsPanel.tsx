@@ -204,9 +204,9 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
                 <option value="">Todas las empresas</option>{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
-            <label className="text-sm text-gray-600">Proyecto
+            <label className="text-sm text-gray-600">Cuenta analítica
               <select disabled={!includeInternal} value={projectId} onChange={e => setProjectId(e.target.value)} className="mt-1 w-full h-10 rounded-md border border-gray-200 px-3 bg-white disabled:opacity-50">
-                <option value="">Todos los proyectos</option>{visibleProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="">Todas las cuentas analíticas</option>{visibleProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </label>
           </div>

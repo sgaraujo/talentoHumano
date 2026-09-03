@@ -381,7 +381,7 @@ export const EmailSendStatsPage = () => {
           <div className="flex">
             {([
               { id: 'cuestionarios', label: 'Por Cuestionario', count: byQuestionnaire.filter(r => r.total > 0).length },
-              { id: 'proyectos',     label: 'Por Proyecto',     count: byProject.length },
+              { id: 'proyectos',     label: 'Por cuenta analítica', count: byProject.length },
               { id: 'comunicados',   label: 'Comunicados',      count: comms.length },
               { id: 'fallidos',      label: 'Fallidos',         count: failures.length, alert: failures.length > 0 },
             ] as Array<{ id: typeof tab; label: string; count: number; alert?: boolean }>).map(t => (
@@ -512,7 +512,7 @@ export const EmailSendStatsPage = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-xs text-gray-400 bg-gray-50/70 border-b border-gray-100">
-                    <th className="text-left px-5 py-3 font-medium">Proyecto</th>
+                    <th className="text-left px-5 py-3 font-medium">Cuenta analítica</th>
                     <button onClick={() => toggleSort('total')} className="contents">
                       <th className="text-right px-3 py-3 font-medium cursor-pointer hover:text-gray-600">
                         <span className="flex items-center justify-end gap-1">Total <SortIcon field="total" /></span>
@@ -573,7 +573,7 @@ export const EmailSendStatsPage = () => {
                 >
                   <span className="flex items-center gap-2.5">
                     <UserX className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm font-medium text-gray-500">Sin proyecto asignado</span>
+                    <span className="text-sm font-medium text-gray-500">Sin cuenta analítica asignada</span>
                     <span className="text-xs text-gray-400">
                       {noProjectUsers.length} usuario{noProjectUsers.length !== 1 ? 's' : ''} · {noProjectRow.total.toLocaleString('es-CO')} registros
                     </span>
@@ -646,7 +646,7 @@ export const EmailSendStatsPage = () => {
                       </table>
                     </div>
                     <p className="px-5 py-2.5 text-xs text-gray-400 border-t border-gray-100">
-                      Estos usuarios no tienen proyecto asignado en su perfil. Ve a Usuarios → edita su perfil → asigna un proyecto.
+                      Estos usuarios no tienen cuenta analítica asignada en su perfil. Ve a Usuarios → edita su perfil → asigna una cuenta analítica.
                     </p>
                   </div>
                 )}
@@ -798,7 +798,7 @@ export const EmailSendStatsPage = () => {
                                         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1">
                                           {curTab === 'empresa'
                                             ? <><Building2 className="w-3 h-3" /> Por empresa</>
-                                            : <><Users className="w-3 h-3" /> Por proyecto</>}
+                                            : <><Users className="w-3 h-3" /> Por cuenta analítica</>}
                                         </p>
                                         {allProjects.length > 0 && (
                                           <div className="flex rounded overflow-hidden border border-gray-200 text-[10px]">
@@ -810,7 +810,7 @@ export const EmailSendStatsPage = () => {
                                             <button
                                               onClick={() => setCommChartTab(p => ({ ...p, [comm.id]: 'proyecto' }))}
                                               className={`px-2 py-0.5 font-medium transition-colors ${curTab === 'proyecto' ? 'bg-[#008C3C] text-white' : 'bg-white text-gray-400 hover:bg-gray-50'}`}>
-                                              Proyecto
+                                              Cuenta analítica
                                             </button>
                                           </div>
                                         )}
@@ -839,7 +839,7 @@ export const EmailSendStatsPage = () => {
                                         <tr className="text-gray-400 border-b border-gray-100">
                                           <th className="text-left px-3 py-2 font-medium">Nombre</th>
                                           <th className="text-left px-3 py-2 font-medium">Empresa</th>
-                                          <th className="text-left px-3 py-2 font-medium">Proyecto</th>
+                                          <th className="text-left px-3 py-2 font-medium">Cuenta analítica</th>
                                           <th className="text-center px-3 py-2 font-medium">Estado</th>
                                           <th className="text-left px-3 py-2 font-medium">Leído el</th>
                                         </tr>

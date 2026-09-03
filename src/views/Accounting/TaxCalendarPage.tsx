@@ -405,8 +405,12 @@ export const TaxCalendarPage = () => {
     'ICA Régimen Común',
     'ICA Régimen Preferencial',
     'ReteICA',
+    'Exógena Distrital Bogotá',
     'Predial',
     'Vehículos',
+    // Legales / Regulatorios — obligaciones manuales sin calendario automático
+    'Contribución a la CRC',
+    'Comisión de Regulación de Comunicaciones - CRC',
   ];
 
   // Combina tipos predefinidos + los que ya existen en Firestore (sin duplicados)
@@ -716,12 +720,20 @@ export const TaxCalendarPage = () => {
 
   // ── DIAN rows ────────────────────────────────────────────────────────────────
 
+  /**
+   * Obligación manual/legal guardada solo en Firestore (ej. Contribución CRC) que no
+   * corresponde a ninguna entrada del calendario automático DIAN/Bogotá. Se representa
+   * como un DianObligation "sintético" para reutilizar el mismo renderizado de fila;
+   * `manualObligation` apunta siempre al registro real, sin necesidad de buscarlo.
+   */
+  type UpcomingItem = DianObligation & { manualObligation?: TaxObligation };
+
   interface CompanyDianRow {
     company: CalendarCompany;
     digit: NitDigit | null;
-    upcoming: DianObligation[];
+    upcoming: UpcomingItem[];
     allDianObls: DianObligation[];
-    nextDue: DianObligation | null;
+    nextDue: UpcomingItem | null;
   }
 
   // Cada entrada es un array de palabras clave; cualquiera hace match (maneja nombres viejos y nuevos)
@@ -852,18 +864,53 @@ export const TaxCalendarPage = () => {
               return date >= cutoff && date <= rangeEnd;
             });
         // Para el filtro de mes filtramos las obligaciones que muestran, pero nextDue usa días reales
-        const upcoming = filterMonth !== 'all'
+        const upcoming: UpcomingItem[] = filterMonth !== 'all'
           ? allUpcoming.filter(o => effectiveDueDate(o).slice(0, 7) === filterMonth)
           : allUpcoming;
-        const upcomingForNext = c.nit
+        const upcomingForNextCalendar: UpcomingItem[] = c.nit
           ? (getUpcomingObligationsByNit(c.nit, dianDays)).filter(o => !hidden.has(o.taxType))
           : [];
 
-        // Helper para buscar el estado registrado de una obligación DIAN
-        const matchedStatus = (dianObl: DianObligation) => {
-          const m = obligations.find(o => {
-            return belongsToCompany(o, c) && sameDianObligation(o, dianObl);
-          });
+        // ── Obligaciones manuales/legales (ej. Contribución CRC) que no calzan con
+        // ningún vencimiento del calendario automático DIAN/Bogotá. Sin esto, quedan
+        // vencidas en Firestore (y se alertan por correo) sin ninguna forma de verlas
+        // ni gestionarlas aquí. Usa sameDianObligation (la misma función que resuelve
+        // "matched" más abajo) para no duplicar un registro que el calendario ya
+        // reclama por coincidencia de período/año aunque su fecha difiera.
+        const manualObls = savedForCompany.filter(o =>
+          !hidden.has(o.taxType) &&
+          !allCalendarObligations.some(cal => sameDianObligation(o, cal))
+        );
+        const asUpcomingItem = (o: TaxObligation): UpcomingItem => ({
+          taxType: o.taxType, category: 'ICA', period: o.period, dueDate: o.dueDate,
+          scope: 'Nacional', manualObligation: o,
+        });
+        const manualUpcoming = (viewMode === 'past'
+          ? manualObls.filter(o => o.dueDate < cutoff && o.dueDate >= vencidosFrom)
+          : viewMode === 'paid'
+          ? manualObls
+          : manualObls.filter(o => o.dueDate >= cutoff && o.dueDate <= rangeEnd)
+        ).map(asUpcomingItem);
+        const manualForMonth = (filterMonth !== 'all'
+          ? manualUpcoming.filter(o => o.dueDate.slice(0, 7) === filterMonth)
+          : manualUpcoming);
+        upcoming.push(...manualForMonth);
+        upcoming.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+        const overdueLookback = (() => {
+          const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 14);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        })();
+        const manualForNext = manualObls
+          .filter(o => o.dueDate >= overdueLookback && o.dueDate <= rangeEnd)
+          .map(asUpcomingItem);
+        const upcomingForNext = [...upcomingForNextCalendar, ...manualForNext]
+          .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+        // Helper para buscar el estado registrado de una obligación DIAN o manual
+        const matchedStatus = (item: UpcomingItem) => {
+          if (item.manualObligation) return item.manualObligation.status;
+          const m = obligations.find(o => belongsToCompany(o, c) && sameDianObligation(o, item));
           return m?.status;
         };
 
@@ -2106,6 +2153,16 @@ export const TaxCalendarPage = () => {
               'ReteICA',
               'Predial',
               'Vehículos',
+            ],
+          },
+          {
+            label: 'Legales / Regulatorios',
+            color: 'text-purple-700',
+            bg: 'bg-purple-50',
+            dot: 'bg-purple-500',
+            types: [
+              'Contribución a la CRC',
+              'Comisión de Regulación de Comunicaciones - CRC',
             ],
           },
         ];

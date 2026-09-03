@@ -26,7 +26,7 @@ const GROUPS: MenuGroup[] = [
       { icon: Shield,        label: 'Usuarios y accesos', path: '/usuarios' },
       { icon: ClipboardCheck,label: 'Expedientes y control', path: '/talento-humano/control' },
       { icon: Building2,     label: 'Empresas',           path: '/empresas' },
-      { icon: FolderKanban,  label: 'Proyectos',          path: '/proyectos' },
+      { icon: FolderKanban,  label: 'Cuentas analíticas', path: '/proyectos' },
       { icon: BarChart2,     label: 'Rotación de talento', path: '/rotacion-talento' },
     ],
   },

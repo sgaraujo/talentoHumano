@@ -6,7 +6,7 @@ export const useAnalytics = () => {
   const [metrics, setMetrics] = useState<RotationMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filterOptions, setFilterOptions] = useState<{ empresas: string[]; proyectos: string[] }>({ empresas: [], proyectos: [] });
+  const [filterOptions, setFilterOptions] = useState<{ empresas: string[]; proyectos: string[]; proyectosPorEmpresa: Record<string, string[]> }>({ empresas: [], proyectos: [], proyectosPorEmpresa: {} });
 
   const loadMetrics = async (filters?: FilterOptions) => {
     try {

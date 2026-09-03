@@ -1,3 +1,6 @@
+import { normalizeRetiroReason } from './terminationReasons';
+import { parseExcelDate } from './excelDate';
+
 export type HrPreviewAction = 'create' | 'update' | 'unchanged' | 'conflict' | 'rejected';
 
 export interface HrPreviewIssue {
@@ -65,7 +68,9 @@ const numberValue = (value: unknown) => {
   const parsed = Number(normalized);
   return normalized && Number.isFinite(parsed) ? parsed : undefined;
 };
-const dateValue = (value: unknown) => text(value) || undefined;
+// Normaliza a Date real; si no se puede parsear, conserva el texto crudo en
+// vez de perder el dato (para que quede visible que algo no cuadra).
+const dateValue = (value: unknown): Date | string | undefined => parseExcelDate(value) ?? (text(value) || undefined);
 
 export function buildHrImportPlan(
   fileName: string,
@@ -116,7 +121,10 @@ export function buildHrImportPlan(
           startDate: dateValue(row['FECHA DE INGRESO']), endDate: dateValue(row['FECHA RETIRO']),
           workday: text(row.JORNADA), modality: text(row.MODALIDAD), regional: text(row.REGIONAL),
           baseLocation: text(row['BASE DE OPERACION']), area: text(row.DEPARTAMENTO), analyticalAccount: text(row['CUENTA ANALITICA']),
-          terminationReason: text(row['MOTIVO DE RETIRO'] || row['MOTIVO RETIRO']),
+          terminationReason: (() => {
+            const raw = text(row['MOTIVO DE RETIRO'] || row['MOTIVO RETIRO'] || row.MOTIVO);
+            return raw ? normalizeRetiroReason(raw).reason : undefined;
+          })(),
           terminationCost: numberValue(row['COSTO DE RETIRO'] || row['COSTO RETIRO']),
           sourceRow,
         }),
@@ -239,7 +247,7 @@ export function analyzeHrRows(
       issues.push({
         row: duplicateActiveAssignment[0].rowNumber,
         action: 'conflict',
-        reasons: [`Relación activa duplicada para la misma cédula, empresa y proyecto: filas ${duplicateActiveAssignment.map(entry => entry.rowNumber).join(', ')}`],
+        reasons: [`Relación activa duplicada para la misma cédula, empresa y cuenta analítica: filas ${duplicateActiveAssignment.map(entry => entry.rowNumber).join(', ')}`],
       });
       continue;
     }

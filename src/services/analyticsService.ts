@@ -3,18 +3,69 @@ import { db } from '../config/firebase';
 import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '../config/firestoreCollections';
 import type { RotationMetrics, MonthlyData, FilterOptions, MovementRecord } from '../models/types/Analytics';
 import type { Company } from '../models/types/Company';
+import { MOTIVOS_RETIRO, esVoluntario } from '../domain/humanResources/terminationReasons';
 
-const toDate = (raw: any): Date | null => {
+export const toDate = (raw: any): Date | null => {
   if (!raw) return null;
   if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
-  if (typeof raw.toDate === 'function') return raw.toDate();
+  if (typeof raw.toDate === 'function') {
+    const d = raw.toDate();
+    return isNaN(d.getTime()) ? null : d;
+  }
   if (typeof raw.seconds === 'number') return new Date(raw.seconds * 1000);
-  if (typeof raw === 'string' && raw.trim()) return new Date(raw);
+  if (typeof raw._seconds === 'number') return new Date(raw._seconds * 1000);
+  if (typeof raw === 'string' && raw.trim()) {
+    const s = raw.trim();
+    const timestampMatch = s.match(/Timestamp\s*\(\s*seconds\s*=\s*(-?\d+)/i);
+    if (timestampMatch) return new Date(Number(timestampMatch[1]) * 1000);
+    // Fechas de employments quedaron guardadas con formatos mixtos: mayoritariamente
+    // M/D/YYYY (herencia de toLocaleDateString en-US) y algunas D/M/YYYY (texto de Excel
+    // sin convertir). new Date() nativo solo entiende M/D/Y y produce fechas inválidas o
+    // erróneas (sin lanzar error) para el resto — hay que desambiguar a mano.
+    const parts = s.split(/[\/\-]/);
+    if (parts.length === 3 && parts.every(p => /^\d+$/.test(p))) {
+      const [a, b, c] = parts.map(Number);
+      if (a > 31) {
+        const d = new Date(a, b - 1, c);
+        if (!isNaN(d.getTime()) && d.getFullYear() === a && d.getMonth() === b - 1 && d.getDate() === c) return d;
+      } else {
+        const year = c < 100 ? (c < 50 ? 2000 + c : 1900 + c) : c;
+        if (a > 12 && b <= 12) {
+          // "a" no puede ser mes: forzar día/mes/año
+          const dmy = new Date(year, b - 1, a);
+          if (!isNaN(dmy.getTime()) && dmy.getMonth() === b - 1 && dmy.getDate() === a) return dmy;
+        } else if (b > 12 && a <= 12) {
+          // "b" no puede ser mes: forzar mes/día/año
+          const mdy = new Date(year, a - 1, b);
+          if (!isNaN(mdy.getTime()) && mdy.getMonth() === a - 1 && mdy.getDate() === b) return mdy;
+        } else if (a >= 1 && a <= 12 && b >= 1 && b <= 31) {
+          // Ambos válidos como mes: para esta colección predomina mes/día/año (~80% de los casos no ambiguos)
+          const mdy = new Date(year, a - 1, b);
+          if (!isNaN(mdy.getTime()) && mdy.getMonth() === a - 1 && mdy.getDate() === b) return mdy;
+        }
+      }
+    }
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  }
   return null;
 };
 
 const normalize = (value?: string) => String(value ?? '').toLowerCase().normalize('NFD')
   .replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]/g, '');
+
+// Los aprendices SENA no hacen parte de la base ni de los retiros usados para
+// calcular rotación. Se aceptan las variantes históricas del tipo de contrato.
+export const isSenaApprentice = (relation: any): boolean => {
+  const contractType = normalize(
+    relation?.contractType
+      ?? relation?.contract?.contractType
+      ?? relation?.contractInfo?.contract?.contractType
+  );
+  return contractType.includes('aprendizaje')
+    || contractType.includes('aprendizsena')
+    || contractType === 'aprendiz';
+};
 
 const matchesCompany = (relation: any, companyName: string, companies: Company[]) => {
   const target = companies.find(c => normalize(c.name) === normalize(companyName));
@@ -26,27 +77,9 @@ const matchesCompany = (relation: any, companyName: string, companies: Company[]
   return normalize(relation.companyName) === normalize(companyName);
 };
 
-const esVoluntario = (reason?: string) => {
-  const l = (reason || '').toLowerCase();
-  return l.includes('renuncia') || l.includes('mutuo acuerdo') || l === 'voluntario';
-};
-
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
-const MOTIVOS_ORDEN = [
-  'Fallecimiento',
-  'Anulado',
-  'Renuncia voluntaria',
-  'Sustitución patronal',
-  'Terminación contrato a término fijo',
-  'Terminación contrato con justa causa',
-  'Terminación contrato sin justa causa',
-  'Terminación contrato de aprendizaje',
-  'Terminación de contrato por mutuo acuerdo',
-  'Terminación de contrato por obra o labor',
-  'Terminación de contrato por periodo de prueba',
-  'Terminación de contrato unilateral de aprendizaje',
-];
+const MOTIVOS_ORDEN = MOTIVOS_RETIRO;
 
 class AnalyticsService {
   private movementsCollection = FIRESTORE_COLLECTIONS.movements;
@@ -190,6 +223,24 @@ class AnalyticsService {
     }
   }
 
+  // Obtener el histórico completo de employments (contratos) de todos los empleados
+  async getEmploymentRecords(): Promise<any[]> {
+    try {
+      const snapshot = await getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments));
+      return snapshot.docs.map(item => {
+        const data = item.data();
+        return {
+          id: item.id,
+          ...data,
+          employeeId: data.employeeId || item.ref.parent.parent?.id,
+        };
+      });
+    } catch (error) {
+      console.error('Error obteniendo employments:', error);
+      return [];
+    }
+  }
+
   // Calcular métricas de rotación — fuente: human_resources/data/employees + employments
   async getRotationMetrics(filters?: FilterOptions): Promise<RotationMetrics> {
     try {
@@ -198,21 +249,108 @@ class AnalyticsService {
         getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments)),
       ]);
       const companies = companiesSnap.docs.map(item => ({ id: item.id, ...item.data() } as Company));
-      let relations = employmentSnap.docs.map(item => ({
-        id: item.id, employeeId: item.data().employeeId || item.ref.parent.parent?.id, ...item.data(),
-      } as any));
+      let relations = employmentSnap.docs.map(item => {
+        const data = item.data();
+        return { id: item.id, ...data, employeeId: data.employeeId || item.ref.parent.parent?.id } as any;
+      });
+
+      // Esta analítica es de Talento Humano: solo cuentan las relaciones de empresas
+      // con el módulo TH activo, igual que "Colaboradores activos" en Resumen.
+      const thCompanies = companies.filter(c => c.activeTH);
+      relations = relations.filter(r => thCompanies.some(c => {
+        if (r.companyId && r.companyId === c.id) return true;
+        const accepted = [c.name, ...(c.aliases ?? [])].map(normalize);
+        return accepted.includes(normalize(r.companyName));
+      }));
 
       if (filters?.empresa) relations = relations.filter(r => matchesCompany(r, filters.empresa!, companies));
       if (filters?.proyecto) relations = relations.filter(r => normalize(r.projectName) === normalize(filters.proyecto));
+
+      // Regla de negocio: los aprendices SENA no aplican para rotación.
+      relations = relations.filter(r => !isSenaApprentice(r));
 
       const today = new Date();
       const currentYear = filters?.año || today.getFullYear();
       const currentMonth = filters?.mes !== undefined ? filters.mes : today.getMonth();
 
-      const activeRelations = relations.filter(r => r.status === 'active');
+      // Fin del período filtrado (último día del mes, o del año si no hay mes elegido),
+      // topado a hoy para que el mes/año en curso siga reflejando el headcount actual.
+      const periodEnd = (() => {
+        const end = filters?.mes !== undefined
+          ? new Date(currentYear, currentMonth + 1, 0)
+          : new Date(currentYear, 11, 31);
+        return end < today ? end : today;
+      })();
+      const periodStart = filters?.mes !== undefined
+        ? new Date(currentYear, currentMonth, 1)
+        : new Date(currentYear, 0, 1);
+
+      // Fotografía de relaciones vigentes al cierre del período. En meses pasados
+      // incluye a quien seguía vinculado entonces aunque hoy ya esté retirado.
+      const isActiveAt = (r: any, refDate: Date) => {
+        if (r.status !== 'active' && r.status !== 'retired') return false;
+        // Para la fotografía actual, el estado vigente es la fuente oficial. Esto
+        // evita revivir retiros por fechas ambiguas y evita excluir ingresos activos
+        // como 12/08/2026 interpretados erróneamente como 8 de diciembre.
+        if (refDate >= today) return r.status === 'active';
+        const start = toDate(r.startDate);
+        if (!start || start > refDate) return false;
+        if (r.status === 'retired') {
+          const end = toDate(r.endDate);
+          if (!end || end < refDate) return false;
+        }
+        return true;
+      };
+      const activeRelations = relations.filter(r => {
+        return isActiveAt(r, periodEnd);
+      });
       const headcount = new Set(activeRelations.map(r => r.employeeId)).size;
 
+      // Reconstrucción histórica — SOLO para el promedio del denominador de rotación,
+      // nunca se muestra como "headcount". El campo status es el estado ACTUAL de la
+      // relación, no una foto por fecha: para saber quién seguía vinculado a una
+      // fecha pasada (ej. 1-ene) hay que incluir también a quien ya está retirado hoy
+      // pero cuyo endDate era posterior a esa fecha pasada — si no, cualquiera que se
+      // haya ido después se borra también de la foto de meses atrás, hundiendo el
+      // denominador y disparando la tasa de rotación en vez de corregirla.
+      const headcountAtPast = (refDate: Date) => new Set(
+        relations.filter(r => isActiveAt(r, refDate)).map(r => r.employeeId)
+      ).size;
+      // Headcount promedio de UN mes puntual: promedio de su inicio y su fin (capado
+      // a hoy si es el mes en curso).
+      const monthlyHeadcountAvg = (year: number, month: number) => {
+        const mStart = new Date(year, month, 1);
+        const mEndRaw = new Date(year, month + 1, 0);
+        const mEnd = mEndRaw < today ? mEndRaw : today;
+        return (headcountAtPast(mStart) + headcountAtPast(mEnd)) / 2;
+      };
+
+      // Denominador de las tasas de rotación. Ingresos y Retiros son flujo (se suman
+      // en todo el período), pero Headcount es una foto puntual — no puede usarse el
+      // headcount de un solo mes cuando el numerador cubre varios meses, o la tasa se
+      // dispara (ej. retiros de todo el año / headcount de agosto). Por eso:
+      //   • Un solo mes filtrado → headcount promedio de ESE mes (sin cambios).
+      //   • "Todos" o rango de varios meses → promedio de los headcounts mensuales
+      //     de cada mes incluido en el rango: (H_ene + H_feb + ... + H_n) / n.
+      const includedMonths = filters?.mes !== undefined
+        ? [currentMonth]
+        : Array.from({ length: periodEnd.getMonth() + 1 }, (_, m) => m);
+      const avgHeadcount = filters?.mes !== undefined
+        ? (headcountAtPast(periodStart) + headcountAtPast(periodEnd)) / 2
+        : includedMonths.reduce((sum, m) => sum + monthlyHeadcountAvg(currentYear, m), 0) / includedMonths.length;
+
+      const headcountBaseLabel = filters?.mes !== undefined
+        ? `Base: headcount de ${this.getMonthName(currentMonth)} ${currentYear}`
+        : includedMonths.length === 1
+          ? `Base: headcount promedio de ${this.getMonthName(includedMonths[0])} ${currentYear}`
+          : `Base: headcount promedio ${this.getMonthName(includedMonths[0]).slice(0, 3)}–${this.getMonthName(includedMonths[includedMonths.length - 1]).slice(0, 3)} ${currentYear}`;
+
+      // Un ingreso/retiro con fecha futura (ej. una terminación ya registrada con
+      // preaviso) todavía no ocurrió — no debe sumar en el conteo del período hasta
+      // que su fecha efectivamente llegue, o se infla la rotación con movimientos
+      // que aún no pasan.
       const inPeriod = (date: Date | null) => date
+        && date <= today
         && date.getFullYear() === currentYear
         && (filters?.mes === undefined || date.getMonth() === currentMonth);
 
@@ -224,7 +362,7 @@ class AnalyticsService {
       activeRelations.forEach(r => {
         const start = toDate(r.startDate);
         if (!start) return;
-        const months = this.monthsDifference(start, today);
+        const months = this.monthsDifference(start, periodEnd);
         if (months >= 0) { tiempoPromedioEmpresa += months; countWithContract++; }
       });
       tiempoPromedioEmpresa = countWithContract > 0 ? Math.round((tiempoPromedioEmpresa / countWithContract) * 10) / 10 : 0;
@@ -232,23 +370,34 @@ class AnalyticsService {
       const retirosVoluntarios   = retiros.filter(r => esVoluntario(r.terminationReason)).length;
       const retirosInvoluntarios = retiros.length - retirosVoluntarios;
 
-      const rotacionGeneral    = headcount > 0 ? round2((retiros.length / headcount) * 100) : 0;
-      const rotacionVoluntaria = headcount > 0 ? round2((retirosVoluntarios / headcount) * 100) : 0;
+      // Fórmula oficial: renuncias voluntarias / HT del período, sin aprendices.
+      const rotacionGeneral    = avgHeadcount > 0 ? round2((retirosVoluntarios / avgHeadcount) * 100) : 0;
+      const rotacionVoluntaria = avgHeadcount > 0 ? round2((retirosVoluntarios / avgHeadcount) * 100) : 0;
       const rotacionEvitable   = rotacionVoluntaria;
       const tasaVoluntaria     = retiros.length > 0 ? round2((retirosVoluntarios / retiros.length) * 100) : 0;
       const cubrimiento        = retiros.length > 0 ? round2((ingresos.length / retiros.length) * 100) : 0;
 
       const monthlyData: MonthlyData[] = [];
       const showFullYear = filters?.mes === undefined;
-      for (let i = 11; i >= 0; i--) {
+      const monthCount = showFullYear ? 12 : 1;
+      for (let i = monthCount - 1; i >= 0; i--) {
         const refMonth = showFullYear ? 11 : currentMonth;
         const date = new Date(currentYear, refMonth - i, 1);
         const month = date.getMonth();
         const year = date.getFullYear();
-        const sameMonth = (d: Date | null) => d && d.getMonth() === month && d.getFullYear() === year;
+        // Igual que inPeriod: un movimiento con fecha futura aún no ocurrió.
+        const sameMonth = (d: Date | null) => d && d <= today && d.getMonth() === month && d.getFullYear() === year;
         const monthIngresos = relations.filter(r => sameMonth(toDate(r.startDate))).length;
         const monthRetiros  = relations.filter(r => r.status === 'retired' && sameMonth(toDate(r.endDate))).length;
-        const monthRotacion = headcount > 0 ? round2((monthRetiros / headcount) * 100) : 0;
+        const monthRetirosVoluntarios = relations.filter(r =>
+          r.status === 'retired'
+          && sameMonth(toDate(r.endDate))
+          && esVoluntario(r.terminationReason)
+        ).length;
+        // Headcount promedio de ESE mes, no el headcount global del período filtrado
+        // — si no, enero se divide entre el headcount de diciembre.
+        const monthAvgHeadcount = monthlyHeadcountAvg(year, month);
+        const monthRotacion = monthAvgHeadcount > 0 ? round2((monthRetirosVoluntarios / monthAvgHeadcount) * 100) : 0;
         monthlyData.push({ month: this.getMonthName(month), year, ingresos: monthIngresos, retiros: monthRetiros, rotacion: monthRotacion, rotacionEvitable: monthRotacion });
       }
 
@@ -268,6 +417,16 @@ class AnalyticsService {
         const key = r.terminationReason && motivosRetiro.hasOwnProperty(r.terminationReason) ? r.terminationReason : 'Sin motivo';
         motivosRetiro[key] = (motivosRetiro[key] || 0) + 1;
       });
+      const retirosPorEmpresa = (() => {
+        const map = new Map<string, number>();
+        retiros.forEach(retiro => {
+          const empresa = retiro.companyName?.trim() || 'Sin empresa';
+          map.set(empresa, (map.get(empresa) ?? 0) + 1);
+        });
+        return [...map.entries()]
+          .map(([empresa, count]) => ({ empresa, count }))
+          .sort((a, b) => b.count - a.count || a.empresa.localeCompare(b.empresa, 'es'));
+      })();
 
       return {
         totalIngresos: ingresos.length,
@@ -277,16 +436,19 @@ class AnalyticsService {
         rotacionGeneral,
         rotacionVoluntaria,
         rotacionEvitable,
+        headcountBaseLabel,
+        headcountPromedio: round2(avgHeadcount),
         tasaVoluntaria,
         tasaVoluntariaExterna: tasaVoluntaria,
         cubrimiento,
         voluntarioVsInvoluntario: { voluntario: retirosVoluntarios, involuntario: retirosInvoluntarios },
         externoVsInterno: { externo: retirosVoluntarios, interno: retirosInvoluntarios },
         motivosRetiro,
+        retirosPorEmpresa,
         headcountPorProyecto: (() => {
           const map = new Map<string, { empresa: string; count: number }>();
           activeRelations.forEach(r => {
-            const proj = r.projectName || 'Sin proyecto';
+            const proj = r.projectName || 'Sin cuenta analítica';
             const emp  = r.companyName || '';
             if (!map.has(proj)) map.set(proj, { empresa: emp, count: 0 });
             map.get(proj)!.count++;
@@ -308,23 +470,41 @@ class AnalyticsService {
     }
   }
 
-  // Opciones de filtro — empresas desde el catálogo maestro, proyectos desde las relaciones laborales
-  async getFilterOptions(): Promise<{ empresas: string[]; proyectos: string[] }> {
+  // Opciones de filtro — empresas desde el catálogo maestro, proyectos desde las relaciones laborales.
+  // proyectosPorEmpresa permite que el selector de Proyecto se filtre en el momento
+  // en que se elige una Empresa, sin esperar a aplicar los filtros.
+  async getFilterOptions(): Promise<{ empresas: string[]; proyectos: string[]; proyectosPorEmpresa: Record<string, string[]> }> {
     try {
       const [companiesSnap, employmentSnap] = await Promise.all([
         getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
         getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments)),
       ]);
-      const empresas = companiesSnap.docs.map(item => (item.data() as any).name).filter(Boolean).sort();
+      const allCompanies = companiesSnap.docs.map(item => item.data() as any);
+      const thCompanies = allCompanies.filter(c => c.activeTH);
+      const empresas = thCompanies.map(c => c.name).filter(Boolean).sort();
+
       const proyectosSet = new Set<string>();
+      const proyectosPorEmpresaSet = new Map<string, Set<string>>();
       employmentSnap.docs.forEach(item => {
-        const projectName = (item.data() as any).projectName;
-        if (projectName) proyectosSet.add(projectName);
+        const data = item.data() as any;
+        const projectName = data.projectName;
+        if (!projectName) return;
+        const company = thCompanies.find(c => {
+          if (data.companyId && data.companyId === c.id) return true;
+          const accepted = [c.name, ...(c.aliases ?? [])].map(normalize);
+          return accepted.includes(normalize(data.companyName));
+        });
+        if (!company) return;
+        proyectosSet.add(projectName);
+        if (!proyectosPorEmpresaSet.has(company.name)) proyectosPorEmpresaSet.set(company.name, new Set());
+        proyectosPorEmpresaSet.get(company.name)!.add(projectName);
       });
-      return { empresas, proyectos: [...proyectosSet].sort() };
+      const proyectosPorEmpresa: Record<string, string[]> = {};
+      for (const [empresa, set] of proyectosPorEmpresaSet) proyectosPorEmpresa[empresa] = [...set].sort();
+      return { empresas, proyectos: [...proyectosSet].sort(), proyectosPorEmpresa };
     } catch (error) {
       console.error('Error obteniendo opciones de filtro:', error);
-      return { empresas: [], proyectos: [] };
+      return { empresas: [], proyectos: [], proyectosPorEmpresa: {} };
     }
   }
 }

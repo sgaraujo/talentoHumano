@@ -256,7 +256,7 @@ function ChartsPanel({
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
-                {chartTab === 'empresa' ? 'Por empresa' : 'Por proyecto'}
+                {chartTab === 'empresa' ? 'Por empresa' : 'Por cuenta analítica'}
               </p>
               {hasProjects && (
                 <div className="flex rounded-md overflow-hidden border border-gray-200 text-[10px]">
@@ -268,7 +268,7 @@ function ChartsPanel({
                   <button
                     onClick={() => setChartTab('proyecto')}
                     className={`px-2 py-0.5 font-medium transition-colors ${chartTab === 'proyecto' ? 'bg-[#008C3C] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
-                    Proyecto
+                    Cuenta analítica
                   </button>
                 </div>
               )}
@@ -888,7 +888,7 @@ export const CommunicationsPage = () => {
       'Nombre': r.userName,
       'Email': r.userEmail,
       'Empresa': r.company || '—',
-      'Proyecto': r.project || '—',
+      'Cuenta analítica': r.project || '—',
       'Estado': r.status === 'read' ? 'Leído' : 'Pendiente',
       'Fecha envío': r.sentAt ? r.sentAt.toLocaleDateString('es-CO') : '—',
       'Fecha lectura': r.readAt ? r.readAt.toLocaleDateString('es-CO') : '—',
@@ -932,7 +932,7 @@ export const CommunicationsPage = () => {
 
     autoTable(doc, {
       startY: 42,
-      head: [['Nombre', 'Email', 'Empresa', 'Proyecto', 'Estado', 'Fecha Envío', 'Fecha Lectura']],
+      head: [['Nombre', 'Email', 'Empresa', 'Cuenta analítica', 'Estado', 'Fecha Envío', 'Fecha Lectura']],
       body: filteredRecipients.map(r => [
         r.userName,
         r.userEmail,
@@ -1043,7 +1043,7 @@ export const CommunicationsPage = () => {
             <SelectItem value="all">Todos los tipos</SelectItem>
             <SelectItem value="all_users">Todos los colaboradores</SelectItem>
             <SelectItem value="company">Por empresa</SelectItem>
-            <SelectItem value="project">Por proyecto</SelectItem>
+            <SelectItem value="project">Por cuenta analítica</SelectItem>
           </SelectContent>
         </Select>
         <span className="flex items-center text-xs text-gray-400 px-1">
@@ -1469,7 +1469,7 @@ export const CommunicationsPage = () => {
             {([
               { key: 'person', label: 'Empleado', icon: <Users className="w-3.5 h-3.5" /> },
               { key: 'company', label: 'Empresa', icon: <Building2 className="w-3.5 h-3.5" /> },
-              { key: 'project', label: 'Proyecto', icon: <FolderKanban className="w-3.5 h-3.5" /> },
+              { key: 'project', label: 'Cuenta analítica', icon: <FolderKanban className="w-3.5 h-3.5" /> },
             ] as const).map(tab => (
               <button
                 key={tab.key}
@@ -1565,7 +1565,7 @@ export const CommunicationsPage = () => {
               return (
                 <div className="space-y-1 max-h-72 overflow-y-auto">
                   {projects.length === 0 && (
-                    <p className="text-xs text-gray-400 text-center py-4">No hay proyectos</p>
+                    <p className="text-xs text-gray-400 text-center py-4">No hay cuentas analíticas</p>
                   )}
                   {projects.map(p => {
                     const belongsToProject = (u: any) =>
@@ -1660,7 +1660,7 @@ export const CommunicationsPage = () => {
                   <SelectContent>
                     <SelectItem value="all"><div className="flex items-center gap-2"><Users className="w-3.5 h-3.5" /> Todos los colaboradores</div></SelectItem>
                     <SelectItem value="company"><div className="flex items-center gap-2"><Building2 className="w-3.5 h-3.5" /> Por empresa</div></SelectItem>
-                    <SelectItem value="project"><div className="flex items-center gap-2"><FolderKanban className="w-3.5 h-3.5" /> Por proyecto</div></SelectItem>
+                    <SelectItem value="project"><div className="flex items-center gap-2"><FolderKanban className="w-3.5 h-3.5" /> Por cuenta analítica</div></SelectItem>
                     <SelectItem value="manual"><div className="flex items-center gap-2"><Search className="w-3.5 h-3.5" /> Por empleado</div></SelectItem>
                   </SelectContent>
                 </Select>
@@ -1695,7 +1695,7 @@ export const CommunicationsPage = () => {
 
               {form.targetType === 'project' && (
                 <div className="space-y-2">
-                  <Label className="text-xs text-gray-500">Proyecto(s) *</Label>
+                  <Label className="text-xs text-gray-500">Cuenta(s) analítica(s) *</Label>
                   {form.targetIds.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 rounded-lg border border-gray-200">
                       {form.targetIds.map(id => {
@@ -1711,7 +1711,7 @@ export const CommunicationsPage = () => {
                   )}
                   {form.targetIds.length < projects.length && (
                     <Select value="" onValueChange={v => { if (v) setForm(f => ({ ...f, targetIds: [...f.targetIds, v] })); }}>
-                      <SelectTrigger><SelectValue placeholder="Agregar proyecto..." /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="Agregar cuenta analítica..." /></SelectTrigger>
                       <SelectContent>
                         {projects.filter(p => !form.targetIds.includes(p.id)).map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.companyName}</SelectItem>)}
                       </SelectContent>

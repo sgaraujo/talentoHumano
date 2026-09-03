@@ -171,7 +171,7 @@ export function useEmailSendStats() {
             ? user.contractInfo.assignment.projectId
             : user?.projectIds?.[0] ?? "sin-proyecto";
 
-        const name = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin proyecto" : pid);
+        const name = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin cuenta analítica" : pid);
         if (!projAcc.has(pid)) projAcc.set(pid, { name, total: 0, sent: 0, failed: 0, noStatus: 0 });
         const e = projAcc.get(pid)!;
         e.total++;

@@ -261,7 +261,7 @@ export const CompaniesPage = () => {
                   </div>
                   <div className="rounded-xl bg-blue-50 px-3 py-2.5 flex items-center gap-2">
                     <BriefcaseBusiness className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                    <div><p className="text-[10px] uppercase tracking-wide text-blue-600 font-semibold leading-none">Proyectos</p><p className="text-lg font-bold text-blue-800">{(overview[c.id]?.activeProjects ?? 0).toLocaleString('es-CO')}</p></div>
+                    <div><p className="text-[10px] uppercase tracking-wide text-blue-600 font-semibold leading-none">Cuentas analíticas</p><p className="text-lg font-bold text-blue-800">{(overview[c.id]?.activeProjects ?? 0).toLocaleString('es-CO')}</p></div>
                   </div>
                   <div className="rounded-xl bg-purple-50 px-3 py-2.5 flex items-center gap-2">
                     <UserRoundX className="w-4 h-4 text-purple-600 flex-shrink-0" />

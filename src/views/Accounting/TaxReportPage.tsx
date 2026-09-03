@@ -102,6 +102,7 @@ interface Cell { projected: number; presented: number; paid: number; count: numb
 type PivotRow = {
   key: string; company: string; cells: Record<string, Cell>;
   totalProj: number; totalPresented: number; totalPaid: number; totalCount: number; totalLastPresentedAt?: string;
+  noAplicaCount: number;
 };
 
 /** Se queda con la fecha más reciente entre dos valores de fecha (algún lado puede venir vacío). */
@@ -130,9 +131,9 @@ export const TaxReportPage = () => {
   const [filterYear,     setFilterYear]     = useState(String(new Date().getFullYear()));
   const [expanded,       setExpanded]       = useState<Set<string>>(new Set());
   const [selectedTypes,  setSelectedTypes]  = useState<Set<string>>(new Set());
-  // Controlan si las columnas Proyectado / Pagado (+ Valor presentado/Fecha de
-  // presentado) se muestran en el cuadro — no filtran filas, solo ocultan columnas.
+  // Filtros de métricas. Siempre debe permanecer al menos uno activo.
   const [showProjected,  setShowProjected]  = useState(true);
+  const [showPresented,  setShowPresented]  = useState(true);
   const [showPaid,       setShowPaid]       = useState(true);
   const [filterMonth,    setFilterMonth]    = useState('all');
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
@@ -140,6 +141,17 @@ export const TaxReportPage = () => {
 
   const toggleStatus = (status: string) =>
     setFilterStatuses(prev => { const n = new Set(prev); n.has(status) ? n.delete(status) : n.add(status); return n; });
+
+  const toggleMetric = (metric: 'projected' | 'presented' | 'paid') => {
+    const current = { projected: showProjected, presented: showPresented, paid: showPaid };
+    if (current[metric] && Object.values(current).filter(Boolean).length === 1) {
+      toast.error('Debe permanecer al menos un filtro visible');
+      return;
+    }
+    if (metric === 'projected') setShowProjected(value => !value);
+    if (metric === 'presented') setShowPresented(value => !value);
+    if (metric === 'paid') setShowPaid(value => !value);
+  };
 
   useEffect(() => {
     taxCalendarService.getAll()
@@ -213,9 +225,10 @@ export const TaxReportPage = () => {
         const key = getCompanyKey(o);
         const taxKey = displayTax(o.taxType);
         if (!byCompany.has(key))
-          byCompany.set(key, { key, company: o.company, cells: {}, totalProj: 0, totalPresented: 0, totalPaid: 0, totalCount: 0 });
+          byCompany.set(key, { key, company: o.company, cells: {}, totalProj: 0, totalPresented: 0, totalPaid: 0, totalCount: 0, noAplicaCount: 0 });
         const row = byCompany.get(key)!;
         row.company = preferredCompanyName(row.company, o.company);
+        if (o.status === 'No aplica') row.noAplicaCount += 1;
         if (!row.cells[taxKey]) row.cells[taxKey] = { projected: 0, presented: 0, paid: 0, count: 0 };
         const cell = row.cells[taxKey];
         cell.projected += proj;
@@ -239,12 +252,17 @@ export const TaxReportPage = () => {
 
   // El filtro de estado (Presentado, Pagado, etc.) ya se aplica dentro del
   // pivote — el cuadro tipo Excel se muestra siempre, filtrado o no.
-  const filteredRows = rows;
+  // Se ocultan las empresas sin ningún valor proyectado ni presentado (fila
+  // sin datos financieros que solo agregaría ruido al informe) — salvo que
+  // tengan alguna obligación marcada "No aplica", que es información válida
+  // por sí misma y debe seguir visible aunque no lleve montos.
+  const filteredRows = useMemo(
+    () => rows.filter(r => r.totalProj > 0 || r.totalPresented > 0 || r.noAplicaCount > 0),
+    [rows],
+  );
 
   // Cuántas sub-columnas van visibles por tipo de impuesto (y en el bloque Total):
-  // Proyectado (1) + Pagado/Valor presentado/Fecha de presentado (3), según lo que el
-  // usuario decida mostrar con los botones "Con Proyectado" / "Con Pagado".
-  const typeColSpan = (showProjected ? 1 : 0) + (showPaid ? 3 : 0);
+  const typeColSpan = (showProjected ? 1 : 0) + (showPresented ? 2 : 0) + (showPaid ? 1 : 0);
 
   // ── Status summary ────────────────────────────────────────────────────────────
   const statusSummary = useMemo(() => {
@@ -332,7 +350,8 @@ export const TaxReportPage = () => {
     visibleTypes.forEach(t => {
       const subheaders: string[] = [];
       if (showProjected) subheaders.push('Proyectado');
-      if (showPaid) subheaders.push('Pagado', 'Valor presentado', 'Fecha valor presentado');
+      if (showPresented) subheaders.push('Valor presentado', 'Fecha valor presentado');
+      if (showPaid) subheaders.push('Pagado');
       subheaders.forEach((header, index) => {
         headerRow1.push(index === 0 ? t : null);
         headerRow2.push(header);
@@ -340,7 +359,8 @@ export const TaxReportPage = () => {
     });
     const totalSubheaders: string[] = [];
     if (showProjected) totalSubheaders.push('Proy. Total');
-    if (showPaid) totalSubheaders.push('Pag. Total', 'Valor presentado total', 'Última fecha presentada');
+    if (showPresented) totalSubheaders.push('Valor presentado total', 'Última fecha presentada');
+    if (showPaid) totalSubheaders.push('Pag. Total');
     totalSubheaders.forEach((header, index) => {
       headerRow1.push(index === 0 ? 'Total' : null);
       headerRow2.push(header);
@@ -348,30 +368,33 @@ export const TaxReportPage = () => {
     const numCols = headerRow1.length;
 
     const dataRows = filteredRows.map(r => {
-      const cells: (string | number)[] = [r.company];
+      const noAplicaLabel = r.noAplicaCount > 0 ? ` — NO APLICA (${r.noAplicaCount})` : '';
+      const cells: (string | number)[] = [`${r.company}${noAplicaLabel}`];
       visibleTypes.forEach(t => {
         if (showProjected) cells.push(r.cells[t]?.projected ?? 0);
-        if (showPaid) cells.push(r.cells[t]?.paid ?? 0, r.cells[t]?.presented ?? 0, r.cells[t]?.lastPresentedAt ? fmtFlexDate(r.cells[t]?.lastPresentedAt) : '');
+        if (showPresented) cells.push(r.cells[t]?.presented ?? 0, r.cells[t]?.lastPresentedAt ? fmtFlexDate(r.cells[t]?.lastPresentedAt) : '');
+        if (showPaid) cells.push(r.cells[t]?.paid ?? 0);
       });
       if (showProjected) cells.push(r.totalProj);
-      if (showPaid) cells.push(r.totalPaid, r.totalPresented, r.totalLastPresentedAt ? fmtFlexDate(r.totalLastPresentedAt) : '');
+      if (showPresented) cells.push(r.totalPresented, r.totalLastPresentedAt ? fmtFlexDate(r.totalLastPresentedAt) : '');
+      if (showPaid) cells.push(r.totalPaid);
       return cells;
     });
     const totalRow: (string | number)[] = ['TOTAL'];
     visibleTypes.forEach(t => {
       if (showProjected) totalRow.push(filteredRows.reduce((s, r) => s + (r.cells[t]?.projected ?? 0), 0));
-      if (showPaid) totalRow.push(
-        filteredRows.reduce((s, r) => s + (r.cells[t]?.paid ?? 0), 0),
+      if (showPresented) totalRow.push(
         filteredRows.reduce((s, r) => s + (r.cells[t]?.presented ?? 0), 0),
         fmtFlexDate(filteredRows.reduce((date: string | undefined, r) => laterDate(date, r.cells[t]?.lastPresentedAt), undefined)),
       );
+      if (showPaid) totalRow.push(filteredRows.reduce((s, r) => s + (r.cells[t]?.paid ?? 0), 0));
     });
     if (showProjected) totalRow.push(filteredRows.reduce((s, r) => s + r.totalProj, 0));
-    if (showPaid) totalRow.push(
-      filteredRows.reduce((s, r) => s + r.totalPaid, 0),
+    if (showPresented) totalRow.push(
       filteredRows.reduce((s, r) => s + r.totalPresented, 0),
       fmtFlexDate(filteredRows.reduce((date: string | undefined, r) => laterDate(date, r.totalLastPresentedAt), undefined)),
     );
+    if (showPaid) totalRow.push(filteredRows.reduce((s, r) => s + r.totalPaid, 0));
 
     const ws = XLSX.utils.aoa_to_sheet([
       ['INTEEGRADOS — Informe Tributario'],
@@ -406,10 +429,12 @@ export const TaxReportPage = () => {
     const colWidths = [{ wch: 38 }];
     visibleTypes.forEach(() => {
       if (showProjected) colWidths.push({ wch: 20 });
-      if (showPaid) colWidths.push({ wch: 20 }, { wch: 22 }, { wch: 22 });
+      if (showPresented) colWidths.push({ wch: 22 }, { wch: 22 });
+      if (showPaid) colWidths.push({ wch: 20 });
     });
     if (showProjected) colWidths.push({ wch: 20 });
-    if (showPaid) colWidths.push({ wch: 20 }, { wch: 22 }, { wch: 22 });
+    if (showPresented) colWidths.push({ wch: 22 }, { wch: 22 });
+    if (showPaid) colWidths.push({ wch: 20 });
     ws['!cols'] = colWidths;
     ws['!rows'] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 14 }, { hpt: 6 }, { hpt: 20 }, { hpt: 16 }];
 
@@ -417,6 +442,9 @@ export const TaxReportPage = () => {
     XLSX.utils.book_append_sheet(wb, ws, sheetName1);
 
     // ── HOJA 2: DETALLE ───────────────────────────────────────────────────────
+    // Mismas empresas que la hoja de resumen — se excluyen las que no tienen
+    // ningún valor proyectado ni presentado.
+    const visibleCompanyKeys = new Set(filteredRows.map(r => r.key));
     const detailObls = obligations
       .filter(o => (o.year || o.dueDate?.slice(0, 4)) === filterYear)
       .filter(o => filterMonth === 'all' || o.dueDate?.slice(0, 7) === filterMonth)
@@ -424,6 +452,7 @@ export const TaxReportPage = () => {
       .filter(o => selectedTypes.has(displayTax(o.taxType)))
       .filter(o => filterStatuses.size === 0 || filterStatuses.has(o.status || ''))
       .filter(o => filterCompany === 'all' || getCompanyKey(o) === filterCompany)
+      .filter(o => visibleCompanyKeys.has(getCompanyKey(o)))
       .sort((a, b) => companyIdx(a.company) - companyIdx(b.company) || a.dueDate.localeCompare(b.dueDate));
 
     const ACCOUNTING_STEPS = ['No iniciado', 'Revisado', 'Informe Enviado', 'Presentado'] as const;
@@ -492,7 +521,7 @@ export const TaxReportPage = () => {
             Informe Tributario
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Proyectado vs Pagado por empresa y responsabilidad
+            Proyectado, presentado y pagado por empresa y responsabilidad
           </p>
           <div className="flex gap-1 mt-3">
             <button
@@ -663,11 +692,11 @@ export const TaxReportPage = () => {
         )}
       </div>
 
-      {/* Mostrar / ocultar columnas de proyectado y pagado */}
+      {/* Mostrar / ocultar métricas; al menos una debe permanecer activa */}
       <div className="flex gap-2 mb-4 items-center flex-wrap">
         <span className="text-xs font-semibold text-gray-500 shrink-0">Mostrar:</span>
         <button
-          onClick={() => setShowProjected(v => !v)}
+          onClick={() => toggleMetric('projected')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
             showProjected
               ? 'bg-yellow-500 text-white border-yellow-500'
@@ -678,7 +707,18 @@ export const TaxReportPage = () => {
           Con Proyectado
         </button>
         <button
-          onClick={() => setShowPaid(v => !v)}
+          onClick={() => toggleMetric('presented')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+            showPresented
+              ? 'bg-purple-600 text-white border-purple-600'
+              : 'bg-white text-gray-400 border-gray-200 hover:border-purple-400'
+          }`}
+        >
+          <span className="w-2 h-2 rounded-full bg-current" />
+          Con Presentado
+        </button>
+        <button
+          onClick={() => toggleMetric('paid')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
             showPaid
               ? 'bg-green-600 text-white border-green-600'
@@ -688,9 +728,9 @@ export const TaxReportPage = () => {
           <span className="w-2 h-2 rounded-full bg-current" />
           Con Pagado
         </button>
-        {(!showProjected || !showPaid) && (
+        {(!showProjected || !showPresented || !showPaid) && (
           <button
-            onClick={() => { setShowProjected(true); setShowPaid(true); }}
+            onClick={() => { setShowProjected(true); setShowPresented(true); setShowPaid(true); }}
             className="text-xs text-gray-400 hover:text-gray-600 underline"
           >
             Mostrar todo
@@ -711,6 +751,11 @@ export const TaxReportPage = () => {
         {showPaid && (
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded bg-green-100 border border-green-300" /> Pagado
+          </span>
+        )}
+        {showPresented && (
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded bg-purple-100 border border-purple-300" /> Presentado
           </span>
         )}
         <span className="flex items-center gap-1.5 ml-auto text-gray-400">
@@ -753,11 +798,8 @@ export const TaxReportPage = () => {
                           Proyectado
                         </th>
                       )}
-                      {showPaid && (
+                      {showPresented && (
                         <>
-                          <th key={`${t}-a`} className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
-                            Pagado
-                          </th>
                           <th key={`${t}-sp`} className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
                             Valor presentado
                           </th>
@@ -766,6 +808,11 @@ export const TaxReportPage = () => {
                           </th>
                         </>
                       )}
+                      {showPaid && (
+                        <th key={`${t}-a`} className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
+                          Pagado
+                        </th>
+                      )}
                     </>
                   ))}
                   {showProjected && (
@@ -773,11 +820,8 @@ export const TaxReportPage = () => {
                       Proy. Total
                     </th>
                   )}
-                  {showPaid && (
+                  {showPresented && (
                     <>
-                      <th className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
-                        Pag. Total
-                      </th>
                       <th className="px-3 py-2 text-center font-semibold text-blue-700 bg-blue-50 text-[10px] uppercase tracking-wide">
                         Valor presentado total
                       </th>
@@ -785,6 +829,11 @@ export const TaxReportPage = () => {
                         Fecha de presentado
                       </th>
                     </>
+                  )}
+                  {showPaid && (
+                    <th className="px-3 py-2 text-center font-semibold text-green-700 bg-green-50 text-[10px] uppercase tracking-wide">
+                      Pag. Total
+                    </th>
                   )}
                 </tr>
               </thead>
@@ -801,7 +850,12 @@ export const TaxReportPage = () => {
                       >
                         <td className="px-4 py-3 font-medium text-[#4A4A4A] sticky left-0 bg-white z-10 flex items-center gap-1.5">
                           <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${isExp ? '' : '-rotate-90'}`} />
-                          {shortCompany(row.company)}
+                          <span>{shortCompany(row.company)}</span>
+                          {row.noAplicaCount > 0 && (
+                            <span className="ml-1 inline-flex shrink-0 items-center rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600 not-italic">
+                              No aplica{row.noAplicaCount > 1 ? ` (${row.noAplicaCount})` : ''}
+                            </span>
+                          )}
                         </td>
                         {visibleTypes.map(t => {
                           const c = row.cells[t];
@@ -812,11 +866,8 @@ export const TaxReportPage = () => {
                                   {c?.projected ? fmtCOPShort(c.projected) : <span className="text-gray-200">—</span>}
                                 </td>
                               )}
-                              {showPaid && (
+                              {showPresented && (
                                 <>
-                                  <td key={`${t}-a`} className="px-3 py-3 text-right text-green-700 bg-green-50/50 font-mono">
-                                    {c?.paid ? fmtCOPShort(c.paid) : <span className="text-gray-200">—</span>}
-                                  </td>
                                   <td key={`${t}-sp`} className="px-3 py-3 text-center bg-blue-50/40 text-[11px] font-medium text-blue-700">
                                     {c?.presented ? fmtCOPShort(c.presented) : <span className="text-gray-200">—</span>}
                                   </td>
@@ -824,6 +875,11 @@ export const TaxReportPage = () => {
                                     {c?.lastPresentedAt ? fmtFlexDate(c.lastPresentedAt) : <span className="text-gray-200">—</span>}
                                   </td>
                                 </>
+                              )}
+                              {showPaid && (
+                                <td key={`${t}-a`} className="px-3 py-3 text-right text-green-700 bg-green-50/50 font-mono">
+                                  {c?.paid ? fmtCOPShort(c.paid) : <span className="text-gray-200">—</span>}
+                                </td>
                               )}
                             </>
                           );
@@ -833,11 +889,8 @@ export const TaxReportPage = () => {
                             {row.totalProj ? fmtCOPShort(row.totalProj) : <span className="text-gray-200">—</span>}
                           </td>
                         )}
-                        {showPaid && (
+                        {showPresented && (
                           <>
-                            <td className="px-3 py-3 text-right text-green-800 bg-green-50 font-mono font-semibold">
-                              {row.totalPaid ? fmtCOPShort(row.totalPaid) : <span className="text-gray-200">—</span>}
-                            </td>
                             <td className="px-3 py-3 text-center bg-blue-50 text-[11px] font-semibold text-blue-800">
                               {row.totalPresented ? fmtCOPShort(row.totalPresented) : <span className="text-gray-200">—</span>}
                             </td>
@@ -846,12 +899,22 @@ export const TaxReportPage = () => {
                             </td>
                           </>
                         )}
+                        {showPaid && (
+                          <td className="px-3 py-3 text-right text-green-800 bg-green-50 font-mono font-semibold">
+                            {row.totalPaid ? fmtCOPShort(row.totalPaid) : <span className="text-gray-200">—</span>}
+                          </td>
+                        )}
                       </tr>
 
                       {isExp && detail.map(obl => (
                         <tr key={obl.id} className="bg-gray-50/80 text-[10px]">
                           <td className="pl-10 pr-4 py-2 text-gray-500 sticky left-0 bg-gray-50/80 z-10 italic">
-                            {obl.taxType} — {normalizePeriod(obl.period)}
+                            <span>{obl.taxType} — {normalizePeriod(obl.period)}</span>
+                            {obl.status === 'No aplica' && (
+                              <span className="ml-2 inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600 not-italic">
+                                No aplica
+                              </span>
+                            )}
                           </td>
                           {visibleTypes.map(t => {
                             const isThis = obl.taxType === t;
@@ -862,11 +925,8 @@ export const TaxReportPage = () => {
                                     {isThis && obl.projected ? fmtCOPShort(obl.projected) : ''}
                                   </td>
                                 )}
-                                {showPaid && (
+                                {showPresented && (
                                   <>
-                                    <td key={`d-${t}-a`} className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
-                                      {isThis && obl.paid ? fmtCOPShort(obl.paid) : ''}
-                                    </td>
                                     <td key={`d-${t}-sp`} className="px-3 py-2 text-center bg-blue-50/20 text-blue-700">
                                       {isThis && obl.presented ? fmtCOPShort(obl.presented) : ''}
                                     </td>
@@ -874,6 +934,11 @@ export const TaxReportPage = () => {
                                       {isThis && obl.presentedAt ? fmtFlexDate(obl.presentedAt) : ''}
                                     </td>
                                   </>
+                                )}
+                                {showPaid && (
+                                  <td key={`d-${t}-a`} className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
+                                    {isThis && obl.paid ? fmtCOPShort(obl.paid) : ''}
+                                  </td>
                                 )}
                               </>
                             );
@@ -883,11 +948,8 @@ export const TaxReportPage = () => {
                               {obl.projected ? fmtCOPShort(obl.projected) : ''}
                             </td>
                           )}
-                          {showPaid && (
+                          {showPresented && (
                             <>
-                              <td className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
-                                {obl.paid ? fmtCOPShort(obl.paid) : ''}
-                              </td>
                               <td className="px-3 py-2 text-center bg-blue-50/20 text-blue-700">
                                 {obl.presented ? fmtCOPShort(obl.presented) : ''}
                               </td>
@@ -895,6 +957,11 @@ export const TaxReportPage = () => {
                                 {obl.presentedAt ? fmtFlexDate(obl.presentedAt) : ''}
                               </td>
                             </>
+                          )}
+                          {showPaid && (
+                            <td className="px-3 py-2 text-right bg-green-50/30 font-mono text-green-700">
+                              {obl.paid ? fmtCOPShort(obl.paid) : ''}
+                            </td>
                           )}
                         </tr>
                       ))}
@@ -920,11 +987,8 @@ export const TaxReportPage = () => {
                             {proj ? fmtCOP(proj) : '—'}
                           </td>
                         )}
-                        {showPaid && (
+                        {showPresented && (
                           <>
-                            <td key={`t-${t}-a`} className="px-3 py-3 text-right text-green-300 font-bold font-mono text-xs">
-                              {paid ? fmtCOP(paid) : '—'}
-                            </td>
                             <td key={`t-${t}-sp`} className="px-3 py-3 text-center text-blue-300 font-bold text-[11px]">
                               {presented ? fmtCOP(presented) : '—'}
                             </td>
@@ -932,6 +996,11 @@ export const TaxReportPage = () => {
                               {lastPresentedAt ? fmtFlexDate(lastPresentedAt) : '—'}
                             </td>
                           </>
+                        )}
+                        {showPaid && (
+                          <td key={`t-${t}-a`} className="px-3 py-3 text-right text-green-300 font-bold font-mono text-xs">
+                            {paid ? fmtCOP(paid) : '—'}
+                          </td>
                         )}
                       </>
                     );
@@ -941,11 +1010,8 @@ export const TaxReportPage = () => {
                       {fmtCOP(filteredRows.reduce((s, r) => s + r.totalProj, 0))}
                     </td>
                   )}
-                  {showPaid && (
+                  {showPresented && (
                     <>
-                      <td className="px-3 py-3 text-right text-green-200 font-bold font-mono text-xs">
-                        {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPaid, 0))}
-                      </td>
                       <td className="px-3 py-3 text-center text-blue-300 font-bold text-[11px]">
                         {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPresented, 0))}
                       </td>
@@ -956,6 +1022,11 @@ export const TaxReportPage = () => {
                         })()}
                       </td>
                     </>
+                  )}
+                  {showPaid && (
+                    <td className="px-3 py-3 text-right text-green-200 font-bold font-mono text-xs">
+                      {fmtCOP(filteredRows.reduce((s, r) => s + r.totalPaid, 0))}
+                    </td>
                   )}
                 </tr>
               </tfoot>

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/config/firebase';
 import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
+import { companyService } from '@/services/companyService';
 import type { Bulletin } from '@/models/types/Bulletin';
 import type { User as AppUser } from '@/models/types/User';
 import {
@@ -14,6 +15,23 @@ const sendCommunicationEmail = httpsCallable(functions, 'sendCommunicationEmail'
 
 const ACTIVE_ROLES = new Set(['colaborador']);
 
+type DirectoryUser = AppUser & {
+  _assignments?: Array<{ company?: string }>;
+};
+
+const companiesOf = (user: DirectoryUser): string[] => {
+  const assignments = user._assignments ?? [];
+  const names = assignments.map(assignment => assignment.company?.trim()).filter(Boolean) as string[];
+
+  // Compatibilidad con usuarios que todavía lleguen en el formato anterior.
+  if (names.length === 0) {
+    const company = user.contractInfo?.assignment?.company?.trim();
+    if (company) names.push(company);
+  }
+
+  return [...new Set(names)];
+};
+
 interface Props {
   bulletin: Bulletin;
   open: boolean;
@@ -21,18 +39,32 @@ interface Props {
 }
 
 export function BulletinShareModal({ bulletin, open, onClose }: Props) {
-  const [users,         setUsers]         = useState<AppUser[]>([]);
+  const [users,         setUsers]         = useState<DirectoryUser[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [search,        setSearch]        = useState('');
   const [selected,      setSelected]      = useState<Set<string>>(new Set());
   const [sending,       setSending]       = useState(false);
   const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
+  const [thCompanies,   setThCompanies]   = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    getEmployeeDirectoryUsers()
-      .then(u => setUsers(u.filter(x => x.email && ACTIVE_ROLES.has(x.role))))
+    setSearch('');
+    setSelected(new Set());
+    setCompanyFilter(new Set());
+    Promise.all([getEmployeeDirectoryUsers(), companyService.getAll()])
+      .then(([u, companyCatalog]) => {
+        const activeTHNames = new Set(
+          companyCatalog.filter(company => company.activeTH).map(company => company.name.trim()),
+        );
+        setThCompanies(activeTHNames);
+        setUsers(u.filter(x =>
+          x.email
+          && ACTIVE_ROLES.has(x.role)
+          && companiesOf(x).some(company => activeTHNames.has(company)),
+        ));
+      })
       .catch(() => toast.error('Error cargando usuarios'))
       .finally(() => setLoading(false));
   }, [open]);
@@ -40,11 +72,12 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
   const companies = useMemo(() => {
     const set = new Set<string>();
     users.forEach(u => {
-      const c = u.contractInfo?.assignment?.company;
-      if (c) set.add(c);
+      companiesOf(u).forEach(company => {
+        if (thCompanies.has(company)) set.add(company);
+      });
     });
-    return Array.from(set).sort();
-  }, [users]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [users, thCompanies]);
 
   const toggleCompany = (company: string) =>
     setCompanyFilter(prev => {
@@ -57,10 +90,11 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
     const q = search.toLowerCase();
     return users.filter(u => {
       const matchSearch  = !q || u.fullName?.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
-      const matchCompany = companyFilter.size === 0 || companyFilter.has(u.contractInfo?.assignment?.company ?? '');
+      const userCompanies = companiesOf(u).filter(company => thCompanies.has(company));
+      const matchCompany = companyFilter.size === 0 || userCompanies.some(company => companyFilter.has(company));
       return matchSearch && matchCompany;
     });
-  }, [users, search, companyFilter]);
+  }, [users, search, companyFilter, thCompanies]);
 
   const toggle = (id: string) =>
     setSelected(prev => {
@@ -208,6 +242,7 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
           )}
           {filtered.map(u => {
             const isSelected = selected.has(u.id);
+            const userCompanies = companiesOf(u).filter(company => thCompanies.has(company));
             return (
               <button
                 key={u.id}
@@ -222,9 +257,9 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
                     {u.fullName || u.email.split('@')[0]}
                   </p>
                   <p className="text-xs text-gray-500 truncate">{u.email}</p>
-                  {u.contractInfo?.assignment?.company && (
+                  {userCompanies.length > 0 && (
                     <p className="text-[11px] text-gray-400 truncate">
-                      {u.contractInfo.assignment.company}
+                      {userCompanies.join(' · ')}
                     </p>
                   )}
                 </div>

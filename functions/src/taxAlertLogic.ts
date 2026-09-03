@@ -62,6 +62,7 @@ export interface ManualAlertDecision {
   resolved: boolean;
   representedByCalendar: boolean;
   hasCompletedDuplicate: boolean;
+  excludedByCompany: boolean;
   dueDate: string;
   today: string;
   overdueFrom: string;
@@ -76,7 +77,10 @@ export function daysBetweenDateStrings(from: string, to: string): number {
 
 /** Decide si una obligación manual debe aparecer, sin depender del calendario automático. */
 export function shouldIncludeManualAlert(input: ManualAlertDecision): boolean {
-  if (!input.companyMatches || input.resolved || input.representedByCalendar || input.hasCompletedDuplicate) {
+  if (
+    !input.companyMatches || input.resolved || input.representedByCalendar ||
+    input.hasCompletedDuplicate || input.excludedByCompany
+  ) {
     return false;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) return false;

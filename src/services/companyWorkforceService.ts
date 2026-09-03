@@ -74,7 +74,8 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
   const employees = new Map(employeeSnap.docs.map(item => [item.id, item.data() as any]));
   const companyRelations = employmentSnap.docs.filter(item => belongsToCompany(item.data(), companyValue));
   const people = await Promise.all(companyRelations.map(async item => {
-      const relation = { id: item.id, employeeId: item.data().employeeId || item.ref.parent.parent?.id, ...item.data() } as any;
+      const data = item.data();
+      const relation = { id: item.id, ...data, employeeId: data.employeeId || item.ref.parent.parent?.id } as any;
       const employee = employees.get(relation.employeeId) ?? {};
       const payrollSnap = await getDoc(doc(item.ref, FIRESTORE_SUBCOLLECTIONS.employeePrivateData, 'payroll'));
       return {

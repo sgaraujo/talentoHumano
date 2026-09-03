@@ -38,7 +38,7 @@ class CompanyService {
       getDocs(query(collection(db, FIRESTORE_COLLECTIONS.projects), where('companyId', '==', id))),
     ]);
     if (!employments.empty || !projects.empty) {
-      throw new Error('No se puede eliminar: la empresa tiene proyectos o relaciones laborales vinculadas. Márcala como inactiva en su lugar.');
+      throw new Error('No se puede eliminar: la empresa tiene cuentas analíticas o relaciones laborales vinculadas. Márcala como inactiva en su lugar.');
     }
     await deleteDoc(doc(db, this.col, id));
   }

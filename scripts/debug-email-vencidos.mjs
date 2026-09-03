@@ -127,6 +127,7 @@ async function main() {
         ? o.companyId === doc.id
         : ((compNitC && oNitC && compNitC === oNitC) || cComp(o.company ?? '') === compN);
       if (!companyMatch || COMPLETED.has(o.status ?? '') || o.status === 'No aplica') return false;
+      if (hidden.has(o.taxType)) return false;
       if (allCalObls.some(cal => normTax(cal.taxType) === normTax(o.taxType) && sameDate(cal.dueDate, o.dueDate))) return false;
       const dl = daysLeft(o.dueDate);
       return (dl < 0 && o.dueDate >= OVERDUE_FROM) || (dl >= 0 && dl <= UPCOMING_WINDOW);

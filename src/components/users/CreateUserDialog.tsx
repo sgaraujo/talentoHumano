@@ -158,13 +158,13 @@ function ProjectComboInput({
           ))}
           {filtered.length === 0 && !isNew && (
             <div className="px-3 py-2 text-xs text-gray-400">
-              No hay proyectos — escribe para crear uno nuevo
+              No hay cuentas analíticas — escribe para crear una nueva
             </div>
           )}
           {isNew && (
             <div className="px-3 py-2 text-xs text-[#008C3C] border-t border-gray-100 flex items-center gap-1">
               <Plus className="w-3 h-3" />
-              Crear proyecto: <span className="font-semibold ml-1">"{value}"</span>
+              Crear cuenta analítica: <span className="font-semibold ml-1">"{value}"</span>
             </div>
           )}
         </div>
@@ -289,7 +289,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
     if (step !== 1) return;
     if (companies.length === 0)
       companyService.getAll()
-        .then((all: any[]) => setCompanies(all.map(c => ({ id: c.id, name: c.name }))))
+        .then((all: any[]) => setCompanies(all.filter(c => c.active).map(c => ({ id: c.id, name: c.name }))))
         .catch(() => {});
     if (allUsers.length === 0)
       userService.getAll().then(setAllUsers).catch(() => {});
@@ -525,7 +525,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="colaborador">Colaborador</SelectItem>
-                  <SelectItem value="lider">Líder de proyecto</SelectItem>
+                  <SelectItem value="lider">Líder de cuenta analítica</SelectItem>
                   <SelectItem value="aspirante">Aspirante</SelectItem>
                   <SelectItem value="excolaborador">Ex-colaborador</SelectItem>
                   <SelectItem value="descartado">Descartado</SelectItem>
@@ -573,7 +573,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
             {/* Proyecto */}
             <div className="sm:col-span-2">
               <Field
-                label="Proyecto"
+                label="Cuenta analítica"
                 hint={!contract.companyId ? 'Selecciona una empresa primero' : 'Escoge uno existente o escribe para crear uno nuevo'}
               >
                 <ProjectComboInput
@@ -581,7 +581,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
                   value={contract.project}
                   projects={projects}
                   disabled={!contract.companyId}
-                  placeholder={contract.companyId ? 'Seleccionar o crear proyecto…' : 'Primero selecciona empresa'}
+                  placeholder={contract.companyId ? 'Seleccionar o crear cuenta analítica…' : 'Primero selecciona empresa'}
                   onChange={(name, id) => {
                     const p = projects.find(x => x.id === id);
                     setContract(prev => ({
@@ -826,7 +826,7 @@ export const CreateUserDialog = ({ open, onOpenChange, onUserCreated }: Props) =
                 <p><span className="font-semibold text-gray-800">Corporativo:</span> {basic.corporateEmail}</p>
               )}
               {contract.company     && <p><span className="font-semibold text-gray-800">Empresa:</span> {contract.company}</p>}
-              {contract.project     && <p><span className="font-semibold text-gray-800">Proyecto:</span> {contract.project}</p>}
+              {contract.project     && <p><span className="font-semibold text-gray-800">Cuenta analítica:</span> {contract.project}</p>}
               {contract.leaderName  && <p><span className="font-semibold text-gray-800">Líder:</span> {contract.leaderName}</p>}
               {contract.position    && <p><span className="font-semibold text-gray-800">Cargo:</span> {contract.position}</p>}
               {contract.area        && <p><span className="font-semibold text-gray-800">Área:</span> {contract.area}</p>}

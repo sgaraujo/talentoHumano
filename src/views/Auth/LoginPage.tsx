@@ -82,7 +82,7 @@ export const LoginPage = () => {
 
   const features = [
     "Analítica de rotación en tiempo real",
-    "Seguimiento por empresa y proyecto",
+    "Seguimiento por empresa y cuenta analítica",
     "Gestión de cuestionarios y onboarding",
     "Reportes de talento humano",
   ];

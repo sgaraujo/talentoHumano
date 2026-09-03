@@ -122,7 +122,7 @@ export const NotificationsPage = () => {
         'Fecha':           e.date.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }),
         'Días restantes':  e.daysUntil < 0 ? `Hace ${Math.abs(e.daysUntil)} día(s)` : e.daysUntil === 0 ? 'Hoy' : `En ${e.daysUntil} día(s)`,
         'Empresa':         e.company  || '—',
-        'Proyecto':        e.project  || '—',
+        'Cuenta analítica': e.project || '—',
         'Cargo':           e.position || '—',
       }));
 

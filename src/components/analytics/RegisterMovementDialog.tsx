@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Building2, UserCheck, UserMinus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '@/services/userService';
+import { companyService } from '@/services/companyService';
 import { analyticsService } from '@/services/analyticsService';
 import type { User } from '@/models/types/User';
 
@@ -43,6 +44,7 @@ export const RegisterMovementDialog = ({
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
+  const [companyNames, setCompanyNames] = useState<string[]>([]);
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
   const [search, setSearch] = useState('');
   const [showResults, setShowResults] = useState(false);
@@ -70,8 +72,12 @@ export const RegisterMovementDialog = ({
   const loadData = async () => {
     try {
       setLoadingData(true);
-      const allUsers = await userService.getAll();
+      const [allUsers, allCompanies] = await Promise.all([
+        userService.getAll(),
+        companyService.getAll(),
+      ]);
       setUsers(allUsers);
+      setCompanyNames(allCompanies.map(c => c.name).sort((a, b) => a.localeCompare(b, 'es')));
     } catch (error: any) {
       toast.error('Error al cargar datos', { description: error.message });
     } finally {
@@ -103,6 +109,12 @@ export const RegisterMovementDialog = ({
     if (!formData.userId || !formData.date) {
       toast.error('Completa los campos obligatorios', {
         description: 'Persona y fecha son requeridos',
+      });
+      return;
+    }
+    if (formData.type === 'retiro' && !formData.company) {
+      toast.error('Falta la empresa del retiro', {
+        description: 'Esta persona no tiene empresa en su perfil — selecciónala antes de continuar',
       });
       return;
     }
@@ -258,8 +270,7 @@ export const RegisterMovementDialog = ({
                   </p>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                     {[
-                      { label: 'Empresa', value: formData.company },
-                      { label: 'Proyecto', value: formData.project },
+                      { label: 'Cuenta analítica', value: formData.project },
                       { label: 'Área', value: formData.area },
                       { label: 'Sede', value: formData.sede },
                     ].map(({ label, value }) => value ? (
@@ -268,12 +279,29 @@ export const RegisterMovementDialog = ({
                         <span className="font-medium text-[#4A4A4A]">{value}</span>
                       </div>
                     ) : null)}
-                    {!formData.company && (
-                      <p className="col-span-2 text-amber-600">
-                        Esta persona no tiene empresa asignada en su perfil
-                      </p>
-                    )}
                   </div>
+                  {formData.company ? (
+                    <p className="text-xs">
+                      <span className="text-gray-400">Empresa: </span>
+                      <span className="font-medium text-[#4A4A4A]">{formData.company}</span>
+                    </p>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-amber-600 text-xs">
+                        Esta persona no tiene empresa asignada en su perfil — identifícala manualmente:
+                      </p>
+                      <Select value={formData.company} onValueChange={v => set('company', v)}>
+                        <SelectTrigger className="border-amber-300 focus:ring-amber-500 h-8 text-xs">
+                          <SelectValue placeholder="Selecciona la empresa del retiro" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {companyNames.map(name => (
+                            <SelectItem key={name} value={name}>{name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
               )}
 

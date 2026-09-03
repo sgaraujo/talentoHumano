@@ -1,4 +1,4 @@
-import { collection, doc, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, collectionGroup, doc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '@/config/firestoreCollections';
 import type { HrImportPlan } from '@/domain/humanResources/hrExcelPreview';
@@ -10,10 +10,47 @@ const hash = (value: string) => {
   for (let index = 0; index < value.length; index++) result = Math.imul(result ^ value.charCodeAt(index), 16777619);
   return (result >>> 0).toString(36);
 };
-const employmentId = (row: any) => {
-  const basis = [row.companyName, row.projectName, row.startDate, row.endDate].map(keyPart).join('|');
-  return `${keyPart(row.companyName).slice(0, 24)}-${keyPart(row.projectName).slice(0, 24)}-${hash(basis)}`;
+// Fecha -> "AAAA-MM-DD" en calendario local (evita el corrimiento de d\u00eda de toISOString con UTC).
+const dateKey = (value: unknown) => {
+  let date: Date | undefined;
+  if (value instanceof Date) date = value;
+  else if (typeof (value as any)?.toDate === 'function') date = (value as any).toDate();
+  else if (typeof (value as any)?.seconds === 'number') date = new Date((value as any).seconds * 1000);
+  else if (typeof (value as any)?._seconds === 'number') date = new Date((value as any)._seconds * 1000);
+  else if (typeof value === 'string') {
+    const timestampMatch = value.match(/Timestamp\s*\(\s*seconds\s*=\s*(-?\d+)/i);
+    if (timestampMatch) date = new Date(Number(timestampMatch[1]) * 1000);
+    else if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+      const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+      date = new Date(year, month - 1, day);
+    } else {
+      const parts = value.trim().split(/[\/-]/).map(Number);
+      if (parts.length === 3 && parts.every(Number.isFinite)) {
+        const [first, second, rawYear] = parts;
+        const year = rawYear < 100 ? (rawYear < 50 ? 2000 + rawYear : 1900 + rawYear) : rawYear;
+        // Los textos históricos fueron generados mayoritariamente con locale
+        // en-US (M/D/YYYY). Solo usar D/M cuando el primer valor no puede ser mes.
+        date = first > 12
+          ? new Date(year, second - 1, first)
+          : new Date(year, first - 1, second);
+      }
+    }
+  }
+  if (date && !Number.isNaN(date.getTime())) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+  return keyPart(value);
 };
+// El id NO debe depender de proyecto ni de fecha de retiro: ambos pueden variar
+// entre cargas del mismo contrato real (columna PROYECTO vac\u00eda en una fila,
+// o una persona que pasa de activa a retirada) y antes generaban un documento
+// nuevo en vez de actualizar el existente.
+const employmentId = (row: any) => {
+  const basis = [row.companyName, dateKey(row.startDate)].join('|');
+  return `${keyPart(row.companyName).slice(0, 24)}-${hash(basis)}`;
+};
+const employmentBusinessKey = (employeeId: unknown, row: any) =>
+  `${keyPart(employeeId)}|${keyPart(row.companyName)}|${dateKey(row.startDate)}`;
 
 export async function applyHrImport(
   plan: HrImportPlan,
@@ -29,13 +66,32 @@ export async function applyHrImport(
   });
 
   try {
+    // Reutilizar el documento existente aunque haya sido creado históricamente
+    // con un ID derivado de un Timestamp. Así una nueva carga no duplica el
+    // contrato por diferencias de representación de la misma fecha.
+    const existingRelationsSnap = await getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments));
+    const existingRelationIds = new Map<string, { id: string; completeness: number }>();
+    existingRelationsSnap.docs.forEach(snapshot => {
+      const relation = snapshot.data() as any;
+      const employeeId = relation.employeeId || snapshot.ref.parent.parent?.id;
+      if (!employeeId) return;
+      const key = employmentBusinessKey(employeeId, relation);
+      const completeness = [relation.projectName, relation.companyId, relation.projectId, relation.position, relation.contractType]
+        .filter(value => String(value ?? '').trim()).length;
+      const previous = existingRelationIds.get(key);
+      if (!previous || completeness > previous.completeness) {
+        existingRelationIds.set(key, { id: snapshot.id, completeness });
+      }
+    });
+
     const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
     const latestEmployee = new Map<string, (typeof plan.rows)[number]>();
     plan.rows.forEach(row => {
       const previous = latestEmployee.get(row.documentNumber);
       if (!previous || (previous.status === 'retired' && row.status === 'active')) latestEmployee.set(row.documentNumber, row);
       const employeeRef = doc(db, FIRESTORE_COLLECTIONS.employees, row.documentNumber);
-      const relationId = employmentId(row.employment);
+      const relationId = existingRelationIds.get(employmentBusinessKey(row.documentNumber, row.employment))?.id
+        ?? employmentId(row.employment);
       const relationRef = doc(employeeRef, FIRESTORE_SUBCOLLECTIONS.employeeEmployments, relationId);
       operations.push(batch => batch.set(relationRef, {
         ...row.employment, id: relationId, employeeId: row.documentNumber,

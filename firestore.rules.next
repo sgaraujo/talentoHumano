@@ -117,6 +117,11 @@ service cloud.firestore {
         allow read, create, update: if hasRole(['admin', 'talento_humano']);
         allow delete: if isAdmin();
 
+        match /audit/{auditId} {
+          allow read, create: if hasRole(['admin', 'talento_humano']);
+          allow update, delete: if false;
+        }
+
         match /private/{privateDocumentId} {
           allow read, create, update: if hasRole(['admin', 'talento_humano']);
           allow delete: if isAdmin();

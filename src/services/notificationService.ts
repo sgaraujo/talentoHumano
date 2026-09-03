@@ -2,23 +2,17 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { NotificationEvent, NotificationType } from '../models/types/Notification';
+import { parseFirestoreDate } from '@/domain/humanResources/firestoreDate';
 
 function parseDateLocal(v: any): Date | null {
-  if (!v) return null;
-  if (v instanceof Date) return v;
+  const d = parseFirestoreDate(v);
+  if (!d) return null;
   if (v?.toDate) {
-    const d = v.toDate();
     if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
       return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
     }
-    return d;
   }
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    const [yr, mo, dy] = v.split('-').map(Number);
-    return new Date(yr, mo - 1, dy);
-  }
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? null : d;
+  return d;
 }
 
 class NotificationService {
@@ -125,9 +119,8 @@ class NotificationService {
     const today = new Date();
     for (const user of users) {
       if (user.role !== 'colaborador' || !user.contractInfo?.contract?.startDate) continue;
-      const startDate = user.contractInfo.contract.startDate.toDate
-        ? user.contractInfo.contract.startDate.toDate()
-        : new Date(user.contractInfo.contract.startDate);
+      const startDate = parseDateLocal(user.contractInfo.contract.startDate);
+      if (!startDate) continue;
       const nextAnniversary = this.getNextAnniversary(startDate);
       const daysUntil = this.daysBetween(today, nextAnniversary);
       if (daysUntil >= 0 && daysUntil <= maxDays) {
@@ -152,9 +145,8 @@ class NotificationService {
     const today = new Date();
     for (const user of users) {
       if (user.role !== 'colaborador' || !user.contractInfo?.contract?.startDate || !user.contractInfo?.contract?.probationPeriod) continue;
-      const startDate = user.contractInfo.contract.startDate.toDate
-        ? user.contractInfo.contract.startDate.toDate()
-        : new Date(user.contractInfo.contract.startDate);
+      const startDate = parseDateLocal(user.contractInfo.contract.startDate);
+      if (!startDate) continue;
       const monthsMatch = user.contractInfo.contract.probationPeriod.match(/(\d+)/);
       const months = monthsMatch ? parseInt(monthsMatch[0]) : 3;
       const probationEndDate = new Date(startDate);
@@ -181,9 +173,8 @@ class NotificationService {
     const today = new Date();
     for (const user of users) {
       if (user.role !== 'colaborador' || !user.contractInfo?.contract?.startDate) continue;
-      const startDate = user.contractInfo.contract.startDate.toDate
-        ? user.contractInfo.contract.startDate.toDate()
-        : new Date(user.contractInfo.contract.startDate);
+      const startDate = parseDateLocal(user.contractInfo.contract.startDate);
+      if (!startDate) continue;
       const daysUntil = this.daysBetween(today, startDate);
       if (daysUntil >= -7 && daysUntil <= maxDays) {
         events.push({
@@ -206,9 +197,8 @@ class NotificationService {
     const today = new Date();
     for (const user of users) {
       if (user.role !== 'colaborador' || !user.contractInfo?.contract?.endDate) continue;
-      const endDate = user.contractInfo.contract.endDate.toDate
-        ? user.contractInfo.contract.endDate.toDate()
-        : new Date(user.contractInfo.contract.endDate);
+      const endDate = parseDateLocal(user.contractInfo.contract.endDate);
+      if (!endDate) continue;
       const daysUntil = this.daysBetween(today, endDate);
       if (daysUntil >= 0 && daysUntil <= maxDays) {
         events.push({
@@ -282,9 +272,8 @@ class NotificationService {
 
         // Aniversarios laborales
         if (user.role === 'colaborador' && user.contractInfo?.contract?.startDate) {
-          const sd = user.contractInfo.contract.startDate.toDate
-            ? user.contractInfo.contract.startDate.toDate()
-            : new Date(user.contractInfo.contract.startDate);
+          const sd = parseDateLocal(user.contractInfo.contract.startDate);
+          if (!sd) continue;
           const eventDate = new Date(year, month, sd.getDate());
           if (eventDate.getMonth() === month && sd.getMonth() === month) {
             const years = year - sd.getFullYear();
@@ -306,9 +295,8 @@ class NotificationService {
 
         // Fin de contrato (fecha exacta)
         if (user.role === 'colaborador' && user.contractInfo?.contract?.endDate) {
-          const ed = user.contractInfo.contract.endDate.toDate
-            ? user.contractInfo.contract.endDate.toDate()
-            : new Date(user.contractInfo.contract.endDate);
+          const ed = parseDateLocal(user.contractInfo.contract.endDate);
+          if (!ed) continue;
           if (ed.getMonth() === month && ed.getFullYear() === year) {
             events.push({
               id: `contract_end_${user.id}`,
@@ -325,9 +313,8 @@ class NotificationService {
 
         // Inicio de contrato (fecha exacta)
         if (user.role === 'colaborador' && user.contractInfo?.contract?.startDate) {
-          const sd = user.contractInfo.contract.startDate.toDate
-            ? user.contractInfo.contract.startDate.toDate()
-            : new Date(user.contractInfo.contract.startDate);
+          const sd = parseDateLocal(user.contractInfo.contract.startDate);
+          if (!sd) continue;
           if (sd.getMonth() === month && sd.getFullYear() === year) {
             events.push({
               id: `contract_start_${user.id}`,

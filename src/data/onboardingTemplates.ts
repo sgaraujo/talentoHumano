@@ -363,7 +363,7 @@ const contratoAsignacion: Template = {
     { id: q(C, 0), order: 0, text: '¿A qué empresa estás vinculado/a?',         type: 'text', required: true },
     { id: q(C, 1), order: 1, text: '¿En qué área o departamento trabajas?',      type: 'text', required: true },
     { id: q(C, 2), order: 2, text: '¿Cuál es tu cargo o posición?',              type: 'text', required: true },
-    { id: q(C, 3), order: 3, text: '¿A qué proyecto estás asignado/a actualmente?', type: 'text', required: false },
+    { id: q(C, 3), order: 3, text: '¿A qué cuenta analítica estás asignado/a actualmente?', type: 'text', required: false },
     { id: q(C, 4), order: 4, text: '¿Cuál es tu sede de trabajo?',               type: 'text', required: false },
     {
       id: q(C, 5), order: 5, text: '¿Qué tipo de contrato tienes?', type: 'select', required: true,

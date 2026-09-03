@@ -104,7 +104,7 @@ const FIELD_GROUPS = [
       { label: 'Empresa', value: 'contractInfo.assignment.company' },
       { label: 'Área asignada', value: 'contractInfo.assignment.area' },
       { label: 'Cargo / Posición', value: 'contractInfo.assignment.position' },
-      { label: 'Proyecto', value: 'contractInfo.assignment.project' },
+      { label: 'Cuenta analítica', value: 'contractInfo.assignment.project' },
       { label: 'Sede', value: 'contractInfo.assignment.location' },
       { label: 'Tipo de contrato', value: 'contractInfo.contract.contractType' },
       { label: 'Fecha de inicio', value: 'contractInfo.contract.startDate' },

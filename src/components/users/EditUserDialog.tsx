@@ -33,6 +33,7 @@ import { toast } from 'sonner';
 import { userService } from '@/services/userService';
 import { companyService } from '@/services/companyService';
 import { projectService } from '@/services/projectService';
+import { firestoreDateInput } from '@/domain/humanResources/firestoreDate';
 import { membershipService } from '@/services/membershipService';
 import type { User, UserRole } from '@/models/types/User';
 import type { Project } from '@/models/types/Project';
@@ -98,17 +99,11 @@ function ComboInput({
 }
 
 function formatDateForInput(date: any): string {
-  if (!date) return '';
-  let d: Date;
-  if (date?.toDate) d = date.toDate();
-  else if (typeof date === 'string' && date.includes('/')) {
+  if (typeof date === 'string' && date.includes('/')) {
     const [dd, mm, yyyy] = date.split('/');
-    d = new Date(+yyyy, +mm - 1, +dd);
-  } else {
-    d = new Date(date);
+    return firestoreDateInput(new Date(+yyyy, +mm - 1, +dd));
   }
-  if (isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return firestoreDateInput(date);
 }
 
 function parseLocalDate(s: string): Date {
@@ -161,13 +156,13 @@ function ProjectComboInput({
           ))}
           {filtered.length === 0 && !isNew && (
             <div className="px-3 py-2 text-xs text-gray-400">
-              No hay proyectos — escribe para crear uno nuevo
+              No hay cuentas analíticas — escribe para crear una nueva
             </div>
           )}
           {isNew && (
             <div className="px-3 py-2 text-xs text-[#008C3C] border-t border-gray-100 flex items-center gap-1">
               <Plus className="w-3 h-3" />
-              Crear proyecto: <span className="font-semibold ml-1">"{value}"</span>
+              Crear cuenta analítica: <span className="font-semibold ml-1">"{value}"</span>
             </div>
           )}
         </div>
@@ -215,7 +210,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
   useEffect(() => {
     if (!open) return;
     companyService.getAll()
-      .then((all: any[]) => setCompanies(all.map(c => ({ id: c.id, name: c.name }))))
+      .then((all: any[]) => setCompanies(all.filter(c => c.active).map(c => ({ id: c.id, name: c.name }))))
       .catch(() => {});
     userService.getAll().then(setAllUsers).catch(() => {});
   }, [open]);
@@ -470,13 +465,13 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
                 </Field>
               </div>
 
-              <Field label="Proyecto">
+              <Field label="Cuenta analítica">
                 <ProjectComboInput
                   key={`proj-${contract.companyId}`}
                   value={contract.project}
                   projects={projects}
                   disabled={!contract.companyId}
-                  placeholder={contract.companyId ? 'Seleccionar o crear proyecto…' : 'Primero selecciona empresa'}
+                  placeholder={contract.companyId ? 'Seleccionar o crear cuenta analítica…' : 'Primero selecciona empresa'}
                   onChange={(name, id) =>
                     setContract(p => ({ ...p, project: name, projectId: id }))
                   }

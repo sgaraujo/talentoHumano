@@ -174,7 +174,7 @@ function QuestionnaireDetailPanel({ row, details }: {
       {d.byProject.length > 1 && (
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-            <FolderKanban className="w-3.5 h-3.5" /> Por Proyecto
+            <FolderKanban className="w-3.5 h-3.5" /> Por cuenta analítica
           </p>
           <div className="space-y-2">
             {d.byProject.map(p => (
@@ -330,7 +330,7 @@ export const QuestionnaireSendStatsPage = () => {
         <div className="flex items-center border-b border-gray-100 px-5 overflow-x-auto">
           {([
             { id: 'cuestionarios', label: 'Por Cuestionario', icon: FileText },
-            { id: 'proyectos',     label: 'Por Proyecto',     icon: FolderKanban },
+            { id: 'proyectos',     label: 'Por cuenta analítica', icon: FolderKanban },
             { id: 'roles',         label: 'Por Rol',          icon: Users },
             { id: 'tendencia',     label: 'Tendencia',        icon: BarChart2 },
             { id: 'alertas',       label: 'Alertas',          icon: AlertTriangle, badge: pendingAlerts.length },
@@ -429,7 +429,7 @@ export const QuestionnaireSendStatsPage = () => {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input
                   className="h-8 pl-8 pr-3 text-sm border border-gray-200 rounded-lg w-52 focus:outline-none focus:ring-2 focus:ring-[#008C3C]/20"
-                  placeholder="Buscar proyecto..."
+                  placeholder="Buscar cuenta analítica..."
                   value={pSearch}
                   onChange={e => setPSearch(e.target.value)}
                 />
@@ -438,7 +438,7 @@ export const QuestionnaireSendStatsPage = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-gray-400 bg-gray-50/70 border-b border-gray-100">
-                  <th className="text-left px-5 py-3 font-medium">Proyecto</th>
+                  <th className="text-left px-5 py-3 font-medium">Cuenta analítica</th>
                   <th className="text-right px-3 py-3 font-medium">Enviados</th>
                   <th className="text-right px-3 py-3 font-medium text-green-600">Respondieron</th>
                   <th className="text-right px-3 py-3 font-medium text-orange-500">Pendientes</th>
