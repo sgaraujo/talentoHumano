@@ -29,6 +29,30 @@ export interface HrImportRunSummary {
   writeCount?: number;
 }
 
+/** Una fila por relación laboral, con los datos del empleado ya unidos — es la
+ * base completa que se descarga desde "Expedientes y control". */
+export interface HrRelationshipRow {
+  documentNumber: string;
+  fullName: string;
+  employeeStatus: string;
+  corporateEmail?: string;
+  personalEmail?: string;
+  corporatePhone?: string;
+  personalPhone?: string;
+  companyName?: string;
+  projectName?: string;
+  position?: string;
+  contractType?: string;
+  modality?: string;
+  regional?: string;
+  baseLocation?: string;
+  area?: string;
+  startDate?: string;
+  endDate?: string;
+  relationshipStatus: string;
+  terminationReason?: string;
+}
+
 export async function getHrControlData() {
   const [employeeSnap, employmentSnap, runSnap] = await Promise.all([
     getDocs(collection(db, FIRESTORE_COLLECTIONS.employees)),
@@ -64,9 +88,37 @@ export async function getHrControlData() {
     };
   });
 
+  const employeeById = new Map(employeeSnap.docs.map(snapshot => [snapshot.id, snapshot.data() as any]));
+  const relationshipRows: HrRelationshipRow[] = employmentSnap.docs.map(snapshot => {
+    const relationship = snapshot.data() as any;
+    const employeeId = relationship.employeeId || snapshot.ref.parent.parent?.id;
+    const employee = (employeeId && employeeById.get(employeeId)) || {};
+    return {
+      documentNumber: employee.documentNumber || employeeId || '',
+      fullName: employee.fullName || 'Sin nombre',
+      employeeStatus: employee.status || 'unknown',
+      corporateEmail: employee.corporateEmail,
+      personalEmail: employee.personalEmail,
+      corporatePhone: employee.corporatePhone,
+      personalPhone: employee.personalPhone,
+      companyName: relationship.companyName,
+      projectName: relationship.projectName,
+      position: relationship.position,
+      contractType: relationship.contractType,
+      modality: relationship.modality,
+      regional: relationship.regional,
+      baseLocation: relationship.baseLocation,
+      area: relationship.area,
+      startDate: relationship.startDate,
+      endDate: relationship.endDate,
+      relationshipStatus: relationship.status || 'unknown',
+      terminationReason: relationship.terminationReason,
+    };
+  });
+
   const runs = runSnap.docs.map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as HrImportRunSummary))
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-  return { employees, runs };
+  return { employees, runs, relationshipRows };
 }
 
 export async function getHrEmployeeDetail(employeeId: string) {

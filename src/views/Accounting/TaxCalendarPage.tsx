@@ -179,6 +179,7 @@ function TaxTypeCombobox({
 function AdminEmailButtons() {
   const [sending9, setSending9] = useState<'idle'|'loading'|'ok'|'err'>('idle');
   const [sending5, setSending5] = useState<'idle'|'loading'|'ok'|'err'>('idle');
+  const [sendingWeekly, setSendingWeekly] = useState<'idle'|'loading'|'ok'|'err'>('idle');
 
   const trigger9am = async () => {
     setSending9('loading');
@@ -200,6 +201,16 @@ function AdminEmailButtons() {
     } catch { setSending5('err'); setTimeout(() => setSending5('idle'), 4000); }
   };
 
+  const triggerWeekly = async () => {
+    setSendingWeekly('loading');
+    try {
+      const fn = httpsCallable(functions, 'triggerWeeklyTaxDigest');
+      await fn({});
+      setSendingWeekly('ok');
+      setTimeout(() => setSendingWeekly('idle'), 4000);
+    } catch { setSendingWeekly('err'); setTimeout(() => setSendingWeekly('idle'), 4000); }
+  };
+
   const btnClass = (state: typeof sending9) =>
     `flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border transition-colors ${
       state === 'loading' ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-wait' :
@@ -217,6 +228,10 @@ function AdminEmailButtons() {
       <button onClick={trigger5pm} disabled={sending5 === 'loading'} className={btnClass(sending5)}>
         {sending5 === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
         {sending5 === 'ok' ? 'Enviado ✓' : sending5 === 'err' ? 'Error' : 'Correo 5pm'}
+      </button>
+      <button onClick={triggerWeekly} disabled={sendingWeekly === 'loading'} className={btnClass(sendingWeekly)}>
+        {sendingWeekly === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+        {sendingWeekly === 'ok' ? 'Enviado ✓' : sendingWeekly === 'err' ? 'Error' : 'Correo semanal'}
       </button>
     </>
   );
@@ -1082,6 +1097,70 @@ export const TaxCalendarPage = () => {
     XLSX.writeFile(wb, `calendario-tributario-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
+  /**
+   * Auditoría de vencimientos: TODAS las empresas activas y TODOS sus
+   * vencimientos del calendario (sin los filtros de fecha/vista del panel),
+   * ordenados por tipo de obligación y luego por empresa — así se puede ver,
+   * para un mismo impuesto (ej. IVA), si la periodicidad (Bimestral,
+   * Cuatrimestral, etc.) es la misma entre compañías o si alguna quedó
+   * configurada distinto al resto.
+   */
+  const handleExportAudit = () => {
+    type AuditRow = {
+      'Tipo de obligación': string; Alcance: string; Empresa: string; NIT: string;
+      Período: string; Vencimiento: string; Estado: string;
+    };
+    const rows: AuditRow[] = [];
+    const activeCompanies = calendarCompanies.filter(c => c.active && c.activeContabilidad);
+
+    activeCompanies.forEach(company => {
+      const hidden = new Set(company.excludedTaxTypes);
+      const match = (o: TaxObligation) => belongsToCompany(o, company);
+
+      const calendarObls = (company.nit ? getAllObligationsByNit(company.nit) : [])
+        .filter(o => !hidden.has(o.taxType));
+      calendarObls.forEach(calObl => {
+        const fs = obligations.find(o => match(o) && sameDianObligation(o, calObl));
+        rows.push({
+          'Tipo de obligación': displayTax(calObl.taxType),
+          Alcance:     calObl.scope,
+          Empresa:     company.name,
+          NIT:         company.nit ?? '',
+          Período:     normalizePeriod(calObl.period),
+          Vencimiento: calObl.dueDate,
+          Estado:      fs?.status || '',
+        });
+      });
+
+      // Obligaciones manuales/legales (ej. Contribución CRC) que no están en el calendario automático.
+      obligations
+        .filter(o => match(o) && !hidden.has(o.taxType) && !calendarObls.some(cal => sameDianObligation(o, cal)))
+        .forEach(o => {
+          rows.push({
+            'Tipo de obligación': displayTax(o.taxType),
+            Alcance:     o.scope || 'Nacional',
+            Empresa:     company.name,
+            NIT:         company.nit ?? '',
+            Período:     normalizePeriod(o.period),
+            Vencimiento: o.dueDate,
+            Estado:      o.status || '',
+          });
+        });
+    });
+
+    rows.sort((a, b) =>
+      a['Tipo de obligación'].localeCompare(b['Tipo de obligación'], 'es') ||
+      companyOrderIndex(a.Empresa) - companyOrderIndex(b.Empresa) ||
+      a.Vencimiento.localeCompare(b.Vencimiento)
+    );
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 38 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 18 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Auditoría de vencimientos');
+    XLSX.writeFile(wb, `auditoria-vencimientos-todas-las-empresas-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   // ── render ───────────────────────────────────────────────────────────────────
 
   return (
@@ -1120,6 +1199,14 @@ export const TaxCalendarPage = () => {
             className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Download className="w-3.5 h-3.5" /> Exportar Excel
+          </button>
+          <button
+            onClick={handleExportAudit}
+            disabled={calendarCompanies.filter(c => c.active && c.activeContabilidad).length === 0}
+            title="Todos los vencimientos de todas las empresas, sin filtros — para auditar periodicidad"
+            className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3.5 h-3.5" /> Auditoría (todas las empresas)
           </button>
           {!isFinanciera && (
             <div className="flex items-center gap-1">

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Building2, CheckCircle2, ChevronDown, ChevronUp, Eye, FileSpreadsheet, Loader2, Megaphone, Search, Send, Users, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronUp, Download, Eye, FileSpreadsheet, Loader2, Megaphone, Search, Send, Users, X } from "lucide-react";
+import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { getTemplates } from "@/services/whatsappService";
 import {
   getCampaignAudienceData, getCampaignRecipients, getRecentCampaigns, parseExternalContacts, recipientsFromUsers, sendCampaign,
-  type WaCampaignRecipientResult, type WaCampaignResult,
+  usersMissingCorporatePhone,
+  type WaCampaignRecipientResult, type WaCampaignResult, type WaMissingPhoneUser,
 } from "@/services/whatsappCampaignService";
 import type { Company } from "@/models/types/Company";
 import type { Project } from "@/models/types/Project";
@@ -51,13 +53,14 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
   const normalizeName = (value?: string) => (value ?? "").trim().normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").replace(/[^a-z0-9]/g, "");
   const visibleProjects = useMemo(() => projects.filter(p => {
+    if (p.status !== "activo") return false; // proyectos desactivados no deben poder elegirse para enviar campañas
     if (!companyId) return true;
     return p.companyId === companyId ||
       normalizeName(p.companyName) === normalizeName(selectedCompany?.name);
   }), [projects, companyId, selectedCompany?.name]);
   const internalCandidates = useMemo(
-    () => includeInternal ? recipientsFromUsers(users, companyId, projectId) : [],
-    [users, companyId, projectId, includeInternal]
+    () => includeInternal ? recipientsFromUsers(users, companyId, projectId, companies, projects) : [],
+    [users, companyId, projectId, includeInternal, companies, projects]
   );
   useEffect(() => {
     setSelectedInternalIds(new Set(internalCandidates.map(r => r.id)));
@@ -75,6 +78,22 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
       (digits.length > 0 && person.phone.includes(digits))
     );
   }, [internalCandidates, peopleSearch]);
+
+  // ── Personas sin teléfono corporativo (no se les puede enviar por esa vía) ──
+  const [missingPhoneOpen, setMissingPhoneOpen] = useState(false);
+  const [missingPhoneSearch, setMissingPhoneSearch] = useState("");
+  const missingPhoneUsers = useMemo(
+    () => includeInternal ? usersMissingCorporatePhone(users, companyId, projectId, companies, projects) : [],
+    [users, companyId, projectId, includeInternal, companies, projects]
+  );
+  const visibleMissingPhone = useMemo(() => {
+    const query = missingPhoneSearch.trim().toLocaleLowerCase("es");
+    if (!query) return missingPhoneUsers;
+    return missingPhoneUsers.filter((person: WaMissingPhoneUser) =>
+      person.name.toLocaleLowerCase("es").includes(query) ||
+      (person.documentNumber ?? "").includes(query)
+    );
+  }, [missingPhoneUsers, missingPhoneSearch]);
   const recipients = useMemo(() => {
     const byPhone = new Map<string, WaCampaignRecipient>();
     [...internal, ...external].forEach(r => { if (!byPhone.has(r.phone)) byPhone.set(r.phone, r); });
@@ -133,6 +152,28 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
     try { setCampaignRecipients(await getCampaignRecipients(campaignId)); }
     catch (e: any) { toast.error("No se pudo cargar el detalle", { description: e.message }); }
     finally { setLoadingRecipients(false); }
+  };
+
+  const statusLabel = (recipient: WaCampaignRecipientResult) => {
+    const state = recipient.deliveryStatus || recipient.status;
+    return state === "read" ? "Leído" : state === "delivered" ? "Entregado" : state === "failed" ? "Fallido"
+      : state === "skipped" ? "Omitido" : state === "sent" || state === "pending" ? "Aceptado" : state;
+  };
+
+  const handleExportRecipients = (campaign: WaCampaignResult) => {
+    const rows = campaignRecipients.map(recipient => ({
+      Número: `+${recipient.phone}`,
+      Nombre: recipient.name || '',
+      Empresa: companies.find(c => c.id === recipient.companyId)?.name || '',
+      Proyecto: projects.find(p => p.id === recipient.projectId)?.name || '',
+      Estado: statusLabel(recipient),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 16 }, { wch: 32 }, { wch: 32 }, { wch: 28 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Destinatarios');
+    const safeName = campaign.name.replace(/[^\w\-]+/g, '_');
+    XLSX.writeFile(wb, `campana-whatsapp-${safeName}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   if (loading) return <div className="h-full flex items-center justify-center"><Loader2 className="w-7 h-7 animate-spin text-[#00a884]" /></div>;
@@ -270,6 +311,58 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
           )}
         </section>
 
+        {includeInternal && missingPhoneUsers.length > 0 && (
+          <section className="bg-white border border-amber-200 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMissingPhoneOpen(open => !open)}
+              className="w-full flex items-center gap-3 p-4 text-left hover:bg-amber-50/50 transition-colors"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-800">{missingPhoneUsers.length} persona{missingPhoneUsers.length !== 1 ? "s" : ""} sin teléfono corporativo</p>
+                <p className="text-xs text-gray-500 mt-0.5">No se les puede enviar por WhatsApp con su número de empresa — algunas igual reciben por su celular personal.</p>
+              </div>
+              {missingPhoneOpen ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+            </button>
+            {missingPhoneOpen && (
+              <div className="border-t border-amber-100">
+                <div className="p-3 bg-amber-50/40 border-b border-amber-100 relative">
+                  <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    value={missingPhoneSearch}
+                    onChange={e => setMissingPhoneSearch(e.target.value)}
+                    placeholder="Buscar por nombre o cédula…"
+                    className="w-full h-10 rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/10"
+                  />
+                </div>
+                <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+                  {visibleMissingPhone.map(person => (
+                    <div key={person.id} className="flex items-center gap-3 px-4 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-gray-700 truncate">{person.name}</p>
+                        <p className="text-xs text-gray-400">
+                          {person.documentNumber && <>Cédula {person.documentNumber} · </>}
+                          {[person.company, person.project].filter(Boolean).join(" · ") || "Sin empresa/cuenta analítica"}
+                        </p>
+                      </div>
+                      <span className={`text-[11px] font-medium px-2 py-1 rounded-full flex-shrink-0 ${person.hasPersonalPhone ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-600"}`}>
+                        {person.hasPersonalPhone ? "Recibe por celular personal" : "Sin ningún teléfono"}
+                      </span>
+                    </div>
+                  ))}
+                  {visibleMissingPhone.length === 0 && (
+                    <div className="px-4 py-8 text-center">
+                      <Search className="w-6 h-6 mx-auto text-gray-300 mb-2" />
+                      <p className="text-sm text-gray-500">No encontramos personas con esa búsqueda.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2"><FileSpreadsheet className="w-4 h-4" /> 3. Contactos externos</h2>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
@@ -327,16 +420,25 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
                   </div>
                 )}
                 {expandedCampaignId === campaign.id && (
-                  <div className="border-t border-gray-100 max-h-72 overflow-y-auto">
-                    {loadingRecipients ? <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-[#00a884]" /></div> : campaignRecipients.map(recipient => {
-                      const state = recipient.deliveryStatus || recipient.status;
-                      const label = state === "read" ? "Leído" : state === "delivered" ? "Entregado" : state === "failed" ? "Fallido" : state === "skipped" ? "Omitido" : state === "sent" || state === "pending" ? "Aceptado" : state;
-                      return <div key={recipient.id} className="px-3 py-2 border-b last:border-0 border-gray-100 flex items-center gap-3">
-                        <div className="min-w-0 flex-1"><p className="text-sm text-gray-700 truncate">{recipient.name || recipient.phone}</p><p className="text-xs text-gray-400">+{recipient.phone}</p></div>
-                        <span className={`text-xs font-medium ${state === "failed" ? "text-red-600" : state === "skipped" ? "text-gray-400" : state === "read" ? "text-green-600" : state === "delivered" ? "text-blue-600" : "text-gray-500"}`} title={recipient.error}>{state === "read" && <Eye className="inline w-3.5 h-3.5 mr-1" />}{label}</span>
-                        {recipient.error && state !== "skipped" && <span title={recipient.error} className="text-red-500"><AlertCircle className="w-4 h-4" /></span>}
-                      </div>;
-                    })}
+                  <div className="border-t border-gray-100">
+                    {!loadingRecipients && campaignRecipients.length > 0 && (
+                      <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 flex justify-end">
+                        <button type="button" onClick={() => handleExportRecipients(campaign)} className="flex items-center gap-1.5 text-xs font-medium text-[#008C3C] hover:underline">
+                          <Download className="w-3.5 h-3.5" /> Exportar Excel
+                        </button>
+                      </div>
+                    )}
+                    <div className="max-h-72 overflow-y-auto">
+                      {loadingRecipients ? <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-[#00a884]" /></div> : campaignRecipients.map(recipient => {
+                        const state = recipient.deliveryStatus || recipient.status;
+                        const label = statusLabel(recipient);
+                        return <div key={recipient.id} className="px-3 py-2 border-b last:border-0 border-gray-100 flex items-center gap-3">
+                          <div className="min-w-0 flex-1"><p className="text-sm text-gray-700 truncate">{recipient.name || recipient.phone}</p><p className="text-xs text-gray-400">+{recipient.phone}</p></div>
+                          <span className={`text-xs font-medium ${state === "failed" ? "text-red-600" : state === "skipped" ? "text-gray-400" : state === "read" ? "text-green-600" : state === "delivered" ? "text-blue-600" : "text-gray-500"}`} title={recipient.error}>{state === "read" && <Eye className="inline w-3.5 h-3.5 mr-1" />}{label}</span>
+                          {recipient.error && state !== "skipped" && <span title={recipient.error} className="text-red-500"><AlertCircle className="w-4 h-4" /></span>}
+                        </div>;
+                      })}
+                    </div>
                   </div>
                 )}
               </div>

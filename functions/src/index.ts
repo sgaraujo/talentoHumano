@@ -1259,6 +1259,9 @@ interface AlertRecipient {
   name: string;
   email: string;
   obligations: Array<TaxObligation & { daysLeft: number; threshold: number; isNew?: boolean }>;
+  // Obligaciones ya "Presentado" por contabilidad pero aún sin marcar "Pagado" —
+  // recordatorio para que financiera registre el valor pagado.
+  paymentReminders: Array<TaxObligation & { projected?: number }>;
 }
 
 // Normaliza nombres de tipos de impuesto para comparación — evita duplicados por nombre distinto
@@ -1338,9 +1341,11 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
     });
   }
 
-  // Load all contabilidad + admin users to always notify them
+  // Load all contabilidad + admin + financiera users to always notify them —
+  // financiera necesita el reporte de las 9am para ver el recordatorio de pagos
+  // pendientes (ver pendingPaymentObls más abajo).
   const rolesSnap = await db.collection(IDENTITY_COLLECTIONS.platformRoles)
-    .where("role", "in", ["contabilidad", "admin"])
+    .where("role", "in", ["contabilidad", "admin", "financiera"])
     .get();
   const globalRecipients: { name: string; email: string }[] = rolesSnap.docs.map(d => ({
     name: d.data().name || d.id,
@@ -1375,7 +1380,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   const ensureRecipient = (email: string, name: string) => {
     const key = email.toLowerCase();
     if (!recipientMap.has(key)) {
-      recipientMap.set(key, { name, email: key, obligations: [] });
+      recipientMap.set(key, { name, email: key, obligations: [], paymentReminders: [] });
     }
     return recipientMap.get(key)!;
   };
@@ -1613,10 +1618,26 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
     }
   }
 
+  // ── Recordatorio de pago pendiente ────────────────────────────────────────
+  // Obligaciones que contabilidad ya marcó "Presentado" (el único estado desde
+  // el que la plataforma habilita "Registrar pago") pero que financiera todavía
+  // no marcó "Pagado". A diferencia de vencidos/próximos, no depende de la fecha
+  // de vencimiento ni se deja de mostrar por sí solo: aparece todos los días
+  // hasta que financiera registre el pago.
+  const activeCompanyIds = new Set(companiesSnap.docs.map(d => d.id));
+  const pendingPaymentObls = allDocs.filter(o =>
+    o.status === "Presentado" && (!o.companyId || activeCompanyIds.has(o.companyId))
+  );
+  if (pendingPaymentObls.length > 0) {
+    for (const gr of globalRecipients) {
+      ensureRecipient(gr.email, gr.name).paymentReminders.push(...pendingPaymentObls);
+    }
+  }
+
   // Si no hay ningún vencimiento que reportar, igual se envía el correo diario
-  // a contabilidad/admin (con las tablas vacías) para confirmar que la alerta
-  // corrió correctamente — un día sin novedades no debe leerse como que el
-  // sistema dejó de enviar el reporte.
+  // a contabilidad/admin/financiera (con las tablas vacías) para confirmar que
+  // la alerta corrió correctamente — un día sin novedades no debe leerse como
+  // que el sistema dejó de enviar el reporte.
   if (recipientMap.size === 0) {
     for (const gr of globalRecipients) ensureRecipient(gr.email, gr.name);
   }
@@ -1700,6 +1721,16 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
       }
     }
     rec.obligations = [...bestMap.values()];
+
+    // Mismo tratamiento de nombre/NIT para el recordatorio de pago, deduplicado
+    // por id (una obligación no debería repetirse, pero por si acaso).
+    rec.paymentReminders = rec.paymentReminders.map(o => {
+      const idx = companyIdx(o.company);
+      return { ...o, company: nameOf(o), nit: cNit(o.nit) || canonicalNitMap.get(idx) || o.nit };
+    });
+    const paymentSeen = new Map<string, typeof rec.paymentReminders[0]>();
+    for (const o of rec.paymentReminders) paymentSeen.set(o.id, o);
+    rec.paymentReminders = [...paymentSeen.values()].sort((a, b) => orderOf(a) - orderOf(b) || a.company.localeCompare(b.company, "es"));
   }
 
   // Trazabilidad por destinatario: permite comparar cada correo con su propio
@@ -1740,6 +1771,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
     const companyStatusGrid = makeCompanyStatusGrid(recipient.obligations);
     const newCount = recipient.obligations.filter(o => o.isNew).length;
     const resolvedSincePrevious = changesByRecipient.get(recipient.email)?.noLongerAlerted ?? [];
+    const paymentObls = recipient.paymentReminders;
 
     const makeRow = (o: any, isOverdue: boolean) => {
       const statusColor = o.status === "No iniciado" ? "#6b7280" : o.status === "Revisado" ? "#3b82f6" : "#16a34a";
@@ -1785,6 +1817,30 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
   <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:24px 32px 8px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;border-top:1px solid #f3f4f6">
     <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#128197; Pr&#xF3;ximos 7 d&#xED;as (${upcomingObls.length})</p>
     ${TABLE_HEADER}${upcomingObls.map(o => makeRow(o, false)).join("")}</table>
+  </td></tr>`;
+
+    const paymentRow = (o: any) => `
+      <tr>
+        <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1f2937;font-weight:600;border-bottom:1px solid #fde68a">${o.company}${cNit(o.nit) ? `<br/><span style="font-size:10px;font-weight:400;color:#92400e">NIT: ${cNit(o.nit)}</span>` : ""}</td>
+        <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;border-bottom:1px solid #fde68a">${displayTax(o.taxType)}</td>
+        <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #fde68a">${o.period ?? ""}</td>
+        <td align="right" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#92400e;border-bottom:1px solid #fde68a;white-space:nowrap">${o.projected ? "$" + Number(o.projected).toLocaleString("es-CO") : "&#8212;"}</td>
+      </tr>`;
+
+    const PAYMENT_TABLE_HEADER = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #fde68a">
+      <tr bgcolor="#fef9c3" style="background-color:#fef9c3">
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Empresa</th>
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Obligaci&#xF3;n</th>
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Per&#xED;odo</th>
+        <th align="right" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Proyectado</th>
+      </tr>`;
+
+    const paymentSection = paymentObls.length === 0 ? "" : `
+  <!-- PAGOS PENDIENTES -->
+  <tr><td bgcolor="#fffbeb" style="background-color:#fffbeb;padding:24px 32px 8px;border-left:1px solid #fde68a;border-right:1px solid #fde68a;border-top:1px solid #fde68a">
+    <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:1.5px">&#128181; Pendientes de pago &mdash; Equipo Financiero (${paymentObls.length})</p>
+    <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#78350f">Contabilidad ya present&#xF3; estas obligaciones. Falta registrar el <b>valor pagado</b> en la plataforma para cerrar el ciclo.</p>
+    ${PAYMENT_TABLE_HEADER}${paymentObls.map(paymentRow).join("")}</table>
   </td></tr>`;
 
     const resolvedSection = resolvedSincePrevious.length === 0 ? "" : `
@@ -1834,11 +1890,13 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
       ${overdueObls.length > 0 ? `<strong style="color:#dc2626">${overdueObls.length} vencimiento${overdueObls.length !== 1 ? "s" : ""} sin gestionar.</strong> ` : ""}
       ${upcomingObls.length > 0 ? `<strong>${upcomingObls.length} obligaci&#xF3;n${upcomingObls.length !== 1 ? "es" : ""}</strong> vence${upcomingObls.length !== 1 ? "n" : ""} en los pr&#xF3;ximos 7 d&#xED;as.` : "No hay vencimientos pr&#xF3;ximos en 7 d&#xED;as."}
       ${newCount > 0 ? `<br/><span style="font-size:11px;color:#1d4ed8"><strong>${newCount}</strong> ${newCount === 1 ? "es nueva" : "son nuevas"} desde el correo del ${previousSentDate.split("-").reverse().join("/")}.</span>` : ""}
+      ${paymentObls.length > 0 ? `<br/><span style="font-size:11px;color:#92400e"><strong>${paymentObls.length}</strong> obligaci&#xF3;n${paymentObls.length !== 1 ? "es" : ""} presentada${paymentObls.length !== 1 ? "s" : ""} sigue${paymentObls.length !== 1 ? "n" : ""} sin pago registrado.</span>` : ""}
     </p>
   </td></tr>
 
   ${overdueSection}
   ${upcomingSection}
+  ${paymentSection}
   ${resolvedSection}
 
   <!-- ══ ESTADO POR EMPRESA ══ -->
@@ -1874,6 +1932,7 @@ async function runTaxAlerts(db: admin.firestore.Firestore, force = false): Promi
               const parts: string[] = [];
               if (overdueObls.length > 0) parts.push(`🔴 ${overdueObls.length} vencido${overdueObls.length !== 1 ? "s" : ""} sin gestionar`);
               if (upcomingObls.length > 0) parts.push(`📅 ${upcomingObls.length} próximo${upcomingObls.length !== 1 ? "s" : ""} (≤7d)`);
+              if (paymentObls.length > 0) parts.push(`💵 ${paymentObls.length} pendiente${paymentObls.length !== 1 ? "s" : ""} de pago`);
               return parts.length > 0 ? parts.join(" · ") : "Calendario Tributario — Sin novedades";
             })(),
             body: { contentType: "HTML", content: html },
@@ -2485,15 +2544,46 @@ interface TaxDailyLogEntry {
   obligationId?: string;
 }
 
-async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: number; entries: number }> {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+interface ActivityDigestOptions {
+  sinceDate: string;    // YYYY-MM-DD, inclusivo
+  untilDate: string;    // YYYY-MM-DD, inclusivo — igual a sinceDate para el digest diario
+  periodTitle: string;  // ej. "Gestión del Día" / "Gestión de la Semana"
+  dateLabel: string;    // subtítulo bajo el título — fecha única o rango ya formateado
+  subjectSuffix: string; // ej. "hoy" / "esta semana" — usado en el asunto y el texto de cada tarjeta
+  includePaymentReminders: boolean; // agrega la sección "Pendientes de pago" (solo semanal)
+}
 
+async function sendActivityDigest(
+  db: admin.firestore.Firestore,
+  opts: ActivityDigestOptions,
+): Promise<{ sent: number; entries: number; paymentReminders: number }> {
   // Solo filtra por fecha — orderBy en campo distinto requeriría índice compuesto
   const logSnap = await db.collection(ACCOUNTING_COLLECTIONS.dailyActivity)
-    .where("date", "==", today)
+    .where("date", ">=", opts.sinceDate)
+    .where("date", "<=", opts.untilDate)
     .get();
 
-  if (logSnap.empty) return { sent: 0, entries: 0 };
+  // Pendientes de pago: obligaciones que contabilidad ya marcó "Presentado" pero
+  // financiera aún no marcó "Pagado" — independiente del rango de fechas del
+  // digest, porque no depende de cuándo cambió de estado sino de en qué estado
+  // sigue hoy. Solo se calcula para el digest semanal (ver includePaymentReminders).
+  let paymentReminders: Array<{ company: string; nit?: string; taxType: string; period?: string; dueDate: string; projected?: number }> = [];
+  if (opts.includePaymentReminders) {
+    const companiesSnap = await db.collection(ORGANIZATION_COLLECTIONS.companies)
+      .where("active", "==", true)
+      .where("activeContabilidad", "==", true)
+      .get();
+    const activeCompanyIds = new Set(companiesSnap.docs.map(d => d.id));
+    const oblSnap = await db.collection(ACCOUNTING_COLLECTIONS.obligations)
+      .where("status", "==", "Presentado")
+      .get();
+    paymentReminders = oblSnap.docs
+      .map(d => d.data() as any)
+      .filter(o => !o.companyId || activeCompanyIds.has(o.companyId))
+      .sort((a, b) => (a.company || "").localeCompare(b.company || "", "es"));
+  }
+
+  if (logSnap.empty && paymentReminders.length === 0) return { sent: 0, entries: 0, paymentReminders: 0 };
 
   // Ordenar en memoria por hora de cambio
   const entries: TaxDailyLogEntry[] = logSnap.docs
@@ -2528,7 +2618,7 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
     email: (d.data().email || d.id) as string,
   }));
 
-  if (recipients.length === 0) return { sent: 0, entries: entries.length };
+  if (recipients.length === 0) return { sent: 0, entries: entries.length, paymentReminders: paymentReminders.length };
 
   // Enriquecer con datos de la obligación: projected, paid, stepOwners
   const oblIds = [...new Set(entries.map(e => e.obligationId).filter(Boolean) as string[])];
@@ -2628,7 +2718,7 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:28px">
         <tr><td bgcolor="#f9fafb" style="background-color:#f9fafb;padding:10px 14px;border-left:3px solid #006C2F">
           <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#1f2937">
-            &#128100; ${person} &nbsp;<span style="font-weight:400;font-size:12px;color:#6b7280">${acts.length} cambio${acts.length !== 1 ? "s" : ""} hoy</span>
+            &#128100; ${person} &nbsp;<span style="font-weight:400;font-size:12px;color:#6b7280">${acts.length} cambio${acts.length !== 1 ? "s" : ""} ${opts.subjectSuffix}</span>
           </p>
         </td></tr>
         <tr><td style="padding:12px 0 0">
@@ -2637,10 +2727,32 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
       </table>`;
   }).join("");
 
+  // ── Pendientes de pago (solo digest semanal) ──────────────────────────────
+  const paymentRow = (o: { company: string; nit?: string; taxType: string; period?: string; dueDate: string; projected?: number }) => `
+    <tr>
+      <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1f2937;font-weight:600;border-bottom:1px solid #fde68a">${o.company}${o.nit ? `<br/><span style="font-size:10px;font-weight:400;color:#92400e">NIT: ${o.nit}</span>` : ""}</td>
+      <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;border-bottom:1px solid #fde68a">${displayTax(o.taxType)}</td>
+      <td style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;border-bottom:1px solid #fde68a">${o.period ?? "&#8212;"}<br/><span style="font-size:10px;color:#9ca3af">Vence: ${fmtDate(o.dueDate)}</span></td>
+      <td align="right" style="padding:9px 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#92400e;border-bottom:1px solid #fde68a;white-space:nowrap">${fmtCOP(o.projected)}</td>
+    </tr>`;
+
+  const paymentSection = paymentReminders.length === 0 ? "" : `
+  <!-- PAGOS PENDIENTES -->
+  <tr><td bgcolor="#fffbeb" style="background-color:#fffbeb;padding:24px 32px;border-left:1px solid #fde68a;border-right:1px solid #fde68a;border-top:1px solid #f3f4f6">
+    <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:1.5px">&#128181; Pendientes de pago &mdash; Equipo Financiero (${paymentReminders.length})</p>
+    <p style="margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#78350f">Contabilidad ya present&#xF3; estas obligaciones. Falta registrar el <b>valor pagado</b> en la plataforma para cerrar el ciclo.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #fde68a">
+      <tr bgcolor="#fef9c3" style="background-color:#fef9c3">
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Empresa</th>
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Obligaci&#xF3;n</th>
+        <th align="left" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Per&#xED;odo</th>
+        <th align="right" style="padding:8px 12px;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #fde68a">Proyectado</th>
+      </tr>
+      ${paymentReminders.map(paymentRow).join("")}
+    </table>
+  </td></tr>`;
+
   const year = new Date().getFullYear();
-  const dateStr = new Date().toLocaleDateString("es-CO", {
-    weekday: "long", day: "2-digit", month: "long", year: "numeric",
-  });
 
   const html = `<!DOCTYPE html>
 <html lang="es" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -2662,18 +2774,21 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
     <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:10px auto 0">
       <tr><td bgcolor="#7BCB6A" style="background-color:#7BCB6A;height:3px;width:40px;font-size:0;line-height:0">&nbsp;</td></tr>
     </table>
-    <p style="margin:14px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;color:#ffffff">Gesti&#xF3;n del D&#xED;a</p>
-    <p style="margin:4px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#a7f3d0">${dateStr}</p>
+    <p style="margin:14px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;color:#ffffff">${opts.periodTitle}</p>
+    <p style="margin:4px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#a7f3d0">${opts.dateLabel}</p>
   </td></tr>
 
+  ${paymentSection}
+
   <!-- DETALLE POR PERSONA -->
+  ${entries.length === 0 ? "" : `
   <tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:8px 32px 28px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;border-top:1px solid #f3f4f6">
     <p style="margin:0 0 18px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#006C2F;text-transform:uppercase;letter-spacing:1.5px">&#128196; Detalle por persona</p>
     ${personSections}
     <p style="margin:8px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#9ca3af;text-align:center">
       Ingresa a la plataforma para ver el detalle completo.
     </p>
-  </td></tr>
+  </td></tr>`}
 
   <!-- FOOTER -->
   <tr><td bgcolor="#1f2937" style="background-color:#1f2937;padding:18px 32px;text-align:center">
@@ -2706,7 +2821,13 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
           headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             message: {
-              subject: `[Resumen] Calendario tributario — ${entries.length} cambio${entries.length !== 1 ? "s" : ""} hoy`,
+              subject: (() => {
+                const parts: string[] = [];
+                if (entries.length > 0) parts.push(`${entries.length} cambio${entries.length !== 1 ? "s" : ""}`);
+                if (paymentReminders.length > 0) parts.push(`💵 ${paymentReminders.length} pendiente${paymentReminders.length !== 1 ? "s" : ""} de pago`);
+                const summary = parts.length > 0 ? parts.join(" · ") : "sin novedades";
+                return `[Resumen] Calendario tributario — ${summary} ${opts.subjectSuffix}`;
+              })(),
               body: { contentType: "HTML", content: html },
               toRecipients: [{ emailAddress: { address: r.email } }],
             },
@@ -2715,13 +2836,13 @@ async function sendDailyDigest(db: admin.firestore.Firestore): Promise<{ sent: n
         }
       );
       if (res.ok) sent++;
-      else console.error("dailyTaxDigest: failed for", r.email, await res.text());
+      else console.error("activityDigest: failed for", r.email, await res.text());
     } catch (e) {
-      console.error("dailyTaxDigest send error:", e);
+      console.error("activityDigest send error:", e);
     }
   }
 
-  return { sent, entries: entries.length };
+  return { sent, entries: entries.length, paymentReminders: paymentReminders.length };
 }
 
 export const dailyTaxDigest = onSchedule(
@@ -2733,7 +2854,7 @@ export const dailyTaxDigest = onSchedule(
   },
   async () => {
     try {
-      const result = await sendDailyDigest(admin.firestore());
+      const result = await sendActivityDigest(admin.firestore(), dailyDigestOptions());
       console.log(`dailyTaxDigest: sent=${result.sent} entries=${result.entries}`);
     } catch (e) {
       console.error("dailyTaxDigest ERROR:", e);
@@ -2750,7 +2871,73 @@ export const triggerDailyTaxDigest = onCall(
   },
   async (request) => {
     await requirePlatformRole(request, ["admin"]);
-    return sendDailyDigest(admin.firestore());
+    return sendActivityDigest(admin.firestore(), dailyDigestOptions());
+  }
+);
+
+function dailyDigestOptions(): ActivityDigestOptions {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+  const dateLabel = new Date().toLocaleDateString("es-CO", {
+    weekday: "long", day: "2-digit", month: "long", year: "numeric",
+  });
+  return {
+    sinceDate: today, untilDate: today,
+    periodTitle: "Gestión del Día", dateLabel, subjectSuffix: "hoy",
+    includePaymentReminders: false,
+  };
+}
+
+/**
+ * Resumen semanal: recapitula los cambios de los últimos 7 días (viernes a
+ * viernes) e incluye el recordatorio de pagos pendientes — a diferencia del
+ * digest diario, este sí lo lleva porque contabilidad pidió específicamente
+ * un informe semanal de gestión que le sirva a financiera para no perder de
+ * vista lo que quedó "Presentado" sin pagar durante la semana.
+ */
+function weeklyDigestOptions(): ActivityDigestOptions {
+  const now = new Date();
+  const untilDate = now.toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+  const sinceDate = new Date(now.getTime() - 6 * 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+  const fmt = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "long" });
+  return {
+    sinceDate, untilDate,
+    periodTitle: "Gestión de la Semana",
+    dateLabel: `${fmt(sinceDate)} — ${fmt(untilDate)} de ${now.getFullYear()}`,
+    subjectSuffix: "esta semana",
+    includePaymentReminders: true,
+  };
+}
+
+/**
+ * Scheduled: todos los viernes a las 5:00 PM hora Colombia.
+ */
+export const weeklyTaxDigest = onSchedule(
+  {
+    schedule: "0 17 * * 5",
+    timeZone: "America/Bogota",
+    region: "us-central1",
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
+  },
+  async () => {
+    try {
+      const result = await sendActivityDigest(admin.firestore(), weeklyDigestOptions());
+      console.log(`weeklyTaxDigest: sent=${result.sent} entries=${result.entries} paymentReminders=${result.paymentReminders}`);
+    } catch (e) {
+      console.error("weeklyTaxDigest ERROR:", e);
+      throw e;
+    }
+  }
+);
+
+export const triggerWeeklyTaxDigest = onCall(
+  {
+    region: "us-central1",
+    cors: true,
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
+  },
+  async (request) => {
+    await requirePlatformRole(request, ["admin"]);
+    return sendActivityDigest(admin.firestore(), weeklyDigestOptions());
   }
 );
 

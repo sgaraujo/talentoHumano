@@ -31,7 +31,7 @@ function getModuleLabels(role: AppRole): string[] {
     '/usuarios':         'Usuarios',
     '/empresas':         'Empresas',
     '/proyectos':        'Cuentas analíticas',
-    '/comunicaciones':   'Comunicaciones',
+    '/comunicaciones':   'Correos',
     '/notificaciones':   'Notificaciones',
     '/rotacion-talento': 'Rotación y Talento',
     '/chatbot':          'Chat IA',

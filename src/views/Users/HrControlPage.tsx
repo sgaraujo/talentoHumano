@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, BriefcaseBusiness, CheckCircle2, FileClock, Loader2, RefreshCw, Search, Upload, UserPlus, UserRoundX, Users } from 'lucide-react';
+import { AlertCircle, BriefcaseBusiness, CheckCircle2, Download, FileClock, Loader2, RefreshCw, Search, Upload, UserPlus, UserRoundX, Users } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { getHrControlData, type HrControlEmployee, type HrImportRunSummary } from '@/services/hrControlService';
+import { getHrControlData, type HrControlEmployee, type HrImportRunSummary, type HrRelationshipRow } from '@/services/hrControlService';
 import { HrImportPreviewDialog } from '@/components/users/HrImportPreviewDialog';
 import type { HrExcelPreview } from '@/domain/humanResources/hrExcelPreview';
 import { runHrExcelImportPlan, runHrExcelPreview } from '@/domain/humanResources/runHrExcelPreview';
@@ -19,6 +20,7 @@ const dateLabel = (value: any) => value?.toDate?.().toLocaleString('es-CO', { da
 export function HrControlPage() {
   const [employees, setEmployees] = useState<HrControlEmployee[]>([]);
   const [runs, setRuns] = useState<HrImportRunSummary[]>([]);
+  const [relationshipRows, setRelationshipRows] = useState<HrRelationshipRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -40,7 +42,7 @@ export function HrControlPage() {
     setLoading(true); setError('');
     try {
       const data = await getHrControlData();
-      setEmployees(data.employees); setRuns(data.runs);
+      setEmployees(data.employees); setRuns(data.runs); setRelationshipRows(data.relationshipRows);
     } catch (reason: any) {
       setError(reason?.message || 'No fue posible consultar los expedientes.');
     } finally { setLoading(false); }
@@ -70,6 +72,36 @@ export function HrControlPage() {
       setPreviewError(reason?.message || 'No fue posible aplicar la importación.');
       toast.error('La actualización no se completó');
     } finally { setApplying(false); }
+  };
+
+  const handleDownloadDatabase = () => {
+    if (relationshipRows.length === 0) { toast.error('No hay relaciones para descargar'); return; }
+    const rows = relationshipRows.map(r => ({
+      Documento: r.documentNumber,
+      Nombre: r.fullName,
+      'Estado empleado': r.employeeStatus,
+      'Correo corporativo': r.corporateEmail || '',
+      'Correo personal': r.personalEmail || '',
+      'Teléfono corporativo': r.corporatePhone || '',
+      'Teléfono personal': r.personalPhone || '',
+      Empresa: r.companyName || '',
+      'Cuenta analítica': r.projectName || '',
+      Cargo: r.position || '',
+      'Tipo de contrato': r.contractType || '',
+      Modalidad: r.modality || '',
+      Regional: r.regional || '',
+      Sede: r.baseLocation || '',
+      Área: r.area || '',
+      'Fecha inicio': r.startDate || '',
+      'Fecha fin': r.endDate || '',
+      'Estado relación': r.relationshipStatus,
+      'Motivo de retiro': r.terminationReason || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = Object.keys(rows[0]).map(key => ({ wch: Math.max(key.length + 2, 16) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Talento Humano');
+    XLSX.writeFile(wb, `BD_Talento_Humano_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const withoutAccess = employees.filter(item => !item.identityUserId).length;
@@ -130,6 +162,9 @@ export function HrControlPage() {
           {latestRun ? <p className="text-sm text-gray-500 mt-1">{latestRun.fileName} · <b className={latestRun.status === 'completed' ? 'text-green-600' : 'text-amber-600'}>{latestRun.status}</b> · {dateLabel(latestRun.completedAt || latestRun.createdAt)} · {latestRun.relationshipCount ?? 0} relaciones</p>
             : <p className="text-sm text-gray-400 mt-1">No hay ejecuciones registradas.</p>}
         </div>
+        <Button variant="outline" size="sm" onClick={handleDownloadDatabase} disabled={relationshipRows.length === 0} className="flex-shrink-0">
+          <Download className="w-4 h-4 mr-2" />Descargar base ({relationshipRows.length.toLocaleString('es-CO')})
+        </Button>
       </div>
 
       <div className="bg-white border rounded-xl overflow-hidden">

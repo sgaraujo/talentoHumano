@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Banknote, BriefcaseBusiness, Building2, Clock, Loader2, Search, ShieldAlert, TrendingUp, UserRoundX, Users } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Banknote, BriefcaseBusiness, Building2, Clock, Download, Loader2, Search, ShieldAlert, TrendingUp, UserRoundX, Users } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -66,6 +67,48 @@ export function CompanyWorkforcePage() {
     return !term || [item.fullName, item.documentNumber, item.projectName, item.position, item.area].some(value => value?.toLowerCase().includes(term));
   }), [active, search]);
   const qualityRows = active.filter(item => !item.projectName || !item.position || !item.corporateEmail || !item.corporatePhone);
+
+  const handleExportQuality = () => {
+    if (!data) return;
+    const rows = qualityRows.map(item => ({
+      Persona: item.fullName,
+      Documento: item.documentNumber,
+      Cargo: item.position || '',
+      'Cuenta analítica': item.projectName || '',
+      'Correo corporativo': item.corporateEmail || '',
+      'Teléfono corporativo': item.corporatePhone || '',
+      'Información faltante': [
+        !item.projectName && 'Cuenta analítica',
+        !item.position && 'Cargo',
+        !item.corporateEmail && 'Correo',
+        !item.corporatePhone && 'Teléfono',
+      ].filter(Boolean).join(', '),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 32 }, { wch: 16 }, { wch: 24 }, { wch: 24 }, { wch: 28 }, { wch: 18 }, { wch: 40 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Calidad de datos');
+    XLSX.writeFile(wb, `calidad-de-datos-${data.company.name.replace(/[^\w\-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const handleExportPeople = () => {
+    if (!data) return;
+    const rows = filtered.map(item => ({
+      Persona: item.fullName,
+      Documento: item.documentNumber,
+      Cargo: item.position || '',
+      'Cuenta analítica': item.projectName || '',
+      Regional: item.regional || '',
+      Sede: item.baseLocation || '',
+      'Correo corporativo': item.corporateEmail || '',
+      'Teléfono corporativo': item.corporatePhone || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 32 }, { wch: 16 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 18 }, { wch: 28 }, { wch: 18 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Personas');
+    XLSX.writeFile(wb, `personas-${data.company.name.replace(/[^\w\-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
 
   const statsData = useMemo(() => {
     if (!data) return null;
@@ -200,7 +243,7 @@ export function CompanyWorkforcePage() {
         </div>
       </div>}
 
-      {tab === 'people' && <div><div className="p-4 border-b relative"><Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><Input className="pl-9" value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar persona, cédula, cargo o cuenta analítica…" /></div><PeopleTable rows={filtered} onOpen={setEmployeeId} /></div>}
+      {tab === 'people' && <div><div className="p-4 border-b flex flex-col sm:flex-row gap-3 sm:items-center"><div className="relative flex-1"><Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><Input className="pl-9" value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar persona, cédula, cargo o cuenta analítica…" /></div><Button variant="outline" size="sm" disabled={!filtered.length} onClick={handleExportPeople} className="flex-shrink-0"><Download className="w-4 h-4 mr-1.5" />Exportar Excel</Button></div><PeopleTable rows={filtered} onOpen={setEmployeeId} /></div>}
 
       {tab === 'projects' && <div className="p-5 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{data.projects.map(project => { const count = new Set(active.filter(item => item.projectName?.toLowerCase() === project.name.toLowerCase()).map(item => item.employeeId)).size; return <div key={project.id} className="rounded-xl border p-4"><div className="flex justify-between gap-2"><p className="font-semibold text-gray-800">{project.name}</p><span className={`h-fit text-[10px] px-2 py-1 rounded-full ${project.status === 'activo' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{project.status}</span></div><p className="text-sm text-gray-500 mt-3"><Users className="inline w-4 h-4 mr-1" />{count} personas activas</p><p className="text-xs text-gray-400 mt-1">{project.area || project.sede || 'Sin clasificación'}</p></div>; })}{!data.projects.length && <p className="text-gray-400">No hay cuentas analíticas vinculadas.</p>}</div>}
 
@@ -215,7 +258,7 @@ export function CompanyWorkforcePage() {
         <div className="rounded-xl border overflow-x-auto"><table className="w-full text-sm"><thead className="bg-gray-50 text-xs text-gray-500"><tr><th className="text-left px-4 py-3">Persona</th><th className="text-left px-4 py-3">Cargo</th><th className="text-right px-4 py-3">Salario base</th><th className="text-right px-4 py-3">Auxilios</th><th className="text-right px-4 py-3">KPI</th></tr></thead><tbody className="divide-y">{active.filter((item,index,all) => all.findIndex(value => value.employeeId === item.employeeId) === index).map(item => { const p = item.payroll; const allowances = ['transportAllowance','operationalAllowance','foodAllowance','supportAllowance','vehicleAllowance','toolsAllowance','communicationAllowance'].reduce((sum,field) => sum + (Number((p as any)?.[field]) || 0),0); return <tr key={item.employeeId} onClick={() => setEmployeeId(item.employeeId)} className="hover:bg-green-50 cursor-pointer"><td className="px-4 py-3 font-medium text-gray-700">{item.fullName}</td><td className="px-4 py-3 text-gray-500">{item.position || '—'}</td><td className="px-4 py-3 text-right">{money(p?.baseSalary)}</td><td className="px-4 py-3 text-right">{money(allowances)}</td><td className="px-4 py-3 text-right">{money(p?.salaryKpi)}</td></tr>; })}</tbody></table></div>
       </div>}
 
-      {tab === 'quality' && <div className="p-5"><div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 flex gap-3"><AlertTriangle className="w-5 h-5 text-amber-600" /><div><p className="font-semibold text-amber-800">{qualityRows.length} relaciones requieren revisión</p><p className="text-xs text-amber-700 mt-1">Se revisan cuenta analítica, cargo, correo corporativo y teléfono corporativo.</p></div></div><PeopleTable rows={qualityRows} onOpen={setEmployeeId} quality /></div>}
+      {tab === 'quality' && <div className="p-5"><div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 flex gap-3 items-start"><AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" /><div className="flex-1"><p className="font-semibold text-amber-800">{qualityRows.length} relaciones requieren revisión</p><p className="text-xs text-amber-700 mt-1">Se revisan cuenta analítica, cargo, correo corporativo y teléfono corporativo.</p></div><Button variant="outline" size="sm" disabled={!qualityRows.length} onClick={handleExportQuality} className="bg-white flex-shrink-0"><Download className="w-4 h-4 mr-1.5" />Exportar Excel</Button></div><PeopleTable rows={qualityRows} onOpen={setEmployeeId} quality /></div>}
     </div>
     <HrEmployeeDetailDialog employeeId={employeeId} open={!!employeeId} onOpenChange={open => { if (!open) setEmployeeId(null); }} onUpdated={load} />
   </div>;

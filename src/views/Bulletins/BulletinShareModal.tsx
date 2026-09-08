@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/config/firebase';
 import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
 import { companyService } from '@/services/companyService';
+import { projectService } from '@/services/projectService';
 import type { Bulletin } from '@/models/types/Bulletin';
 import type { User as AppUser } from '@/models/types/User';
 import {
@@ -15,22 +16,36 @@ const sendCommunicationEmail = httpsCallable(functions, 'sendCommunicationEmail'
 
 const ACTIVE_ROLES = new Set(['colaborador']);
 
+type Assignment = { company?: string; projectId?: string };
 type DirectoryUser = AppUser & {
-  _assignments?: Array<{ company?: string }>;
+  _assignments?: Assignment[];
 };
 
-const companiesOf = (user: DirectoryUser): string[] => {
+const rawAssignments = (user: DirectoryUser): Assignment[] => {
   const assignments = user._assignments ?? [];
-  const names = assignments.map(assignment => assignment.company?.trim()).filter(Boolean) as string[];
+  if (assignments.length > 0) return assignments;
 
   // Compatibilidad con usuarios que todavía lleguen en el formato anterior.
-  if (names.length === 0) {
-    const company = user.contractInfo?.assignment?.company?.trim();
-    if (company) names.push(company);
-  }
-
-  return [...new Set(names)];
+  const company = user.contractInfo?.assignment?.company?.trim();
+  return company ? [{ company }] : [];
 };
+
+/**
+ * Nombres de empresa de las asignaciones de la persona cuya empresa Y cuenta
+ * analítica siguen activas — que el contrato individual siga vigente no
+ * basta: si la empresa o el proyecto ya se desactivaron, esa persona no debe
+ * seguir recibiendo boletines por esa vía. Los aprendices SENA sí se incluyen
+ * aquí (a diferencia de la analítica de RRHH): también deben poder recibir
+ * boletines.
+ */
+const activeCompanyNamesOf = (
+  user: DirectoryUser, activeTHNames: Set<string>, activeProjectIds: Set<string>,
+): string[] =>
+  [...new Set(
+    rawAssignments(user)
+      .filter(a => a.company && activeTHNames.has(a.company.trim()) && (!a.projectId || activeProjectIds.has(a.projectId)))
+      .map(a => a.company!.trim())
+  )];
 
 interface Props {
   bulletin: Bulletin;
@@ -46,6 +61,7 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
   const [sending,       setSending]       = useState(false);
   const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
   const [thCompanies,   setThCompanies]   = useState<Set<string>>(new Set());
+  const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
@@ -53,16 +69,18 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
     setSearch('');
     setSelected(new Set());
     setCompanyFilter(new Set());
-    Promise.all([getEmployeeDirectoryUsers(), companyService.getAll()])
-      .then(([u, companyCatalog]) => {
+    Promise.all([getEmployeeDirectoryUsers(), companyService.getAll(), projectService.getAll()])
+      .then(([u, companyCatalog, projectCatalog]) => {
         const activeTHNames = new Set(
           companyCatalog.filter(company => company.activeTH).map(company => company.name.trim()),
         );
+        const activeProjIds = new Set(projectCatalog.filter(project => project.status === 'activo').map(project => project.id));
         setThCompanies(activeTHNames);
+        setActiveProjectIds(activeProjIds);
         setUsers(u.filter(x =>
           x.email
           && ACTIVE_ROLES.has(x.role)
-          && companiesOf(x).some(company => activeTHNames.has(company)),
+          && activeCompanyNamesOf(x, activeTHNames, activeProjIds).length > 0,
         ));
       })
       .catch(() => toast.error('Error cargando usuarios'))
@@ -72,12 +90,10 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
   const companies = useMemo(() => {
     const set = new Set<string>();
     users.forEach(u => {
-      companiesOf(u).forEach(company => {
-        if (thCompanies.has(company)) set.add(company);
-      });
+      activeCompanyNamesOf(u, thCompanies, activeProjectIds).forEach(company => set.add(company));
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
-  }, [users, thCompanies]);
+  }, [users, thCompanies, activeProjectIds]);
 
   const toggleCompany = (company: string) =>
     setCompanyFilter(prev => {
@@ -90,11 +106,11 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
     const q = search.toLowerCase();
     return users.filter(u => {
       const matchSearch  = !q || u.fullName?.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
-      const userCompanies = companiesOf(u).filter(company => thCompanies.has(company));
+      const userCompanies = activeCompanyNamesOf(u, thCompanies, activeProjectIds);
       const matchCompany = companyFilter.size === 0 || userCompanies.some(company => companyFilter.has(company));
       return matchSearch && matchCompany;
     });
-  }, [users, search, companyFilter, thCompanies]);
+  }, [users, search, companyFilter, thCompanies, activeProjectIds]);
 
   const toggle = (id: string) =>
     setSelected(prev => {
@@ -136,7 +152,7 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
         title: bulletin.title,
         body: `${bulletin.subtitle ? bulletin.subtitle + '\n\n' : ''}${intro}`,
         recipients,
-        senderKey: 'default',
+        senderKey: 'inteegra',
       });
       const data = (result as any)?.data ?? {};
       const sent: number = typeof data.sent === 'number' ? data.sent : recipients.length;
@@ -242,7 +258,7 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
           )}
           {filtered.map(u => {
             const isSelected = selected.has(u.id);
-            const userCompanies = companiesOf(u).filter(company => thCompanies.has(company));
+            const userCompanies = activeCompanyNamesOf(u, thCompanies, activeProjectIds);
             return (
               <button
                 key={u.id}

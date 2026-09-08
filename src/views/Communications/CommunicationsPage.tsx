@@ -290,12 +290,6 @@ function ChartsPanel({
   );
 }
 
-// Compara nombres de empresa ignorando puntos, may/min y espacios extra —
-// evita que un usuario quede fuera del envío masivo por una diferencia de
-// formato entre su perfil y el nombre canónico en `companies` (ver caso Inteegra).
-const normalizeCompanyName = (name?: string | null) =>
-  (name ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[.\-,]/g, '').replace(/\s+/g, ' ').trim();
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
@@ -493,22 +487,29 @@ export const CommunicationsPage = () => {
         project: u.contractInfo?.assignment?.project || '',
       })).filter(u => u.userEmail);
     }
-    let users = allUsers.filter(u => u.role === 'colaborador' || u.role === 'aspirante' || u.role === 'lider');
+    const activeCompanyIds = new Set(companies.filter((c: any) => c.activeTH).map((c: any) => c.id));
+    const activeProjectIds = new Set(projects.filter((p: any) => p.status === 'activo').map((p: any) => p.id));
+    // Una asignación solo cuenta si su empresa Y su cuenta analítica siguen
+    // activas — que el contrato individual siga vigente no basta: si la
+    // empresa o el proyecto se desactivaron, esa persona no debe seguir
+    // recibiendo comunicados por esa vía. Se revisan TODAS las asignaciones de
+    // la persona (no solo la primaria), porque puede tener varias a la vez.
+    // Los aprendices SENA sí se incluyen aquí (a diferencia de la analítica de
+    // RRHH): también deben poder recibir comunicados.
+    const activeAssignments = (u: any) =>
+      ((u._assignments ?? [u.contractInfo?.assignment]).filter(Boolean) as any[]).filter(item =>
+        (!item.companyId || activeCompanyIds.has(item.companyId)) &&
+        (!item.projectId || activeProjectIds.has(item.projectId)));
+
+    let users = allUsers.filter(u =>
+      (u.role === 'colaborador' || u.role === 'aspirante' || u.role === 'lider') &&
+      activeAssignments(u).length > 0
+    );
     if (form.targetType === 'company' && form.targetIds.length > 0) {
-      const names = form.targetIds.map(id => normalizeCompanyName(companies.find(c => c.id === id)?.name)).filter(Boolean);
-      // Una persona puede tener asignaciones activas en varias empresas — no basta
-      // con mirar solo la asignación primaria (contractInfo.assignment).
-      users = users.filter(u =>
-        form.targetIds.some(id => u.companyIds?.includes(id)) ||
-        names.includes(normalizeCompanyName(u.contractInfo?.assignment?.company))
-      );
+      users = users.filter(u => activeAssignments(u).some(item => form.targetIds.includes(item.companyId)));
     }
     if (form.targetType === 'project' && form.targetIds.length > 0) {
-      const projectNames = form.targetIds.map(id => projects.find(p => p.id === id)?.name).filter(Boolean);
-      users = users.filter(u =>
-        form.targetIds.some(id => u.projectIds?.includes(id)) ||
-        projectNames.includes(u.contractInfo?.assignment?.project)
-      );
+      users = users.filter(u => activeAssignments(u).some(item => form.targetIds.includes(item.projectId)));
     }
     return users.map(u => ({
       userId: u.id, userName: u.fullName,
@@ -986,8 +987,8 @@ export const CommunicationsPage = () => {
       {/* Header */}
       <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Comunicaciones</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Envía comunicados y haz seguimiento de lectura</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Correos</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Envía correos y haz seguimiento de lectura</p>
         </div>
         <Button onClick={() => setComposeOpen(true)} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
           <Plus className="w-4 h-4 mr-2" /> Nuevo comunicado
@@ -1709,11 +1710,11 @@ export const CommunicationsPage = () => {
                       })}
                     </div>
                   )}
-                  {form.targetIds.length < projects.length && (
+                  {form.targetIds.length < projects.filter(p => p.status === 'activo').length && (
                     <Select value="" onValueChange={v => { if (v) setForm(f => ({ ...f, targetIds: [...f.targetIds, v] })); }}>
                       <SelectTrigger><SelectValue placeholder="Agregar cuenta analítica..." /></SelectTrigger>
                       <SelectContent>
-                        {projects.filter(p => !form.targetIds.includes(p.id)).map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.companyName}</SelectItem>)}
+                        {projects.filter(p => p.status === 'activo' && !form.targetIds.includes(p.id)).map(p => <SelectItem key={p.id} value={p.id}>{p.name} · {p.companyName}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   )}

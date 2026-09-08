@@ -27,7 +27,6 @@ const GROUPS: MenuGroup[] = [
       { icon: ClipboardCheck,label: 'Expedientes y control', path: '/talento-humano/control' },
       { icon: Building2,     label: 'Empresas',           path: '/empresas' },
       { icon: FolderKanban,  label: 'Cuentas analíticas', path: '/proyectos' },
-      { icon: BarChart2,     label: 'Rotación de talento', path: '/rotacion-talento' },
     ],
   },
   {
@@ -35,7 +34,7 @@ const GROUPS: MenuGroup[] = [
     label: 'Comunicaciones',
     icon: MessageSquare,
     items: [
-      { icon: MessageSquare, label: 'Comunicados',        path: '/comunicaciones' },
+      { icon: MessageSquare, label: 'Correos',            path: '/comunicaciones' },
       { icon: Newspaper,     label: 'Boletines',          path: '/boletines' },
       { icon: MessageCircle, label: 'WhatsApp',           path: '/whatsapp' },
       { icon: Bell,          label: 'Notificaciones',     path: '/notificaciones' },
