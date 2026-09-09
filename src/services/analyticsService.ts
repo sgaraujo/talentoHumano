@@ -317,11 +317,26 @@ class AnalyticsService {
         ).size;
       };
 
-      // Denominador de las tasas de rotación: headcount normal (sin promediar) al
-      // cierre del período filtrado — ya calculado arriba como `headcount`.
+      // Denominador de las tasas de rotación. Ingresos y Retiros son flujo (se suman
+      // en todo el período), pero Headcount es una foto puntual:
+      //   • Un mes específico → alcanza con el headcount normal (sin promediar) de
+      //     ese mes, porque el numerador también es de ese mismo mes.
+      //   • "Todos los meses" (rango de un año) → el numerador suma los retiros de
+      //     los 12 meses, así que dividir entre el headcount de un solo día (el
+      //     cierre) distorsiona la tasa — aquí sí hay que promediar los headcounts
+      //     mensuales de cada mes incluido: (H_ene + H_feb + ... + H_n) / n.
+      const includedMonths = filters?.mes !== undefined
+        ? [currentMonth]
+        : Array.from({ length: periodEnd.getMonth() + 1 }, (_, m) => m);
+      const rotationHeadcount = filters?.mes !== undefined
+        ? headcount
+        : round2(includedMonths.reduce((sum, m) => sum + monthlyHeadcount(currentYear, m), 0) / includedMonths.length);
+
       const headcountBaseLabel = filters?.mes !== undefined
         ? `Base: headcount de ${this.getMonthName(currentMonth)} ${currentYear}`
-        : `Base: headcount al cierre de ${this.getMonthName(periodEnd.getMonth())} ${currentYear}`;
+        : includedMonths.length === 1
+          ? `Base: headcount promedio de ${this.getMonthName(includedMonths[0])} ${currentYear}`
+          : `Base: headcount promedio ${this.getMonthName(includedMonths[0]).slice(0, 3)}–${this.getMonthName(includedMonths[includedMonths.length - 1]).slice(0, 3)} ${currentYear}`;
 
       // Un ingreso/retiro con fecha futura (ej. una terminación ya registrada con
       // preaviso) todavía no ocurrió — no debe sumar en el conteo del período hasta
@@ -349,8 +364,8 @@ class AnalyticsService {
       const retirosInvoluntarios = retiros.length - retirosVoluntarios;
 
       // Fórmula oficial: renuncias voluntarias / HT del período, sin aprendices.
-      const rotacionGeneral    = headcount > 0 ? round2((retirosVoluntarios / headcount) * 100) : 0;
-      const rotacionVoluntaria = headcount > 0 ? round2((retirosVoluntarios / headcount) * 100) : 0;
+      const rotacionGeneral    = rotationHeadcount > 0 ? round2((retirosVoluntarios / rotationHeadcount) * 100) : 0;
+      const rotacionVoluntaria = rotationHeadcount > 0 ? round2((retirosVoluntarios / rotationHeadcount) * 100) : 0;
       const rotacionEvitable   = rotacionVoluntaria;
       const tasaVoluntaria     = retiros.length > 0 ? round2((retirosVoluntarios / retiros.length) * 100) : 0;
       const cubrimiento        = retiros.length > 0 ? round2((ingresos.length / retiros.length) * 100) : 0;
@@ -409,13 +424,18 @@ class AnalyticsService {
       return {
         totalIngresos: ingresos.length,
         totalRetiros: retiros.length,
-        headcount,
+        // Con un mes específico esto es el headcount puntual de ese mes (igual a
+        // `headcount`); con "todos los meses" es el promedio de los headcounts
+        // mensuales del rango — mostrar el headcount puntual del cierre ahí
+        // subestima/sobreestima el tamaño real del equipo durante el año.
+        headcount: rotationHeadcount,
+        headcountSnapshot: headcount,
         tiempoPromedioEmpresa,
         rotacionGeneral,
         rotacionVoluntaria,
         rotacionEvitable,
         headcountBaseLabel,
-        headcountBase: headcount,
+        headcountBase: rotationHeadcount,
         tasaVoluntaria,
         tasaVoluntariaExterna: tasaVoluntaria,
         cubrimiento,
@@ -438,7 +458,7 @@ class AnalyticsService {
         ingresosPorMes: monthlyData,
         retirosPorMes: monthlyData,
         costoRetiros,
-        fracasoContratacion: headcount > 0 ? round2((retirosTempranos / headcount) * 100) : 0,
+        fracasoContratacion: rotationHeadcount > 0 ? round2((retirosTempranos / rotationHeadcount) * 100) : 0,
         costoRetirosTemprano,
         retirosTempranos,
       };

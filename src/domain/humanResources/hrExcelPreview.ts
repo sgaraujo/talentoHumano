@@ -1,5 +1,6 @@
 import { normalizeRetiroReason } from './terminationReasons';
 import { parseExcelDate } from './excelDate';
+import { standardizePhone } from './phone';
 
 export type HrPreviewAction = 'create' | 'update' | 'unchanged' | 'conflict' | 'rejected';
 
@@ -109,7 +110,7 @@ export function buildHrImportPlan(
           documentType: text(row['TIPO DOCUMENTO']), documentNumber: doc, fullName, status,
           corporateEmail: validEmail(corporateEmail) ? corporateEmail : currentUser?.location?.corporateEmail,
           personalEmail: validEmail(personalEmail) ? personalEmail : currentUser?.location?.personalEmail,
-          personalPhone: text(row['TELEFONO PERSONAL']), corporatePhone: text(row['TELEFONO CORPORATIVO']),
+          personalPhone: standardizePhone(row['TELEFONO PERSONAL']), corporatePhone: standardizePhone(row['TELEFONO CORPORATIVO']),
           birthDate: dateValue(row['FECHA DE NACIMIENTO']), gender: text(row.GENERO),
           nationality: text(row['PAIS - NACIONALIDAD']),
           residence: compact({ department: text(row['DEPARTAMENTO DE RESIDENCIA']), city: text(row['CIUDAD DE RESIDENCIA']), address: text(row['DIRECCION VIVIENDA']) }),

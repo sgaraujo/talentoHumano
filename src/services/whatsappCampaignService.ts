@@ -14,6 +14,10 @@ export function normalizeWhatsAppPhone(value: unknown): string | null {
   if (phone.startsWith("00")) phone = phone.slice(2);
   if (phone.length === 10) phone = `57${phone}`;
   if (phone.length < 11 || phone.length > 15) return null;
+  // Los números que empiezan por 601 son fijos de Bogotá (línea de oficina),
+  // no celulares — tienen formato válido pero no pueden recibir WhatsApp.
+  const local = phone.startsWith("57") ? phone.slice(2) : phone;
+  if (local.startsWith("601")) return null;
   return phone;
 }
 

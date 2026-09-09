@@ -13,6 +13,7 @@ export interface CompanyWorkforcePerson {
   corporatePhone?: string;
   companyName: string;
   projectName?: string;
+  analyticalAccount?: string;
   position?: string;
   area?: string;
   regional?: string;
@@ -87,6 +88,7 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
         corporatePhone: employee.corporatePhone,
         companyName: relation.companyName || companyValue.name,
         projectName: relation.projectName,
+        analyticalAccount: relation.analyticalAccount,
         position: relation.position,
         area: relation.area,
         regional: relation.regional,
@@ -121,7 +123,12 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
     retiredPeople: [...uniqueRetired].filter(id => !uniqueActive.has(id)).length,
     withoutAccess: new Set(activePeople.filter(item => !item.identityUserId).map(item => item.employeeId)).size,
     activeProjects: projects.filter(item => item.status === 'activo').length,
-    incompleteRecords: activePeople.filter(item => !item.projectName || !item.position || !item.corporateEmail || !item.corporatePhone).length,
+    // "Cuenta analítica" se considera presente con projectName (vinculado al
+    // proyecto/cuenta maestro) O analyticalAccount (texto libre del Excel) —
+    // el expediente muestra analyticalAccount, así que si solo falta
+    // projectName (pendiente de vincular al proyecto) no debe marcarse como
+    // dato faltante para la persona.
+    incompleteRecords: activePeople.filter(item => (!item.projectName && !item.analyticalAccount) || !item.position || !item.corporateEmail || !item.corporatePhone).length,
     monthlyBaseSalary,
     monthlyAllowances,
     monthlySalaryKpi,

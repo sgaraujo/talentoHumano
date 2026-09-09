@@ -1,6 +1,7 @@
 import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '@/config/firestoreCollections';
+import { standardizePhone } from '@/domain/humanResources/phone';
 
 export type HrEditableValues = {
   corporateEmail?: string; personalEmail?: string; corporatePhone?: string; personalPhone?: string;
@@ -39,8 +40,8 @@ export async function createHrEmployee(
     documentType: clean(employee.documentType), documentNumber, fullName: clean(employee.fullName),
     status: hasEmployment ? 'active' : 'unknown',
     birthDate: clean(employee.birthDate), gender: clean(employee.gender), nationality: clean(employee.nationality),
-    personalEmail: clean(employee.personalEmail), personalPhone: clean(employee.personalPhone),
-    corporateEmail: clean(employee.corporateEmail), corporatePhone: clean(employee.corporatePhone),
+    personalEmail: clean(employee.personalEmail), personalPhone: standardizePhone(employee.personalPhone),
+    corporateEmail: clean(employee.corporateEmail), corporatePhone: standardizePhone(employee.corporatePhone),
     residence: { city: clean(employee.city), department: clean(employee.department), address: clean(employee.address) },
     source: { system: 'application' },
     createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
@@ -72,7 +73,9 @@ export async function createHrEmployee(
 const employeeFields = ['corporateEmail', 'personalEmail', 'corporatePhone', 'personalPhone'] as const;
 const socialFields = ['eps', 'afp', 'ccf', 'severanceFund'] as const;
 const bankingFields = ['bankName', 'accountType', 'accountNumber'] as const;
+const phoneFields = new Set(['corporatePhone', 'personalPhone']);
 const clean = (value: unknown) => String(value ?? '').trim();
+const cleanField = (field: string, value: unknown) => phoneFields.has(field) ? standardizePhone(value) : clean(value);
 
 export async function updateHrEmployeeFields(employeeId: string, values: HrEditableValues, actor: string, source = 'manual') {
   const employeeRef = doc(db, FIRESTORE_COLLECTIONS.employees, employeeId);
@@ -86,8 +89,8 @@ export async function updateHrEmployeeFields(employeeId: string, values: HrEdita
   const changes: Array<{ field: string; previousValue: unknown; newValue: unknown }> = [];
   const assign = (fields: readonly string[], current: any, patch: Record<string, unknown>) => fields.forEach(field => {
     if (!(field in values)) return;
-    const next = clean((values as any)[field]);
-    if (clean(current?.[field]) === next) return;
+    const next = cleanField(field, (values as any)[field]);
+    if (cleanField(field, current?.[field]) === next) return;
     patch[field] = next;
     changes.push({ field, previousValue: current?.[field] ?? null, newValue: next });
   });

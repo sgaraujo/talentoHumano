@@ -2,7 +2,15 @@ export interface RotationMetrics {
   // KPIs principales
   totalIngresos: number;
   totalRetiros: number;
+  // Con un mes específico, es el headcount puntual de ese mes. Con "todos los
+  // meses", es el promedio de los headcounts mensuales del rango (no el
+  // headcount puntual del cierre, que subestima/sobreestima el tamaño real
+  // del equipo durante el año).
   headcount: number;
+  // Headcount puntual (foto real de personas al cierre del período, sin
+  // promediar) — usar solo para reconciliar contra desgloses que también son
+  // una foto puntual (ej. headcountPorProyecto), no como KPI de portada.
+  headcountSnapshot: number;
   tiempoPromedioEmpresa: number; // en meses
   
   // Tasas

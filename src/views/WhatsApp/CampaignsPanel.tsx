@@ -165,7 +165,7 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
       Número: `+${recipient.phone}`,
       Nombre: recipient.name || '',
       Empresa: companies.find(c => c.id === recipient.companyId)?.name || '',
-      Proyecto: projects.find(p => p.id === recipient.projectId)?.name || '',
+      'Cuenta analítica': projects.find(p => p.id === recipient.projectId)?.name || '',
       Estado: statusLabel(recipient),
     }));
     const ws = XLSX.utils.json_to_sheet(rows);

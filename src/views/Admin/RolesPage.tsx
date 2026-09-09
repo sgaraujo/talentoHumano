@@ -17,6 +17,7 @@ import {
 import { toast } from 'sonner';
 import { rolesService } from '@/services/rolesService';
 import { userService } from '@/services/userService';
+import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
 import type { PlatformUser, AppRole } from '@/models/types/AppRole';
 import type { User, UserRole } from '@/models/types/User';
 import { ROLE_LABELS, ROLE_COLORS, ROLE_MODULES } from '@/models/types/AppRole';
@@ -138,6 +139,13 @@ interface UserRow {
 // ── component ─────────────────────────────────────────────────────────────────
 
 export const RolesPage = () => {
+  // Fuente de personas/correos: la misma base canónica que "Expedientes y
+  // control" (empleados + contratos), no la colección `identity/data/users`
+  // — esa colección queda desincronizada de las altas/bajas reales de RRHH.
+  const [employeeUsers, setEmployeeUsers] = useState<User[]>([]);
+  // `identity/data/users` se conserva solo para dos cosas que no existen en
+  // Expedientes: el id real del documento (necesario para guardar "cargo de
+  // equipo") y el "Líder" (concepto exclusivo de esta colección legada).
   const [sysUsers,   setSysUsers]   = useState<User[]>([]);
   const [roleUsers,  setRoleUsers]  = useState<PlatformUser[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -160,10 +168,12 @@ export const RolesPage = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [sys, roles] = await Promise.all([
+      const [employees, sys, roles] = await Promise.all([
+        getEmployeeDirectoryUsers(),
         userService.getAll(),
         rolesService.getAll(),
       ]);
+      setEmployeeUsers(employees);
       setSysUsers(sys);
       setRoleUsers(roles);
     } catch (e: any) {
@@ -178,38 +188,50 @@ export const RolesPage = () => {
   const rows: UserRow[] = useMemo(() => {
     // Índice de platform roles por email normalizado
     const roleMap = new Map(roleUsers.map(r => [r.email.toLowerCase().trim(), r]));
+    // Índice de `identity/data/users` por email — solo para resolver el id real
+    // del documento (guardar "cargo de equipo") y si la persona es "Líder".
+    const legacyByEmail = new Map<string, User>();
+    sysUsers.forEach(u => {
+      const key = (u.email || '').toLowerCase().trim();
+      if (key) legacyByEmail.set(key, u);
+    });
 
     // Mapa final: email normalizado → UserRow
     const result = new Map<string, UserRow>();
 
-    // 1. Cargar desde colección `users` (deduplicando por email)
-    const sysMap = new Map<string, User>();
-    sysUsers.forEach(u => {
+    // 1. Cargar desde Expedientes y control (empleados + contratos) — misma
+    // fuente canónica que el resto de la app, deduplicando por email.
+    const empMap = new Map<string, User>();
+    employeeUsers.forEach(u => {
       const key = (u.email || '').toLowerCase().trim();
       if (!key) return;
-      const prev = sysMap.get(key);
+      const prev = empMap.get(key);
       if (!prev || (u.fullName?.length ?? 0) > (prev.fullName?.length ?? 0)) {
-        sysMap.set(key, u);
+        empMap.set(key, u);
       }
     });
-    sysMap.forEach((u, key) => {
+    empMap.forEach((u, key) => {
+      const legacy = legacyByEmail.get(key);
       result.set(key, {
-        userId:       u.id,
+        userId:       legacy?.id || '',
         email:        u.email,
-        fullName:     u.fullName || '',
-        userRole:     u.role ?? 'colaborador',
+        fullName:     u.fullName || legacy?.fullName || '',
+        userRole:     legacy?.role ?? 'colaborador',
         platformUser: roleMap.get(key),
       });
     });
 
-    // 2. Agregar usuarios que solo existen en platform_roles (sin entrada en `users`)
+    // 2. Agregar usuarios que solo existen en platform_roles (sin expediente de
+    // empleado) — evita que alguien con acceso ya otorgado se vuelva imposible
+    // de encontrar/editar solo porque no está en Expedientes (ej. un externo).
     roleMap.forEach((r, key) => {
       if (!result.has(key)) {
+        const legacy = legacyByEmail.get(key);
         result.set(key, {
-          userId:       '',
+          userId:       legacy?.id || '',
           email:        r.email,
-          fullName:     r.name || r.email,
-          userRole:     'colaborador',
+          fullName:     legacy?.fullName || r.name || r.email,
+          userRole:     legacy?.role ?? 'colaborador',
           platformUser: r,
         });
       }
@@ -217,7 +239,7 @@ export const RolesPage = () => {
 
     return Array.from(result.values())
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [sysUsers, roleUsers]);
+  }, [employeeUsers, sysUsers, roleUsers]);
 
   const stats = useMemo(() => {
     const counts: Record<AppRole, number> = { admin: 0, talento_humano: 0, contabilidad: 0, financiera: 0 };

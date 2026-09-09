@@ -287,7 +287,9 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
 
             <Card className="border-[#E7E9EE] shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between pb-1 pt-4 px-4">
-                <CardTitle className="text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">Headcount</CardTitle>
+                <CardTitle className="text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">
+                  {activeMonth === 'all' ? 'Headcount promedio' : 'Headcount'}
+                </CardTitle>
                 <div className="w-7 h-7 rounded-lg bg-[#F1F2F4] flex items-center justify-center flex-shrink-0">
                   <Users className="w-3.5 h-3.5 text-[#14171C]" />
                 </div>
@@ -295,7 +297,9 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
               <CardContent className="px-4 pb-4">
                 <div className="text-2xl sm:text-3xl font-bold text-[#14171C] tracking-tight">{metrics.headcount}</div>
                 <p className="text-xs text-[#8B93A1] mt-1">
-                  {activeEmpresa !== 'all' ? `${activeEmpresa} · cierre de ${periodLabel}` : `Vigentes al cierre de ${periodLabel}`}
+                  {activeMonth === 'all'
+                    ? (activeEmpresa !== 'all' ? `${activeEmpresa} · promedio mensual ${periodLabel}` : `Promedio mensual · ${periodLabel}`)
+                    : (activeEmpresa !== 'all' ? `${activeEmpresa} · cierre de ${periodLabel}` : `Vigentes al cierre de ${periodLabel}`)}
                 </p>
               </CardContent>
             </Card>
@@ -507,8 +511,8 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
                   return (
                     <p className="text-[10px] text-[#8B93A1] mt-2 text-right">
                       Total: <span className="font-semibold text-[#14171C]">{totalAsignaciones}</span> asignaciones
-                      {totalAsignaciones !== metrics.headcount && (
-                        <> ({metrics.headcount} personas — {totalAsignaciones - metrics.headcount} con más de una cuenta analítica activa)</>
+                      {totalAsignaciones !== metrics.headcountSnapshot && (
+                        <> ({metrics.headcountSnapshot} personas — {totalAsignaciones - metrics.headcountSnapshot} con más de una cuenta analítica activa)</>
                       )}
                     </p>
                   );

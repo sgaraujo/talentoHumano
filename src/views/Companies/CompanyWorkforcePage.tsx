@@ -64,9 +64,12 @@ export function CompanyWorkforcePage() {
   const active = useMemo(() => data?.people.filter(item => item.status === 'active') ?? [], [data]);
   const filtered = useMemo(() => active.filter(item => {
     const term = search.trim().toLowerCase();
-    return !term || [item.fullName, item.documentNumber, item.projectName, item.position, item.area].some(value => value?.toLowerCase().includes(term));
+    return !term || [item.fullName, item.documentNumber, item.projectName, item.analyticalAccount, item.position, item.area].some(value => value?.toLowerCase().includes(term));
   }), [active, search]);
-  const qualityRows = active.filter(item => !item.projectName || !item.position || !item.corporateEmail || !item.corporatePhone);
+  // "Cuenta analítica" cuenta como presente con projectName (vinculado al
+  // proyecto maestro) o analyticalAccount (texto libre del Excel que se ve
+  // en el expediente) — solo falta si ninguno de los dos tiene valor.
+  const qualityRows = active.filter(item => (!item.projectName && !item.analyticalAccount) || !item.position || !item.corporateEmail || !item.corporatePhone);
 
   const handleExportQuality = () => {
     if (!data) return;
@@ -74,11 +77,11 @@ export function CompanyWorkforcePage() {
       Persona: item.fullName,
       Documento: item.documentNumber,
       Cargo: item.position || '',
-      'Cuenta analítica': item.projectName || '',
+      'Cuenta analítica': item.projectName || item.analyticalAccount || '',
       'Correo corporativo': item.corporateEmail || '',
       'Teléfono corporativo': item.corporatePhone || '',
       'Información faltante': [
-        !item.projectName && 'Cuenta analítica',
+        !item.projectName && !item.analyticalAccount && 'Cuenta analítica',
         !item.position && 'Cargo',
         !item.corporateEmail && 'Correo',
         !item.corporatePhone && 'Teléfono',
@@ -97,7 +100,7 @@ export function CompanyWorkforcePage() {
       Persona: item.fullName,
       Documento: item.documentNumber,
       Cargo: item.position || '',
-      'Cuenta analítica': item.projectName || '',
+      'Cuenta analítica': item.projectName || item.analyticalAccount || '',
       Regional: item.regional || '',
       Sede: item.baseLocation || '',
       'Correo corporativo': item.corporateEmail || '',
@@ -171,7 +174,7 @@ export function CompanyWorkforcePage() {
       <div className="flex gap-1 p-2 border-b overflow-x-auto">{tabs.map(([value,label]) => <button key={value} onClick={() => setTab(value)} className={`px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap ${tab === value ? 'bg-[#008C3C] text-white' : 'text-gray-500 hover:bg-gray-50'}`}>{label}</button>)}</div>
 
       {tab === 'summary' && <div className="p-5 grid lg:grid-cols-3 gap-4">
-        <SummaryCard title="Distribución por cuenta analítica" rows={unique(active.map(item => item.projectName)).map(name => [name, new Set(active.filter(item => item.projectName === name).map(item => item.employeeId)).size] as [string, number])} empty="No hay cuentas analíticas asociadas" />
+        <SummaryCard title="Distribución por cuenta analítica" rows={unique(active.map(item => item.projectName || item.analyticalAccount)).map(name => [name, new Set(active.filter(item => (item.projectName || item.analyticalAccount) === name).map(item => item.employeeId)).size] as [string, number])} empty="No hay cuentas analíticas asociadas" />
         <SummaryCard title="Cargos principales" rows={unique(active.map(item => item.position)).map(name => [name, new Set(active.filter(item => item.position === name).map(item => item.employeeId)).size] as [string, number]).sort((a,b) => b[1]-a[1]).slice(0,8)} empty="No hay cargos registrados" />
         <SummaryCard title="Regionales" rows={unique(active.map(item => item.regional)).map(name => [name, new Set(active.filter(item => item.regional === name).map(item => item.employeeId)).size] as [string, number])} empty="No hay regionales registradas" />
       </div>}
