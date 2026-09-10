@@ -45,5 +45,6 @@ export interface CommunicationRecipient {
   ctaClickedAt?: Date;
   quizSubmittedAt?: Date;
   emailStatus: 'sent' | 'failed' | 'pending';
+  emailError?: string;
   sentAt: Date;
 }

@@ -1,15 +1,62 @@
 import { useState } from 'react';
+import * as XLSX from 'xlsx';
 import {
   RefreshCw, Loader2, CheckCircle2, Clock, AlertTriangle, TrendingUp,
   Users, FileText, FolderKanban, BarChart2, ChevronDown, ChevronUp,
-  Building2, Search,
+  Building2, Search, Info, Download,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useQuestionnaireStats } from '@/hooks/useQuestionnaireStats';
-import type { QuestionnaireStatRow } from '@/hooks/useQuestionnaireStats';
+import type { QuestionnaireStatRow, QuestionnaireRecipientRow } from '@/hooks/useQuestionnaireStats';
+
+function fmtDate(d: Date | null) {
+  if (!d) return '—';
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+const exportRecipients = (rows: { Cuestionario: string; Nombre: string; Correo: string; Empresa: string; Estado: string; 'Fecha de asignación': string; 'Fecha de respuesta': string }[], filename: string) => {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 28 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 18 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Destinatarios');
+  XLSX.writeFile(wb, filename);
+};
+
+const toExportRow = (questionnaireTitle: string, r: QuestionnaireRecipientRow) => ({
+  Cuestionario: questionnaireTitle, Nombre: r.userName, Correo: r.userEmail, Empresa: r.company,
+  Estado: r.status === 'completed' ? 'Respondió' : 'Pendiente',
+  'Fecha de asignación': fmtDate(r.assignedAt), 'Fecha de respuesta': fmtDate(r.completedAt),
+});
+
+interface KpiExplanation { title: string; formula?: string; description: string; source: string }
+
+const KPI_EXPLANATIONS: Record<string, KpiExplanation> = {
+  cuestionarios: {
+    title: 'Cuestionarios',
+    description: 'Cantidad de cuestionarios marcados como activos, sobre el total de cuestionarios creados (activos e inactivos) en la plataforma.',
+    source: 'Campo active del documento de cada cuestionario (questionnaires).',
+  },
+  totalEnviados: {
+    title: 'Total enviados',
+    description: 'Cantidad de asignaciones activas: cada vez que un cuestionario se le envía a una persona se crea una asignación. Si una misma persona recibe el mismo cuestionario más de una vez, cada envío cuenta por separado.',
+    source: 'Documentos de questionnaireAssignments (uno por persona y cuestionario asignado).',
+  },
+  respondieron: {
+    title: 'Respondieron',
+    formula: 'respondieron ÷ enviados × 100',
+    description: 'Asignaciones marcadas como completadas Y con una respuesta real guardada — una asignación marcada "completada" sin respuesta asociada no cuenta, para evitar inflar la tasa con datos inconsistentes.',
+    source: 'Asignaciones con status = "completed" y con responseId asociado.',
+  },
+  pendientes: {
+    title: 'Pendientes',
+    description: 'Asignaciones que todavía no se han respondido. Las que llevan 3 días o más sin respuesta aparecen también en la pestaña "Alertas", para hacer seguimiento a quienes no han contestado.',
+    source: 'Asignaciones con status = "pending". La alerta usa el campo assignedAt para calcular los días transcurridos.',
+  },
+};
 
 const ROLE_LABELS: Record<string, string> = {
   colaborador: 'Colaborador',
@@ -33,13 +80,16 @@ function RateBar({ rate, size = 'md' }: { rate: number; size?: 'sm' | 'md' }) {
 }
 
 function KpiCard({
-  icon: Icon, label, value, sub, iconBg, valueColor = 'text-gray-900',
+  icon: Icon, label, value, sub, iconBg, valueColor = 'text-gray-900', explainKey, onExplain,
 }: {
   icon: React.ElementType; label: string; value: string | number;
   sub?: string; iconBg: string; valueColor?: string;
+  explainKey: string; onExplain: (key: string) => void;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-start gap-4">
+    <button type="button" onClick={() => onExplain(explainKey)}
+      className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-start gap-4 text-left hover:border-[#008C3C]/40 hover:shadow-md transition-all relative group w-full">
+      <Info className="w-3.5 h-3.5 text-gray-300 absolute top-3 right-3 group-hover:text-[#008C3C]" />
       <div className={`p-3 rounded-xl flex-shrink-0 ${iconBg}`}>
         <Icon className="w-5 h-5 text-white" />
       </div>
@@ -48,7 +98,7 @@ function KpiCard({
         <p className={`text-2xl font-bold mt-0.5 ${valueColor}`}>{value}</p>
         {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -198,6 +248,15 @@ function QuestionnaireDetailPanel({ row, details }: {
             <Users className="w-3.5 h-3.5" /> Destinatarios ({row.assigned})
           </p>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportRecipients(
+                d.recipients.map(r => toExportRow(row.title, r)),
+                `cuestionario-${row.title.replace(/[^\w\-]+/g, '_').slice(0, 40)}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+              )}
+              className="flex items-center gap-1.5 text-xs font-medium text-[#008C3C] hover:underline shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" /> Exportar
+            </button>
             <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
               {(['all', 'pending', 'completed'] as const).map(f => (
                 <button
@@ -274,6 +333,7 @@ export const QuestionnaireSendStatsPage = () => {
   const [pSearch, setPSearch] = useState('');
   const [expandedQ, setExpandedQ] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'cuestionarios' | 'proyectos' | 'roles' | 'tendencia' | 'alertas'>('cuestionarios');
+  const [explainKey, setExplainKey] = useState<string | null>(null);
 
   const filteredQ = byQuestionnaire.filter(r =>
     r.title.toLowerCase().includes(qSearch.toLowerCase())
@@ -281,6 +341,11 @@ export const QuestionnaireSendStatsPage = () => {
   const filteredP = byProject.filter(r =>
     r.projectName.toLowerCase().includes(pSearch.toLowerCase())
   );
+
+  const handleExportAll = () => {
+    const rows = filteredQ.flatMap(q => (questionnaireDetails.get(q.id)?.recipients ?? []).map(r => toExportRow(q.title, r)));
+    exportRecipients(rows, `estadisticas-cuestionarios-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[60vh]">
@@ -315,13 +380,17 @@ export const QuestionnaireSendStatsPage = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard icon={FileText}     label="Cuestionarios"   value={globalStats.activeQuestionnaires}                       sub={`${globalStats.totalQuestionnaires} en total`}   iconBg="bg-blue-500" />
-        <KpiCard icon={Users}        label="Total enviados"  value={globalStats.totalAssigned.toLocaleString('es-CO')}      sub="asignaciones activas"                            iconBg="bg-indigo-500" />
-        <KpiCard icon={CheckCircle2} label="Respondieron"    value={globalStats.totalCompleted.toLocaleString('es-CO')}     sub={`Tasa global: ${globalStats.globalRate}%`}        iconBg="bg-green-500" />
+        <KpiCard icon={FileText}     label="Cuestionarios"   value={globalStats.activeQuestionnaires}                       sub={`${globalStats.totalQuestionnaires} en total`}   iconBg="bg-blue-500"
+          explainKey="cuestionarios" onExplain={setExplainKey} />
+        <KpiCard icon={Users}        label="Total enviados"  value={globalStats.totalAssigned.toLocaleString('es-CO')}      sub="asignaciones activas"                            iconBg="bg-indigo-500"
+          explainKey="totalEnviados" onExplain={setExplainKey} />
+        <KpiCard icon={CheckCircle2} label="Respondieron"    value={globalStats.totalCompleted.toLocaleString('es-CO')}     sub={`Tasa global: ${globalStats.globalRate}%`}        iconBg="bg-green-500"
+          explainKey="respondieron" onExplain={setExplainKey} />
         <KpiCard icon={Clock}        label="Pendientes"      value={globalStats.totalPending.toLocaleString('es-CO')}
           sub={pendingAlerts.length > 0 ? `${pendingAlerts.length} personas con +3 días` : 'Sin alertas críticas'}
           iconBg={globalStats.totalPending > 0 ? 'bg-orange-500' : 'bg-gray-400'}
           valueColor={globalStats.totalPending > 0 ? 'text-orange-600' : 'text-gray-900'}
+          explainKey="pendientes" onExplain={setExplainKey}
         />
       </div>
 
@@ -356,16 +425,21 @@ export const QuestionnaireSendStatsPage = () => {
         {/* ── Por Cuestionario ─────────────────────────────────────────────── */}
         {activeTab === 'cuestionarios' && (
           <div>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-50">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-50 flex-wrap gap-2">
               <p className="text-xs text-gray-400">{filteredQ.length} cuestionario{filteredQ.length !== 1 ? 's' : ''} — clic en una fila para ver detalle</p>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input
-                  className="h-8 pl-8 pr-3 text-sm border border-gray-200 rounded-lg w-52 focus:outline-none focus:ring-2 focus:ring-[#008C3C]/20"
-                  placeholder="Buscar cuestionario..."
-                  value={qSearch}
-                  onChange={e => setQSearch(e.target.value)}
-                />
+              <div className="flex items-center gap-2">
+                <button onClick={handleExportAll} className="flex items-center gap-1.5 text-xs font-medium text-[#008C3C] hover:underline">
+                  <Download className="w-3.5 h-3.5" /> Exportar todo
+                </button>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    className="h-8 pl-8 pr-3 text-sm border border-gray-200 rounded-lg w-52 focus:outline-none focus:ring-2 focus:ring-[#008C3C]/20"
+                    placeholder="Buscar cuestionario..."
+                    value={qSearch}
+                    onChange={e => setQSearch(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
             <div>
@@ -583,6 +657,34 @@ export const QuestionnaireSendStatsPage = () => {
           )
         )}
       </div>
+
+      {/* ── Explicación de cada dato (clic en una tarjeta KPI) ── */}
+      <Dialog open={!!explainKey} onOpenChange={open => { if (!open) setExplainKey(null); }}>
+        <DialogContent className="max-w-md">
+          {explainKey && (() => {
+            const info = KPI_EXPLANATIONS[explainKey];
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    <Info className="w-4 h-4 text-[#008C3C]" /> {info.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  {info.formula && (
+                    <p className="font-mono text-xs bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-gray-700">{info.formula}</p>
+                  )}
+                  <p className="text-gray-600 leading-relaxed">{info.description}</p>
+                  <div className="pt-2 border-t border-gray-100">
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">De dónde sale el dato</p>
+                    <p className="text-xs text-gray-500 leading-relaxed">{info.source}</p>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

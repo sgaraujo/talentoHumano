@@ -110,8 +110,10 @@ class CommunicationService {
     await batch.commit();
 
     try {
-      const sendFn = httpsCallable(functions, 'sendCommunicationEmail');
-      await sendFn({
+      const sendFn = httpsCallable<any, { ok: boolean; sent: number; errors?: Array<{ email: string; error: string }> }>(
+        functions, 'sendCommunicationEmail',
+      );
+      const result = await sendFn({
         communicationId, title, body,
         recipients: tokenMap,
         attachments: attachments || [],
@@ -119,12 +121,28 @@ class CommunicationService {
         questionnaireName: questionnaireName || null,
         senderKey: senderKey || 'default',
       });
+      // La función intenta cada destinatario por separado y devuelve los
+      // correos que sí fallaron — solo esos se marcan como 'failed', el resto
+      // como 'sent'. Antes se marcaban TODOS como 'sent' si la llamada no
+      // lanzaba error, aunque algunos destinatarios individuales sí hubieran
+      // fallado, dejando "Fallidos" en las estadísticas siempre en cero.
+      const errorByEmail = new Map((result.data.errors ?? []).map(e => [e.email, e.error]));
       const snap = await getDocs(query(collection(db, this.recCol), where('communicationId', '==', communicationId)));
       const batch2 = writeBatch(db);
-      snap.docs.forEach(d => batch2.update(d.ref, { emailStatus: 'sent' }));
+      snap.docs.forEach(d => {
+        const email = d.data().userEmail as string;
+        const error = errorByEmail.get(email);
+        batch2.update(d.ref, error
+          ? { emailStatus: 'failed', emailError: error }
+          : { emailStatus: 'sent' });
+      });
       await batch2.commit();
-    } catch (e) {
+    } catch (e: any) {
       console.warn('Email send failed:', e);
+      const snap = await getDocs(query(collection(db, this.recCol), where('communicationId', '==', communicationId)));
+      const batch2 = writeBatch(db);
+      snap.docs.forEach(d => batch2.update(d.ref, { emailStatus: 'failed', emailError: e?.message || 'Error al enviar' }));
+      await batch2.commit();
     }
 
     return communicationId;

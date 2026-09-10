@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
   Tooltip, Legend, ResponsiveContainer,
@@ -294,6 +295,7 @@ function ChartsPanel({
 // ── main ──────────────────────────────────────────────────────────────────────
 
 export const CommunicationsPage = () => {
+  const navigate = useNavigate();
   const [communications, setCommunications] = useState<Communication[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
@@ -990,9 +992,14 @@ export const CommunicationsPage = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Correos</h1>
           <p className="text-sm text-gray-500 mt-0.5">Envía correos y haz seguimiento de lectura</p>
         </div>
-        <Button onClick={() => setComposeOpen(true)} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
-          <Plus className="w-4 h-4 mr-2" /> Nuevo comunicado
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => navigate('/estadisticas-campanas-correo')}>
+            <BarChart2 className="w-4 h-4 mr-2" /> Estadísticas de campañas
+          </Button>
+          <Button onClick={() => setComposeOpen(true)} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
+            <Plus className="w-4 h-4 mr-2" /> Nuevo comunicado
+          </Button>
+        </div>
       </div>
 
       {/* Global stats — reflect current month filter */}
@@ -1112,6 +1119,11 @@ export const CommunicationsPage = () => {
                         className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10 transition-colors">
                         <Eye className="w-4 h-4" />
                       </button>
+                      <button onClick={() => navigate(`/estadisticas-campanas-correo?campaign=${comm.id}`)}
+                        title="Ver estadísticas de esta campaña"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                        <BarChart2 className="w-4 h-4" />
+                      </button>
                       <button onClick={e => handleDelete(comm, e)}
                         className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors">
                         <Trash2 className="w-4 h-4" />
@@ -1204,6 +1216,11 @@ export const CommunicationsPage = () => {
                       <button onClick={() => openDetail(comm)}
                         className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10 transition-colors">
                         <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => navigate(`/estadisticas-campanas-correo?campaign=${comm.id}`)}
+                        title="Ver estadísticas de esta campaña"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors opacity-0 group-hover:opacity-100">
+                        <BarChart2 className="w-3.5 h-3.5" />
                       </button>
                       <button onClick={e => handleDelete(comm, e)}
                         className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100">
@@ -1305,6 +1322,10 @@ export const CommunicationsPage = () => {
                 setPreviewOpen(true);
               }} className="h-8 text-xs border-purple-200 text-purple-600 hover:bg-purple-50 px-2.5">
                 <Eye className="w-3 h-3" /><span className="hidden sm:inline ml-1">Correo</span>
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => selected && navigate(`/estadisticas-campanas-correo?campaign=${selected.id}`)}
+                className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 px-2.5">
+                <BarChart2 className="w-3 h-3" /><span className="hidden sm:inline ml-1">Estadísticas</span>
               </Button>
               <Button size="sm" variant="outline" onClick={handleExportPending}
                 className="h-8 text-xs border-green-200 text-green-700 hover:bg-green-50 px-2.5">

@@ -207,8 +207,8 @@ export function useQuestionnaireStats() {
 
           return {
             id: q.id,
-            title: q.title,
-            active: q.active,
+            title: q.title ?? '(sin título)',
+            active: !!q.active,
             assigned: qa.length,
             completed: compl.length,
             pending: pend.length,

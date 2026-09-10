@@ -6,7 +6,7 @@ import {
   Users, FileText, Bell, Download, Send,
   LogOut, Bot, Search, Menu, X, ChevronLeft, Building2,
   LayoutDashboard, FolderKanban, MessageSquare, Calculator, Shield, ClipboardCheck,
-  ChevronDown, BarChart2, Mail, MessageCircle, Newspaper, Settings2,
+  ChevronDown, BarChart2, MessageCircle, Newspaper, Settings2,
 } from 'lucide-react';
 import { ROLE_LABELS } from '@/models/types/AppRole';
 import { Link, useLocation } from 'react-router-dom';
@@ -38,7 +38,7 @@ const GROUPS: MenuGroup[] = [
       { icon: Newspaper,     label: 'Boletines',          path: '/boletines' },
       { icon: MessageCircle, label: 'WhatsApp',           path: '/whatsapp' },
       { icon: Bell,          label: 'Notificaciones',     path: '/notificaciones' },
-      { icon: Mail,          label: 'Estadísticas de correo', path: '/estadisticas-correos' },
+      { icon: BarChart2,     label: 'Estadísticas de campañas', path: '/estadisticas-campanas-correo' },
       { icon: BarChart2,     label: 'Estadísticas de WhatsApp', path: '/estadisticas-whatsapp' },
     ],
   },

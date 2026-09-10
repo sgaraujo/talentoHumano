@@ -19,6 +19,7 @@ import { CompanyWorkforcePage } from './views/Companies/CompanyWorkforcePage';
 import { CompanySettingsPage } from './views/Companies/CompanySettingsPage';
 import { ProjectsPage } from './views/Projects/ProjectsPage';
 import { CommunicationsPage } from './views/Communications/CommunicationsPage';
+import { CommunicationsStatsPage } from './views/Communications/CommunicationsStatsPage';
 import { ReadCommunicationPage } from './views/Public/ReadCommunicationPage';
 import { CtaTrackingPage } from './views/Public/CtaTrackingPage';
 import { TaxCalendarPage } from './views/Accounting/TaxCalendarPage';
@@ -234,6 +235,15 @@ function App() {
           element={
             loading ? null
             : isAuthenticated ? <MainLayout><CommunicationsPage /></MainLayout>
+            : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/estadisticas-campanas-correo"
+          element={
+            loading ? null
+            : isAuthenticated ? <MainLayout><CommunicationsStatsPage /></MainLayout>
             : <Navigate to="/login" />
           }
         />

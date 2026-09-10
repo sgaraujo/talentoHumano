@@ -11,8 +11,15 @@ const toDate = (v: any): Date | null => {
   return isNaN(d.getTime()) ? null : d;
 };
 
+/** División segura — nunca NaN/Infinity, siempre 0-100 redondeado a 1 decimal. */
+export function rate(numerator: number, denominator: number): number {
+  if (!denominator) return 0;
+  return Math.round((numerator / denominator) * 1000) / 10;
+}
+
 export interface WaCampaignStatRow {
   id: string; name: string; templateName: string; status: string;
+  companyId?: string; companyName?: string; projectId?: string; projectName?: string;
   total: number; sent: number; failed: number; skipped: number;
   delivered: number; read: number; deliveryFailed: number; deliveryRate: number; readRate: number;
   createdAt: Date | null; error?: string;
@@ -21,6 +28,17 @@ export interface WaCampaignStatRow {
 export interface WaFailureRow {
   campaignId: string; campaignName: string; recipientId: string;
   name: string; phone: string; error: string; date: Date | null;
+}
+
+export type WaFinalStatus = 'failed' | 'skipped' | 'sent_no_delivery' | 'delivered_no_read' | 'read';
+
+export interface WaRecipientRow {
+  id: string; campaignId: string; campaignName: string;
+  name: string; phone: string; source: string;
+  companyId?: string; companyName?: string; projectId?: string; projectName?: string;
+  status: string; deliveryStatus?: string; error?: string;
+  createdAt: Date | null; sentAt: Date | null; deliveryUpdatedAt: Date | null;
+  finalStatus: WaFinalStatus;
 }
 
 export interface WaGlobalStats {
@@ -33,10 +51,19 @@ export interface WaNumberSummary { numberId: string; displayName: string; conver
 
 export interface WaConversationStats { total: number; open: number; closed: number; unread: number; byNumber: WaNumberSummary[] }
 
+const finalStatusOf = (r: { status: string; deliveryStatus?: string }): WaFinalStatus => {
+  if (r.status === 'failed' || r.deliveryStatus === 'failed') return 'failed';
+  if (r.status === 'skipped') return 'skipped';
+  if (r.deliveryStatus === 'read') return 'read';
+  if (r.deliveryStatus === 'delivered') return 'delivered_no_read';
+  return 'sent_no_delivery';
+};
+
 export function useWhatsAppStats() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [byCampaign, setByCampaign] = useState<WaCampaignStatRow[]>([]);
+  const [recipients, setRecipients] = useState<WaRecipientRow[]>([]);
   const [failures, setFailures] = useState<WaFailureRow[]>([]);
   const [timeline, setTimeline] = useState<{ date: string; sent: number; failed: number }[]>([]);
   const [conversationStats, setConversationStats] = useState<WaConversationStats>({ total: 0, open: 0, closed: 0, unread: 0, byNumber: [] });
@@ -44,8 +71,14 @@ export function useWhatsAppStats() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const campaignsSnap = await getDocs(query(collection(db, FIRESTORE_COLLECTIONS.whatsappCampaigns), orderBy('createdAt', 'desc')));
+      const [campaignsSnap, companiesSnap, projectsSnap] = await Promise.all([
+        getDocs(query(collection(db, FIRESTORE_COLLECTIONS.whatsappCampaigns), orderBy('createdAt', 'desc'))),
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
+        getDocs(collection(db, FIRESTORE_COLLECTIONS.projects)),
+      ]);
       const campaigns = campaignsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const companyNameById = new Map(companiesSnap.docs.map(d => [d.id, (d.data() as any).name as string]));
+      const projectNameById = new Map(projectsSnap.docs.map(d => [d.id, (d.data() as any).name as string]));
 
       const perCampaign = await Promise.all(campaigns.map(async campaign => {
         const snap = await getDocs(collection(db, FIRESTORE_COLLECTIONS.whatsappCampaigns, campaign.id, 'recipients'));
@@ -54,11 +87,12 @@ export function useWhatsAppStats() {
 
       const rows: WaCampaignStatRow[] = [];
       const failRows: WaFailureRow[] = [];
+      const recRows: WaRecipientRow[] = [];
       const dayBuckets = new Map<string, { sent: number; failed: number }>();
 
-      for (const { campaign, recipients } of perCampaign) {
+      for (const { campaign, recipients: recs } of perCampaign) {
         let sent = 0, failed = 0, skipped = 0, delivered = 0, read = 0, deliveryFailed = 0;
-        for (const r of recipients) {
+        for (const r of recs) {
           if (r.status === 'sent') sent++;
           else if (r.status === 'failed') failed++;
           else if (r.status === 'skipped') skipped++;
@@ -77,17 +111,31 @@ export function useWhatsAppStats() {
             if (r.status === 'sent') bucket.sent++; else bucket.failed++;
           }
 
+          const phone: string = r.phone ?? '';
           if (r.status === 'failed' || r.status === 'skipped' || r.deliveryStatus === 'failed') {
             failRows.push({
-              campaignId: campaign.id, campaignName: campaign.name,
-              recipientId: r.id, name: r.name || r.phone, phone: r.phone,
+              campaignId: campaign.id, campaignName: campaign.name ?? '(sin nombre)',
+              recipientId: r.id, name: r.name || phone, phone,
               error: r.error || 'Sin detalle', date: toDate(r.deliveryUpdatedAt ?? r.sentAt ?? r.createdAt),
             });
           }
+
+          recRows.push({
+            id: r.id, campaignId: campaign.id, campaignName: campaign.name ?? '(sin nombre)',
+            name: r.name || phone, phone, source: r.source || 'user',
+            companyId: r.companyId, companyName: r.companyId ? companyNameById.get(r.companyId) : undefined,
+            projectId: r.projectId, projectName: r.projectId ? projectNameById.get(r.projectId) : undefined,
+            status: r.status, deliveryStatus: r.deliveryStatus, error: r.error,
+            createdAt: toDate(r.createdAt), sentAt: toDate(r.sentAt), deliveryUpdatedAt: toDate(r.deliveryUpdatedAt),
+            finalStatus: finalStatusOf(r),
+          });
         }
         rows.push({
-          id: campaign.id, name: campaign.name, templateName: campaign.templateName ?? '',
-          status: campaign.status ?? 'sending', total: recipients.length, sent, failed, skipped,
+          id: campaign.id, name: campaign.name ?? '(sin nombre)', templateName: campaign.templateName ?? '',
+          status: campaign.status ?? 'sending',
+          companyId: campaign.companyId ?? undefined, companyName: campaign.companyId ? companyNameById.get(campaign.companyId) : undefined,
+          projectId: campaign.projectId ?? undefined, projectName: campaign.projectId ? projectNameById.get(campaign.projectId) : undefined,
+          total: recs.length, sent, failed, skipped,
           delivered, read, deliveryFailed,
           deliveryRate: sent > 0 ? Math.round((delivered / sent) * 100) : 0,
           readRate: sent > 0 ? Math.round((read / sent) * 100) : 0,
@@ -123,6 +171,7 @@ export function useWhatsAppStats() {
       }
 
       setByCampaign(rows);
+      setRecipients(recRows);
       setFailures(failRows.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)));
       setTimeline(tl);
       setConversationStats({ total: totalConv, open: openConv, closed: closedConv, unread: totalUnread, byNumber });
@@ -157,5 +206,5 @@ export function useWhatsAppStats() {
     topFailReason,
   };
 
-  return { loading, error, refresh: load, globalStats, byCampaign, failures, timeline, conversationStats };
+  return { loading, error, refresh: load, globalStats, byCampaign, recipients, failures, timeline, conversationStats };
 }
