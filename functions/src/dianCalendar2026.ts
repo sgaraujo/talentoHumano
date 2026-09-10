@@ -222,8 +222,21 @@ const PATRIMONIO_2026: Record<NitDigit, { period: string; dueDate: string }[]> =
 
 // ── IVA Bimestral 2026 ────────────────────────────────────────────────────────
 // 6 bimestres — Decreto 2229 del 22 de diciembre de 2023
+// El vencimiento de cada bimestre cae el mismo día que la Retención en la
+// Fuente del último mes del bimestre (ambos formularios vencen el mismo día
+// por dígito de NIT). Verificado contra Actualícese: Bimestre 4 (jul-ago,
+// dígito 1) = 9 sep 2026, igual que Retefuente de agosto — antes esta tabla
+// tenía todas las fechas corridas un día de más.
 const IVA_BIMESTRAL_2026: Record<NitDigit, { period: string; dueDate: string }[]> = {
   1: [
+    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-10' },
+    { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-12' },
+    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-09' },
+    { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-09' },
+    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-11' },
+    { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-13' },
+  ],
+  2: [
     { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-11' },
     { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-13' },
     { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-10' },
@@ -231,31 +244,31 @@ const IVA_BIMESTRAL_2026: Record<NitDigit, { period: string; dueDate: string }[]
     { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-12' },
     { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-14' },
   ],
-  2: [
+  3: [
     { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-12' },
     { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-14' },
-    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-11' },
+    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-13' },
     { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-11' },
     { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-13' },
     { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-15' },
   ],
-  3: [
+  4: [
     { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-13' },
     { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-15' },
     { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-14' },
-    { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-12' },
-    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-14' },
-    { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-16' },
+    { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-14' },
+    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-17' },
+    { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-18' },
   ],
-  4: [
-    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-14' },
-    { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-16' },
+  5: [
+    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-16' },
+    { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-19' },
     { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-15' },
     { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-15' },
     { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-18' },
     { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-19' },
   ],
-  5: [
+  6: [
     { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-17' },
     { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-20' },
     { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-16' },
@@ -263,7 +276,7 @@ const IVA_BIMESTRAL_2026: Record<NitDigit, { period: string; dueDate: string }[]
     { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-19' },
     { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-20' },
   ],
-  6: [
+  7: [
     { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-18' },
     { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-21' },
     { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-17' },
@@ -271,92 +284,87 @@ const IVA_BIMESTRAL_2026: Record<NitDigit, { period: string; dueDate: string }[]
     { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-20' },
     { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-21' },
   ],
-  7: [
+  8: [
     { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-19' },
     { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-22' },
-    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-18' },
+    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-21' },
     { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-18' },
-    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-21' },
+    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-23' },
     { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-22' },
   ],
-  8: [
-    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-20' },
-    { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-23' },
-    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-22' },
-    { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-19' },
-    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-24' },
-    { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-23' },
-  ],
   9: [
-    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-21' },
+    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-20' },
     { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-25' },
+    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-22' },
+    { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-21' },
+    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-24' },
+    { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-25' },
+  ],
+  0: [
+    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-24' },
+    { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-26' },
     { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-23' },
     { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-22' },
     { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-25' },
     { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-26' },
   ],
-  0: [
-    { period: 'IVA Bim 1 (Ene-Feb)', dueDate: '2026-03-25' },
-    { period: 'IVA Bim 2 (Mar-Abr)', dueDate: '2026-05-26' },
-    { period: 'IVA Bim 3 (May-Jun)', dueDate: '2026-07-24' },
-    { period: 'IVA Bim 4 (Jul-Ago)', dueDate: '2026-09-23' },
-    { period: 'IVA Bim 5 (Sep-Oct)', dueDate: '2026-11-26' },
-    { period: 'IVA Bim 6 (Nov-Dic)', dueDate: '2027-01-27' },
-  ],
 };
 
 // ── IVA Cuatrimestral 2026 ────────────────────────────────────────────────────
 // 3 cuatrimestres — Decreto 2229 del 22 de diciembre de 2023
+// Mismo día que la Retención en la Fuente del último mes de cada cuatrimestre
+// (abril, agosto, diciembre) — igual criterio que IVA Bimestral. Verificado
+// contra Actualícese: Cuatrimestre 1 (dígito 1) = 12 de mayo de 2026.
 const IVA_CUATRIMESTRAL_2026: Record<NitDigit, { period: string; dueDate: string }[]> = {
   1: [
+    { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-12' },
+    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-09' },
+    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-13' },
+  ],
+  2: [
     { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-13' },
     { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-10' },
     { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-14' },
   ],
-  2: [
+  3: [
     { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-14' },
     { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-11' },
     { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-15' },
   ],
-  3: [
-    { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-15' },
-    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-12' },
-    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-16' },
-  ],
   4: [
-    { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-16' },
+    { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-15' },
+    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-14' },
+    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-18' },
+  ],
+  5: [
+    { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-19' },
     { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-15' },
     { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-19' },
   ],
-  5: [
+  6: [
     { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-20' },
     { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-16' },
     { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-20' },
   ],
-  6: [
+  7: [
     { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-21' },
     { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-17' },
     { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-21' },
   ],
-  7: [
+  8: [
     { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-22' },
     { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-18' },
     { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-22' },
   ],
-  8: [
-    { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-23' },
-    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-19' },
-    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-23' },
-  ],
   9: [
     { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-25' },
-    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-22' },
-    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-26' },
+    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-21' },
+    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-25' },
   ],
   0: [
     { period: 'IVA Cuatrim 1 (Ene-Abr)', dueDate: '2026-05-26' },
-    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-23' },
-    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-27' },
+    { period: 'IVA Cuatrim 2 (May-Ago)', dueDate: '2026-09-22' },
+    { period: 'IVA Cuatrim 3 (Sep-Dic)', dueDate: '2027-01-26' },
   ],
 };
 
