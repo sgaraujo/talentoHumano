@@ -594,10 +594,6 @@ export interface EmailReportGlobalStats {
   total: number; sent: number; failed: number; noStatus: number;
   deliveryRate: number; topFailReason: string;
 }
-export interface EmailReportProjectRow {
-  projectName: string; total: number; sent: number; failed: number;
-  noStatus: number; deliveryRate: number;
-}
 export interface EmailReportQuestionnaireRow {
   title: string; active: boolean; total: number; sent: number;
   failed: number; deliveryRate: number;
@@ -618,13 +614,12 @@ const ROLE_LABELS_PDF: Record<string, string> = {
 
 export function generateEmailSendReport(params: {
   globalStats: EmailReportGlobalStats;
-  byProject: EmailReportProjectRow[];
   byQuestionnaire: EmailReportQuestionnaireRow[];
   byRole: EmailReportRoleRow[];
   failures: EmailReportFailRow[];
   timeline: EmailReportTimelinePoint[];
 }) {
-  const { globalStats, byProject, byQuestionnaire, byRole, failures, timeline } = params;
+  const { globalStats, byQuestionnaire, byRole, failures, timeline } = params;
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -732,59 +727,9 @@ export function generateEmailSendReport(params: {
 
   addPageNumber();
 
-  // ── Page 2: Por Proyecto ───────────────────────────────────────────────────
+  // ── Page 2: Por Cuestionario ───────────────────────────────────────────────
   newPage('Estadisticas de Correos');
   let curY = 26;
-
-  sectionTitle('Entrega de correos por cuenta analítica', curY, GREEN);
-  curY += 5;
-
-  autoTable(doc, {
-    startY: curY,
-    head: [['Cuenta analítica', 'Asignaciones', 'Entregados', 'Fallidos', 'Sin estado', 'Tasa']],
-    body: byProject.map(r => [
-      r.projectName.length > 30 ? r.projectName.slice(0, 28) + '...' : r.projectName,
-      r.total.toString(),
-      r.sent.toString(),
-      r.failed > 0 ? r.failed.toString() : '0',
-      r.noStatus > 0 ? r.noStatus.toString() : '0',
-      r.sent + r.failed > 0 ? `${r.deliveryRate}%` : '-',
-    ]),
-    theme: 'striped',
-    headStyles: { fillColor: GREEN, textColor: [255, 255, 255], fontSize: 8.5, fontStyle: 'bold' },
-    bodyStyles: { fontSize: 8, textColor: DARK },
-    columnStyles: {
-      0: { cellWidth: 65 },
-      1: { cellWidth: 24, halign: 'center' },
-      2: { cellWidth: 24, halign: 'center', textColor: [0, 120, 40] },
-      3: { cellWidth: 20, halign: 'center', textColor: [200, 30, 30] },
-      4: { cellWidth: 22, halign: 'center' },
-      5: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
-    },
-    margin: { left: 14, right: 14 },
-    didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 5) {
-        const v = parseInt(data.cell.raw as string);
-        if (!isNaN(v)) {
-          data.cell.styles.textColor = v >= 90 ? [0, 120, 40] : v >= 70 ? [180, 120, 0] : [200, 30, 30];
-        }
-      }
-    },
-  });
-
-  curY = (doc as any).lastAutoTable.finalY + 12;
-
-  // Gráfico horizontal top proyectos
-  const topP = byProject.slice(0, 8).map(r => ({ label: r.projectName, value: r.sent }));
-  if (topP.length > 0 && curY + topP.length * 10 + 16 < H - 15) {
-    sectionTitle('Top cuentas analíticas — Correos entregados', curY, BLUE);
-    curY += 6;
-    curY = hBarChart(doc, topP, 14, curY, W - 28, 7, 3, BLUE);
-  }
-
-  // ── Page 3: Por Cuestionario ───────────────────────────────────────────────
-  newPage('Estadisticas de Correos');
-  curY = 26;
 
   sectionTitle('Entrega de Correos por Cuestionario', curY, BLUE);
   curY += 5;
@@ -822,7 +767,7 @@ export function generateEmailSendReport(params: {
     },
   });
 
-  // ── Page 4: Por Rol + Tendencia ────────────────────────────────────────────
+  // ── Page 3: Por Rol + Tendencia ────────────────────────────────────────────
   newPage('Estadisticas de Correos');
   curY = 26;
 
@@ -891,7 +836,7 @@ export function generateEmailSendReport(params: {
     }
   }
 
-  // ── Page 5: Fallidos ───────────────────────────────────────────────────────
+  // ── Page 4: Fallidos ───────────────────────────────────────────────────────
   if (failures.length > 0) {
     newPage('Estadisticas de Correos');
     curY = 26;

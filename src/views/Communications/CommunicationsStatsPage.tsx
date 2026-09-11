@@ -34,7 +34,7 @@ interface KpiExplanation { title: string; formula?: string; description: string;
 const KPI_EXPLANATIONS: Record<string, KpiExplanation> = {
   enviados: {
     title: 'Enviados',
-    description: 'Total de destinatarios incluidos en las campañas que cumplen los filtros aplicados (campaña, fechas, empresa, cuenta analítica y estado), sin importar si el correo se entregó o no.',
+    description: 'Total de destinatarios incluidos en las campañas que cumplen los filtros aplicados (campaña, fechas, empresa y estado), sin importar si el correo se entregó o no.',
     source: 'Se cuenta un registro de destinatario (CommunicationRecipient) por cada persona a la que se le generó un envío dentro de un comunicado.',
   },
   envioExitoso: {
@@ -74,7 +74,7 @@ const KPI_EXPLANATIONS: Record<string, KpiExplanation> = {
   destinatarios: {
     title: 'Destinatarios',
     description: 'Cantidad de destinatarios individuales que cumplen TODOS los filtros aplicados, incluido el de "Resultado del correo" — por eso puede ser distinto al número de "Enviados", que no aplica ese último filtro.',
-    source: 'Registros de destinatario (CommunicationRecipient) después de aplicar campaña, fechas, empresa, cuenta analítica, estado, búsqueda y resultado del correo.',
+    source: 'Registros de destinatario (CommunicationRecipient) después de aplicar campaña, fechas, empresa, estado, búsqueda y resultado del correo.',
   },
 };
 
@@ -150,7 +150,6 @@ export function CommunicationsStatsPage() {
   const [dateTo, setDateTo] = useState('');
   const [campaignFilter, setCampaignFilter] = useState(searchParams.get('campaign') || 'all');
   const [companyFilter, setCompanyFilter] = useState('all');
-  const [projectFilter, setProjectFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'sent'>('all');
   const [resultFilter, setResultFilter] = useState<'all' | CommsRecipientRow['finalStatus']>('all');
   const [comparisonMetric, setComparisonMetric] = useState<ComparisonMetric>('openRate');
@@ -179,7 +178,6 @@ export function CommunicationsStatsPage() {
 
   const campaignOptions = useMemo(() => [...campaigns].sort((a, b) => (b.sentAt?.getTime() ?? 0) - (a.sentAt?.getTime() ?? 0)), [campaigns]);
   const companyOptions = useMemo(() => [...new Set(recipients.map(r => r.company).filter(Boolean))].sort(), [recipients]);
-  const projectOptions = useMemo(() => [...new Set(recipients.map(r => r.project).filter(Boolean))].sort(), [recipients]);
 
   const inDateRange = (d: Date | null) => {
     if (!d) return !dateFrom && !dateTo;
@@ -203,9 +201,8 @@ export function CommunicationsStatsPage() {
 
   const baseRecipients = useMemo(() => recipients
     .filter(r => filteredCampaignIds.has(r.communicationId))
-    .filter(r => companyFilter === 'all' || r.company === companyFilter)
-    .filter(r => projectFilter === 'all' || r.project === projectFilter),
-  [recipients, filteredCampaignIds, companyFilter, projectFilter]);
+    .filter(r => companyFilter === 'all' || r.company === companyFilter),
+  [recipients, filteredCampaignIds, companyFilter]);
 
   const filteredCampaigns = useMemo(() => campaigns.filter(c => filteredCampaignIds.has(c.id)), [campaigns, filteredCampaignIds]);
 
@@ -303,14 +300,14 @@ export function CommunicationsStatsPage() {
 
   const toExportRow = (r: CommsRecipientRow) => ({
     Campaña: r.communicationTitle, Destinatario: r.userName, Correo: r.userEmail,
-    Empresa: r.company, 'Cuenta analítica': r.project,
+    Empresa: r.company,
     'Fecha de envío': fmtDateTime(r.sentAt), 'Estado de envío': r.emailStatus,
     'Abrió': r.readAt ? 'Sí' : 'No', 'Fecha de apertura': fmtDateTime(r.readAt),
     'Clic': r.ctaClickedAt ? 'Sí' : 'No', 'Fecha de clic': fmtDateTime(r.ctaClickedAt),
     'Confirmó': r.ackAt ? 'Sí' : 'No', 'Fecha de confirmación': fmtDateTime(r.ackAt),
     'Estado final': FINAL_STATUS_LABEL[r.finalStatus].label,
   });
-  const EXPORT_COL_WIDTHS = [{ wch: 28 }, { wch: 24 }, { wch: 28 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 16 }, { wch: 8 }, { wch: 16 }, { wch: 10 }, { wch: 18 }, { wch: 18 }];
+  const EXPORT_COL_WIDTHS = [{ wch: 28 }, { wch: 24 }, { wch: 28 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 16 }, { wch: 8 }, { wch: 16 }, { wch: 10 }, { wch: 18 }, { wch: 18 }];
 
   const exportRows = (rows: ReturnType<typeof toExportRow>[], filename: string) => {
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -374,10 +371,6 @@ export function CommunicationsStatsPage() {
         <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg text-gray-600">
           <option value="all">Todas las empresas</option>
           {companyOptions.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg text-gray-600">
-          <option value="all">Todas las cuentas analíticas</option>
-          {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg text-gray-600">
           <option value="all">Cualquier estado</option>

@@ -25,8 +25,7 @@ interface RawQuestionnaire {
 interface RawUser {
   id: string;
   role: string;
-  projectIds?: string[];
-  contractInfo?: { assignment?: { projectId?: string; company?: string } };
+  contractInfo?: { assignment?: { company?: string } };
 }
 
 export interface QuestionnaireCompanyRow {
@@ -49,7 +48,6 @@ export interface QuestionnaireRecipientRow {
 
 export interface QuestionnaireDetail {
   byCompany: QuestionnaireCompanyRow[];
-  byProject: ProjectStatRow[];
   recipients: QuestionnaireRecipientRow[];
 }
 
@@ -66,14 +64,6 @@ export interface QuestionnaireStatRow {
 
 export interface RoleStatRow {
   role: string;
-  assigned: number;
-  completed: number;
-  rate: number;
-}
-
-export interface ProjectStatRow {
-  projectId: string;
-  projectName: string;
   assigned: number;
   completed: number;
   rate: number;
@@ -124,7 +114,6 @@ export function useQuestionnaireStats() {
   });
   const [byQuestionnaire, setByQuestionnaire] = useState<QuestionnaireStatRow[]>([]);
   const [byRole, setByRole] = useState<RoleStatRow[]>([]);
-  const [byProject, setByProject] = useState<ProjectStatRow[]>([]);
   const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
   const [pendingAlerts, setPendingAlerts] = useState<PendingAlert[]>([]);
   const [questionnaireDetails, setQuestionnaireDetails] = useState<Map<string, QuestionnaireDetail>>(new Map());
@@ -133,11 +122,10 @@ export function useQuestionnaireStats() {
     setLoading(true);
     setError("");
     try {
-      const [qSnap, aSnap, uSnap, pSnap] = await Promise.all([
+      const [qSnap, aSnap, uSnap] = await Promise.all([
         getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaires)),
         getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaireAssignments)),
         getDocs(collection(db, FIRESTORE_COLLECTIONS.users)),
-        getDocs(collection(db, FIRESTORE_COLLECTIONS.projects)),
       ]);
 
       const questionnaires: RawQuestionnaire[] = qSnap.docs.map(d => ({
@@ -165,10 +153,7 @@ export function useQuestionnaireStats() {
         ...(d.data() as any),
       }));
 
-      const projects = pSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-
       const userMap = new Map(users.map(u => [u.id, u]));
-      const projectMap = new Map<string, string>(projects.map(p => [p.id, p.name]));
       const qMap = new Map(questionnaires.map(q => [q.id, q]));
 
       const now = new Date();
@@ -220,15 +205,13 @@ export function useQuestionnaireStats() {
         .sort((a, b) => b.assigned - a.assigned);
       setByQuestionnaire(byQ);
 
-      // ── Detalle por cuestionario: empresa + proyecto + destinatarios ───────
+      // ── Detalle por cuestionario: empresa + destinatarios ──────────────────
       const detailMap = new Map<string, QuestionnaireDetail>();
       for (const q of questionnaires) {
         const qa = assignments.filter(a => a.questionnaireId === q.id);
 
         // Por empresa
         const compAcc = new Map<string, { assigned: number; completed: number }>();
-        // Por proyecto (dentro del cuestionario)
-        const projAcc2 = new Map<string, { name: string; assigned: number; completed: number }>();
         const recipients: QuestionnaireRecipientRow[] = [];
 
         for (const a of qa) {
@@ -241,17 +224,6 @@ export function useQuestionnaireStats() {
           const ce = compAcc.get(company)!;
           ce.assigned++;
           if (done) ce.completed++;
-
-          // Por proyecto
-          const pid: string =
-            user?.contractInfo?.assignment?.projectId
-              ? user.contractInfo.assignment.projectId
-              : user?.projectIds?.[0] ?? "sin-proyecto";
-          const pname = projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin cuenta analítica" : pid);
-          if (!projAcc2.has(pid)) projAcc2.set(pid, { name: pname, assigned: 0, completed: 0 });
-          const pe = projAcc2.get(pid)!;
-          pe.assigned++;
-          if (done) pe.completed++;
 
           recipients.push({
             userId: a.userId,
@@ -271,15 +243,6 @@ export function useQuestionnaireStats() {
               assigned: v.assigned,
               completed: v.completed,
               pending: v.assigned - v.completed,
-              rate: v.assigned > 0 ? Math.round((v.completed / v.assigned) * 100) : 0,
-            }))
-            .sort((a, b) => b.assigned - a.assigned),
-          byProject: Array.from(projAcc2.entries())
-            .map(([projectId, v]) => ({
-              projectId,
-              projectName: v.name,
-              assigned: v.assigned,
-              completed: v.completed,
               rate: v.assigned > 0 ? Math.round((v.completed / v.assigned) * 100) : 0,
             }))
             .sort((a, b) => b.assigned - a.assigned),
@@ -303,42 +266,6 @@ export function useQuestionnaireStats() {
         Array.from(roleAcc.entries())
           .map(([role, v]) => ({
             role,
-            assigned: v.assigned,
-            completed: v.completed,
-            rate:
-              v.assigned > 0
-                ? Math.round((v.completed / v.assigned) * 100)
-                : 0,
-          }))
-          .sort((a, b) => b.assigned - a.assigned)
-      );
-
-      // ── Por proyecto ──────────────────────────────────────────────────────
-      const projAcc = new Map<string, { name: string; assigned: number; completed: number }>();
-
-      for (const a of assignments) {
-        const user = userMap.get(a.userId);
-        const pids: string[] =
-          user?.projectIds?.length
-            ? user.projectIds
-            : user?.contractInfo?.assignment?.projectId
-            ? [user.contractInfo.assignment.projectId]
-            : ["sin-proyecto"];
-
-        for (const pid of pids) {
-          const name =
-            projectMap.get(pid) ?? (pid === "sin-proyecto" ? "Sin cuenta analítica" : pid);
-          if (!projAcc.has(pid)) projAcc.set(pid, { name, assigned: 0, completed: 0 });
-          const e = projAcc.get(pid)!;
-          e.assigned++;
-          if (realCompleted(a)) e.completed++;
-        }
-      }
-      setByProject(
-        Array.from(projAcc.entries())
-          .map(([projectId, v]) => ({
-            projectId,
-            projectName: v.name,
             assigned: v.assigned,
             completed: v.completed,
             rate:
@@ -426,7 +353,6 @@ export function useQuestionnaireStats() {
     globalStats,
     byQuestionnaire,
     byRole,
-    byProject,
     timeline,
     pendingAlerts,
     questionnaireDetails,

@@ -115,12 +115,6 @@ const TENANT_ID_2     = defineSecret("TENANT_ID_2");
 const CLIENT_ID_2     = defineSecret("CLIENT_ID_2");
 const CLIENT_SECRET_2 = defineSecret("CLIENT_SECRET_2");
 
-// Credenciales del tenant de triangulum.net.co
-const TENANT_ID_3     = defineSecret("TENANT_ID_3");
-const CLIENT_ID_3     = defineSecret("CLIENT_ID_3");
-const CLIENT_SECRET_3 = defineSecret("CLIENT_SECRET_3");
-const SENDER_EMAIL_3  = defineSecret("SENDER_EMAIL_3"); // lguio@triangulum.net.co
-
 async function getGraphToken(): Promise<string> {
   const tenantId = TENANT_ID.value();
   const clientId = CLIENT_ID.value();
@@ -160,24 +154,6 @@ async function getGraphTokenInteegra(): Promise<string> {
     body,
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(JSON.stringify(data));
-  return data.access_token as string;
-}
-
-async function getGraphTokenTriangulum(): Promise<string> {
-  const url = `https://login.microsoftonline.com/${TENANT_ID_3.value()}/oauth2/v2.0/token`;
-  const body = new URLSearchParams({
-    client_id: CLIENT_ID_3.value(),
-    scope: "https://graph.microsoft.com/.default",
-    client_secret: CLIENT_SECRET_3.value(),
-    grant_type: "client_credentials",
-  });
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
   const data = await res.json();
   if (!res.ok) throw new Error(JSON.stringify(data));
   return data.access_token as string;
@@ -826,7 +802,7 @@ export const sendCommunicationEmail = onCall(
   {
     region: "us-central1",
     cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL, SENDER_EMAIL_2, TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, TENANT_ID_3, CLIENT_ID_3, CLIENT_SECRET_3, SENDER_EMAIL_3],
+    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL, SENDER_EMAIL_2, TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2],
   },
   async (request) => {
     const { communicationId, title, body, recipients, attachments = [], ctaButton = null, questionnaireName = null, senderKey = 'default' } = request.data || {};
@@ -837,14 +813,10 @@ export const sendCommunicationEmail = onCall(
 
     const graphToken = senderKey === 'inteegra'
       ? await getGraphTokenInteegra()
-      : senderKey === 'triangulum'
-        ? await getGraphTokenTriangulum()
-        : await getGraphToken();
+      : await getGraphToken();
     const sender = senderKey === 'inteegra'
       ? SENDER_EMAIL_2.value().trim()
-      : senderKey === 'triangulum'
-        ? SENDER_EMAIL_3.value().trim()
-        : SENDER_EMAIL.value().trim();
+      : SENDER_EMAIL.value().trim();
     const year       = new Date().getFullYear();
     const dateStr    = new Date().toLocaleDateString("es-CO", {
       day: "2-digit", month: "long", year: "numeric",
@@ -3299,7 +3271,7 @@ export const sendAccountingMessage = onCall(
     region: "us-central1",
     cors: true,
     timeoutSeconds: 540,
-    secrets: [TENANT_ID_3, CLIENT_ID_3, CLIENT_SECRET_3, SENDER_EMAIL_3],
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
     await requirePlatformRole(request, ["admin", "contabilidad"]);
@@ -3308,8 +3280,8 @@ export const sendAccountingMessage = onCall(
     if (!subject || !body || !Array.isArray(recipients) || recipients.length === 0)
       throw new HttpsError("invalid-argument", "subject, body y recipients son requeridos");
 
-    const token  = await getGraphTokenTriangulum();
-    const sender = SENDER_EMAIL_3.value().trim();
+    const token  = await getGraphTokenInteegra();
+    const sender = SENDER_EMAIL_2.value().trim();
     const year   = new Date().getFullYear();
     const dateStr = new Date().toLocaleDateString("es-CO", {
       weekday: "long", day: "2-digit", month: "long", year: "numeric",

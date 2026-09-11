@@ -444,7 +444,7 @@ export const AccountingMessagesPage = () => {
           Mensajes
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Envía comunicados a las personas de las empresas · desde <span className="font-medium">lguio@triangulum.net.co</span>
+          Envía comunicados a las personas de las empresas · desde <span className="font-medium">inteegrados@inteegra.net.co</span>
         </p>
       </div>
 
@@ -709,7 +709,7 @@ export const AccountingMessagesPage = () => {
               <div className="flex items-center gap-2 px-3 py-2 bg-[#008C3C]/5 border border-[#008C3C]/20 rounded-lg">
                 <Mail className="w-3.5 h-3.5 text-[#008C3C] flex-shrink-0" />
                 <p className="text-xs text-[#008C3C]">
-                  Se enviará desde <span className="font-semibold">lguio@triangulum.net.co</span>
+                  Se enviará desde <span className="font-semibold">inteegrados@inteegra.net.co</span>
                   {senderName && <> · remitente: <span className="font-semibold">{senderName}</span></>}
                 </p>
               </div>

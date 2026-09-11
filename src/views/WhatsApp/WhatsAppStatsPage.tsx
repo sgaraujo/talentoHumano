@@ -36,7 +36,7 @@ interface KpiExplanation { title: string; formula?: string; description: string;
 const KPI_EXPLANATIONS: Record<string, KpiExplanation> = {
   campanas: {
     title: 'Campañas',
-    description: 'Cantidad de campañas de WhatsApp que cumplen los filtros aplicados (fecha, empresa, cuenta analítica, estado), sobre el total de campañas registradas.',
+    description: 'Cantidad de campañas de WhatsApp que cumplen los filtros aplicados (fecha, empresa, estado), sobre el total de campañas registradas.',
     source: 'Documentos de whatsapp/data/campaigns que pasan los filtros.',
   },
   entrega: {
@@ -128,14 +128,14 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
 };
 
 export const WhatsAppStatsPage = () => {
-  const { loading, error, refresh, globalStats, byCampaign, recipients, failures, timeline, conversationStats } = useWhatsAppStats();
+  const { loading, error, refresh, byCampaign, recipients, failures, conversationStats } = useWhatsAppStats();
 
   const [tab, setTab] = useState<'campanas' | 'destinatarios' | 'fallidos' | 'conversaciones'>('campanas');
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
-  const [projectFilter, setProjectFilter] = useState('all');
+  const [campaignFilter, setCampaignFilter] = useState('all');
   const [resultFilter, setResultFilter] = useState<'all' | WaFinalStatus>('all');
   const [comparisonMetric, setComparisonMetric] = useState<ComparisonMetric>('deliveryRate');
   const [sortField, setSortField] = useState<SortField>('total');
@@ -160,7 +160,7 @@ export const WhatsAppStatsPage = () => {
   });
 
   const companyOptions = useMemo(() => [...new Set(recipients.map(r => r.companyName).filter(Boolean) as string[])].sort(), [recipients]);
-  const projectOptions = useMemo(() => [...new Set(recipients.map(r => r.projectName).filter(Boolean) as string[])].sort(), [recipients]);
+  const campaignOptions = useMemo(() => [...byCampaign].sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)), [byCampaign]);
 
   const inDateRange = (d: Date | null) => {
     if (!d) return !dateFrom && !dateTo;
@@ -176,10 +176,10 @@ export const WhatsAppStatsPage = () => {
         .filter(r => r.name.toLowerCase().includes(q) || r.templateName.toLowerCase().includes(q))
         .filter(r => inDateRange(r.createdAt))
         .filter(r => companyFilter === 'all' || r.companyName === companyFilter)
-        .filter(r => projectFilter === 'all' || r.projectName === projectFilter)
+        .filter(r => campaignFilter === 'all' || r.id === campaignFilter)
         .map(r => r.id),
     );
-  }, [byCampaign, search, dateFrom, dateTo, companyFilter, projectFilter]);
+  }, [byCampaign, search, dateFrom, dateTo, companyFilter, campaignFilter]);
 
   const filteredCampaigns = useMemo(() => byCampaign
     .filter(r => filteredCampaignIds.has(r.id))
@@ -199,13 +199,35 @@ export const WhatsAppStatsPage = () => {
     return { total, accepted, delivered, read };
   }, [baseRecipients]);
 
+  // Igual que funnelStats, pero desglosado como en useWhatsAppStats — para que
+  // el donut y el KPI de fallidos también respeten los filtros aplicados
+  // (campaña, empresa, fechas), en vez de mostrar siempre el total global.
+  const filteredDistribution = useMemo(() => {
+    const sent = baseRecipients.filter(r => r.status === 'sent').length;
+    const failed = baseRecipients.filter(r => r.status === 'failed' || r.deliveryStatus === 'failed').length;
+    const skipped = baseRecipients.filter(r => r.status === 'skipped').length;
+    const delivered = baseRecipients.filter(r => r.deliveryStatus === 'delivered' || r.deliveryStatus === 'read').length;
+    const read = baseRecipients.filter(r => r.deliveryStatus === 'read').length;
+    const deliveryFailed = baseRecipients.filter(r => r.deliveryStatus === 'failed').length;
+    return { sent, failed, skipped, delivered, read, deliveryFailed };
+  }, [baseRecipients]);
+
+  const topFailReason = useMemo(() => {
+    const relevant = failures.filter(f => filteredCampaignIds.has(f.campaignId));
+    const counts = new Map<string, number>();
+    for (const f of relevant) counts.set(f.error, (counts.get(f.error) ?? 0) + 1);
+    let top = '', max = 0;
+    for (const [msg, count] of counts) if (count > max) { max = count; top = msg; }
+    return top;
+  }, [failures, filteredCampaignIds]);
+
   const funnelSteps = useMemo(() => {
     const { total, accepted, delivered, read } = funnelStats;
     return [
-      { label: 'Enviados', value: total, ofPrevious: 100, ofTotal: 100 },
-      { label: 'Aceptados', value: accepted, ofPrevious: rate(accepted, total), ofTotal: rate(accepted, total) },
-      { label: 'Entregados', value: delivered, ofPrevious: rate(delivered, accepted), ofTotal: rate(delivered, total) },
-      { label: 'Leídos', value: read, ofPrevious: rate(read, delivered), ofTotal: rate(read, total) },
+      { label: 'Enviados', value: total, ofTotal: 100 },
+      { label: 'Aceptados', value: accepted, ofTotal: rate(accepted, total) },
+      { label: 'Entregados', value: delivered, ofTotal: rate(delivered, total) },
+      { label: 'Leídos', value: read, ofTotal: rate(read, total) },
     ];
   }, [funnelStats]);
 
@@ -243,12 +265,12 @@ export const WhatsAppStatsPage = () => {
 
   const toExportRow = (r: WaRecipientRow) => ({
     Campaña: r.campaignName, Número: `+${r.phone}`, Nombre: r.name,
-    Empresa: r.companyName || '', 'Cuenta analítica': r.projectName || '',
+    Empresa: r.companyName || '',
     'Fecha de envío': fmtDateTime(r.sentAt ?? r.createdAt), Estado: statusLabelOf(r),
   });
   const exportRows = (rows: ReturnType<typeof toExportRow>[], filename: string) => {
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 24 }, { wch: 24 }, { wch: 24 }, { wch: 16 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 24 }, { wch: 24 }, { wch: 16 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Destinatarios');
     XLSX.writeFile(wb, filename);
@@ -260,16 +282,38 @@ export const WhatsAppStatsPage = () => {
   );
 
   const pieData = [
-    { name: 'Leídos', value: globalStats.read, fill: '#008C3C' },
-    { name: 'Entregados', value: Math.max(0, globalStats.delivered - globalStats.read), fill: '#3b82f6' },
-    { name: 'Pendientes', value: Math.max(0, globalStats.sent - globalStats.delivered - globalStats.deliveryFailed), fill: '#f59e0b' },
-    { name: 'Fallidos', value: globalStats.failed, fill: '#ef4444' },
-    { name: 'Omitidos', value: globalStats.skipped, fill: '#9ca3af' },
+    { name: 'Leídos', value: filteredDistribution.read, fill: '#008C3C' },
+    { name: 'Entregado sin leer', value: Math.max(0, filteredDistribution.delivered - filteredDistribution.read), fill: '#3b82f6' },
+    { name: 'Pendientes', value: Math.max(0, filteredDistribution.sent - filteredDistribution.delivered - filteredDistribution.deliveryFailed), fill: '#f59e0b' },
+    { name: 'Fallidos', value: filteredDistribution.failed, fill: '#ef4444' },
+    { name: 'Omitidos', value: filteredDistribution.skipped, fill: '#9ca3af' },
   ].filter(d => d.value > 0);
   const pieTotal = pieData.reduce((s, d) => s + d.value, 0);
 
-  const recentDays = timeline.filter(t => t.sent + t.failed > 0);
-  const maxDay = Math.max(...timeline.map(t => t.sent + t.failed), 1);
+  const filteredTimeline = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dayBuckets = new Map<string, { sent: number; failed: number }>();
+    baseRecipients.forEach(r => {
+      const sentAt = r.sentAt ?? r.createdAt;
+      if (sentAt && (r.status === 'sent' || r.status === 'failed')) {
+        const key = sentAt.toISOString().slice(0, 10);
+        if (!dayBuckets.has(key)) dayBuckets.set(key, { sent: 0, failed: 0 });
+        const bucket = dayBuckets.get(key)!;
+        if (r.status === 'sent') bucket.sent++; else bucket.failed++;
+      }
+    });
+    const tl: { date: string; sent: number; failed: number }[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const bucket = dayBuckets.get(key) ?? { sent: 0, failed: 0 };
+      tl.push({ date: d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }), sent: bucket.sent, failed: bucket.failed });
+    }
+    return tl;
+  }, [baseRecipients]);
+
+  const recentDays = filteredTimeline.filter(t => t.sent + t.failed > 0);
+  const maxDay = Math.max(...filteredTimeline.map(t => t.sent + t.failed), 1);
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-gray-300" /></div>
@@ -311,13 +355,14 @@ export const WhatsAppStatsPage = () => {
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg" />
         <span className="text-xs text-gray-400">a</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg" />
+        <select value={campaignFilter} onChange={e => setCampaignFilter(e.target.value)}
+          className={`h-9 px-2.5 text-sm border rounded-lg max-w-[220px] ${campaignFilter !== 'all' ? 'border-[#00a884] text-[#00a884] font-medium' : 'border-gray-200 text-gray-600'}`}>
+          <option value="all">Todas las campañas</option>
+          {campaignOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
         <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg text-gray-600">
           <option value="all">Todas las empresas</option>
           {companyOptions.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg text-gray-600">
-          <option value="all">Todas las cuentas analíticas</option>
-          {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
         <select value={resultFilter} onChange={e => setResultFilter(e.target.value as any)} className="h-9 px-2.5 text-sm border border-gray-200 rounded-lg text-gray-600">
           <option value="all">Cualquier resultado</option>
@@ -345,7 +390,7 @@ export const WhatsAppStatsPage = () => {
         />
         <KpiCard
           icon={XCircle} label="Fallidos" value={(funnelStats.total - funnelStats.accepted).toLocaleString('es-CO')}
-          sub={globalStats.topFailReason ? globalStats.topFailReason.slice(0, 40) + (globalStats.topFailReason.length > 40 ? '…' : '') : 'sin errores recientes'}
+          sub={topFailReason ? topFailReason.slice(0, 40) + (topFailReason.length > 40 ? '…' : '') : 'sin errores recientes'}
           iconBg={funnelStats.total - funnelStats.accepted > 0 ? 'bg-red-500' : 'bg-gray-400'}
           valueColor={funnelStats.total - funnelStats.accepted > 0 ? 'text-red-600' : 'text-gray-900'}
           explainKey="fallidos" onExplain={setExplainKey}
@@ -355,7 +400,7 @@ export const WhatsAppStatsPage = () => {
       {/* ── Embudo de conversión ── */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-800 mb-1">Embudo de conversión</h2>
-        <p className="text-xs text-gray-400 mb-4">Cantidad y porcentaje frente a la etapa anterior / al total enviado</p>
+        <p className="text-xs text-gray-400 mb-4">Cantidad y porcentaje frente al total enviado</p>
         {funnelStats.total === 0 ? (
           <div className="flex items-center justify-center h-[120px] text-sm text-gray-300">Sin datos para los filtros aplicados</div>
         ) : (
@@ -370,7 +415,7 @@ export const WhatsAppStatsPage = () => {
                   </div>
                 </div>
                 <span className="w-36 shrink-0 text-xs text-gray-400 text-left">
-                  {i === 0 ? '100%' : <>{step.ofPrevious}% de la etapa anterior · <span className="text-gray-300">{step.ofTotal}% del total</span></>}
+                  {i === 0 ? '100%' : <>{step.ofTotal}% del total</>}
                 </span>
               </div>
             ))}
@@ -395,7 +440,7 @@ export const WhatsAppStatsPage = () => {
             <div className="flex items-center justify-center h-[200px] text-sm text-gray-300">Sin actividad en los últimos 30 días</div>
           ) : (
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={timeline} margin={{ top: 4, right: 8, left: -28, bottom: 0 }}>
+              <AreaChart data={filteredTimeline} margin={{ top: 4, right: 8, left: -28, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gWaSent" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#22c55e" stopOpacity={0.25} />
@@ -407,7 +452,7 @@ export const WhatsAppStatsPage = () => {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#9ca3af' }} interval={Math.floor(timeline.length / 7)} axisLine={false} tickLine={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#9ca3af' }} interval={Math.floor(filteredTimeline.length / 7)} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} allowDecimals={false} axisLine={false} tickLine={false} domain={[0, maxDay + 1]} />
                 <Tooltip content={<CustomTooltip />} />
                 <Area type="monotone" dataKey="sent" name="Aceptados" stroke="#22c55e" strokeWidth={2} fill="url(#gWaSent)" dot={false} />
@@ -451,32 +496,34 @@ export const WhatsAppStatsPage = () => {
         </div>
       </div>
 
-      {/* ── Comparación entre campañas ── */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-800">Comparación entre campañas</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Top 10 según la métrica seleccionada</p>
+      {/* ── Comparación entre campañas (solo tiene sentido con varias campañas) ── */}
+      {campaignFilter === 'all' && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">Comparación entre campañas</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Top 10 según la métrica seleccionada</p>
+            </div>
+            <select value={comparisonMetric} onChange={e => setComparisonMetric(e.target.value as ComparisonMetric)}
+              className="h-8 px-2 text-xs border border-gray-200 rounded-lg text-gray-600">
+              {COMPARISON_METRICS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
           </div>
-          <select value={comparisonMetric} onChange={e => setComparisonMetric(e.target.value as ComparisonMetric)}
-            className="h-8 px-2 text-xs border border-gray-200 rounded-lg text-gray-600">
-            {COMPARISON_METRICS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
+          {comparisonData.length === 0 ? (
+            <div className="flex items-center justify-center h-[220px] text-sm text-gray-300">Sin campañas con destinatarios aceptados</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(220, comparisonData.length * 34)}>
+              <BarChart data={comparisonData} layout="vertical" margin={{ top: 0, right: 24, left: 8, bottom: 0 }} barSize={16}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} unit="%" axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: '#4b5563' }} axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} formatter={(v: any) => `${v}%`} />
+                <Bar dataKey="value" name={COMPARISON_METRICS.find(m => m.id === comparisonMetric)?.label} fill="#00a884" radius={[0, 6, 6, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
-        {comparisonData.length === 0 ? (
-          <div className="flex items-center justify-center h-[220px] text-sm text-gray-300">Sin campañas con destinatarios aceptados</div>
-        ) : (
-          <ResponsiveContainer width="100%" height={Math.max(220, comparisonData.length * 34)}>
-            <BarChart data={comparisonData} layout="vertical" margin={{ top: 0, right: 24, left: 8, bottom: 0 }} barSize={16}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} unit="%" axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: '#4b5563' }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} formatter={(v: any) => `${v}%`} />
-              <Bar dataKey="value" name={COMPARISON_METRICS.find(m => m.id === comparisonMetric)?.label} fill="#00a884" radius={[0, 6, 6, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </div>
+      )}
 
       {/* ── Conversaciones — resumen rápido ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

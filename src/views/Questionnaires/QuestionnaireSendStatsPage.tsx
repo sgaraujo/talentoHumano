@@ -2,7 +2,7 @@ import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   RefreshCw, Loader2, CheckCircle2, Clock, AlertTriangle, TrendingUp,
-  Users, FileText, FolderKanban, BarChart2, ChevronDown, ChevronUp,
+  Users, FileText, BarChart2, ChevronDown, ChevronUp,
   Building2, Search, Info, Download,
 } from 'lucide-react';
 import {
@@ -220,27 +220,6 @@ function QuestionnaireDetailPanel({ row, details }: {
         </div>
       )}
 
-      {/* Por proyecto */}
-      {d.byProject.length > 1 && (
-        <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-            <FolderKanban className="w-3.5 h-3.5" /> Por cuenta analítica
-          </p>
-          <div className="space-y-2">
-            {d.byProject.map(p => (
-              <div key={p.projectId} className="flex items-center gap-3 text-xs">
-                <span className="text-gray-700 w-36 shrink-0 truncate">{p.projectName}</span>
-                <div className="flex-1">
-                  <RateBar rate={p.rate} size="sm" />
-                </div>
-                <span className="text-gray-500 tabular-nums w-8 text-right">{p.rate}%</span>
-                <span className="text-gray-400 tabular-nums w-16 text-right">{p.completed}/{p.assigned}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Lista de destinatarios */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -325,21 +304,17 @@ function QuestionnaireDetailPanel({ row, details }: {
 export const QuestionnaireSendStatsPage = () => {
   const {
     loading, error, refresh,
-    globalStats, byQuestionnaire, byRole, byProject, timeline,
+    globalStats, byQuestionnaire, byRole, timeline,
     pendingAlerts, questionnaireDetails,
   } = useQuestionnaireStats();
 
   const [qSearch, setQSearch] = useState('');
-  const [pSearch, setPSearch] = useState('');
   const [expandedQ, setExpandedQ] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'cuestionarios' | 'proyectos' | 'roles' | 'tendencia' | 'alertas'>('cuestionarios');
+  const [activeTab, setActiveTab] = useState<'cuestionarios' | 'roles' | 'tendencia' | 'alertas'>('cuestionarios');
   const [explainKey, setExplainKey] = useState<string | null>(null);
 
   const filteredQ = byQuestionnaire.filter(r =>
     r.title.toLowerCase().includes(qSearch.toLowerCase())
-  );
-  const filteredP = byProject.filter(r =>
-    r.projectName.toLowerCase().includes(pSearch.toLowerCase())
   );
 
   const handleExportAll = () => {
@@ -399,7 +374,6 @@ export const QuestionnaireSendStatsPage = () => {
         <div className="flex items-center border-b border-gray-100 px-5 overflow-x-auto">
           {([
             { id: 'cuestionarios', label: 'Por Cuestionario', icon: FileText },
-            { id: 'proyectos',     label: 'Por cuenta analítica', icon: FolderKanban },
             { id: 'roles',         label: 'Por Rol',          icon: Users },
             { id: 'tendencia',     label: 'Tendencia',        icon: BarChart2 },
             { id: 'alertas',       label: 'Alertas',          icon: AlertTriangle, badge: pendingAlerts.length },
@@ -492,53 +466,6 @@ export const QuestionnaireSendStatsPage = () => {
               <span className="w-36 text-center">Progreso</span>
               <span className="w-4" />
             </div>
-          </div>
-        )}
-
-        {/* ── Por Proyecto ──────────────────────────────────────────────────── */}
-        {activeTab === 'proyectos' && (
-          <div>
-            <div className="flex items-center justify-end px-5 py-3 border-b border-gray-50">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input
-                  className="h-8 pl-8 pr-3 text-sm border border-gray-200 rounded-lg w-52 focus:outline-none focus:ring-2 focus:ring-[#008C3C]/20"
-                  placeholder="Buscar cuenta analítica..."
-                  value={pSearch}
-                  onChange={e => setPSearch(e.target.value)}
-                />
-              </div>
-            </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-gray-400 bg-gray-50/70 border-b border-gray-100">
-                  <th className="text-left px-5 py-3 font-medium">Cuenta analítica</th>
-                  <th className="text-right px-3 py-3 font-medium">Enviados</th>
-                  <th className="text-right px-3 py-3 font-medium text-green-600">Respondieron</th>
-                  <th className="text-right px-3 py-3 font-medium text-orange-500">Pendientes</th>
-                  <th className="px-5 py-3 font-medium w-44">Cumplimiento</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filteredP.length === 0 && (
-                  <tr><td colSpan={5} className="text-center py-12 text-sm text-gray-400">Sin resultados</td></tr>
-                )}
-                {filteredP.map(row => (
-                  <tr key={row.projectId} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-3.5 font-medium text-gray-900">{row.projectName}</td>
-                    <td className="px-3 py-3.5 text-right text-gray-600 tabular-nums">{row.assigned}</td>
-                    <td className="px-3 py-3.5 text-right text-green-700 font-semibold tabular-nums">{row.completed}</td>
-                    <td className="px-3 py-3.5 text-right text-orange-600 tabular-nums">{row.assigned - row.completed}</td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <RateBar rate={row.rate} />
-                        <span className="text-xs font-semibold text-gray-600 w-9 text-right shrink-0">{row.rate}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         )}
 
