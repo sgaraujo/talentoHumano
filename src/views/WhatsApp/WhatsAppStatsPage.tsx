@@ -389,10 +389,10 @@ export const WhatsAppStatsPage = () => {
           explainKey="leidos" onExplain={setExplainKey}
         />
         <KpiCard
-          icon={XCircle} label="Fallidos" value={(funnelStats.total - funnelStats.accepted).toLocaleString('es-CO')}
+          icon={XCircle} label="Fallidos" value={(filteredDistribution.failed + filteredDistribution.skipped).toLocaleString('es-CO')}
           sub={topFailReason ? topFailReason.slice(0, 40) + (topFailReason.length > 40 ? '…' : '') : 'sin errores recientes'}
-          iconBg={funnelStats.total - funnelStats.accepted > 0 ? 'bg-red-500' : 'bg-gray-400'}
-          valueColor={funnelStats.total - funnelStats.accepted > 0 ? 'text-red-600' : 'text-gray-900'}
+          iconBg={filteredDistribution.failed + filteredDistribution.skipped > 0 ? 'bg-red-500' : 'bg-gray-400'}
+          valueColor={filteredDistribution.failed + filteredDistribution.skipped > 0 ? 'text-red-600' : 'text-gray-900'}
           explainKey="fallidos" onExplain={setExplainKey}
         />
       </div>
