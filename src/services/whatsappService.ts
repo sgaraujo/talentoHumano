@@ -75,6 +75,23 @@ export function listenInbox(
   return onSnapshot(q, snap => cb(snap.docs.map(toConv)));
 }
 
+// ── Conversations — paginate older ───────────────────────────────────────────
+export async function fetchOlderConversations(
+  numberId: string,
+  before: Date,
+  pageSize = 50
+): Promise<WaConversation[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, `${FIRESTORE_COLLECTIONS.whatsappNumbers}/${numberId}/conversations`),
+      orderBy("lastMessageAt", "desc"),
+      startAfter(before),
+      limit(pageSize)
+    )
+  );
+  return snap.docs.map(toConv);
+}
+
 // ── Single conversation ──────────────────────────────────────────────────────
 export function listenConversation(
   numberId: string,

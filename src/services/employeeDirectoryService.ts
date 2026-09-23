@@ -108,7 +108,10 @@ export async function getEmployeeDirectoryUsers(): Promise<User[]> {
           ?? legacyUser?.personalData?.ageRange ?? legacyUser?.personalData?.rangoEdad,
         gender: employee.gender ?? legacyUser?.personalData?.gender,
       },
-      location: { corporatePhone: employee.corporatePhone, city: employee.residence?.city },
+      location: {
+        corporatePhone: employee.corporatePhone, city: employee.residence?.city,
+        corporateEmail: employee.corporateEmail, personalEmail: employee.personalEmail,
+      },
       contractInfo: {
         assignment: assignments[0] ?? {},
         contract: { startDate: primaryRelationship?.startDate, contractType: primaryRelationship?.contractType },

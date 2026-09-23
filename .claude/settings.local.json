@@ -33,7 +33,8 @@
       "Bash(rm -f scripts/dedupeMovements.cjs scripts/scanDupMovements.cjs)",
       "Bash(node scripts/diffMovVsEmp.cjs)",
       "Bash(node scripts/investigate9.cjs)",
-      "Bash(node scripts/fix9cases.cjs)"
+      "Bash(node scripts/fix9cases.cjs)",
+      "Bash(node -e *)"
     ],
     "additionalDirectories": [
       "\\tmp"

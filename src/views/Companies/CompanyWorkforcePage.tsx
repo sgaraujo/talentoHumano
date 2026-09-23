@@ -62,6 +62,11 @@ export function CompanyWorkforcePage() {
   };
   useEffect(() => { load(); }, [companyId]);
   const active = useMemo(() => data?.people.filter(item => item.status === 'active') ?? [], [data]);
+  // Para conteos de headcount por cuenta analítica (resumen y pestaña de
+  // cuentas) los aprendices SENA no cuentan, igual que en "Personas activas".
+  // Siguen apareciendo en Personas/Nómina/Calidad de datos porque siguen
+  // siendo relaciones laborales reales que hay que gestionar.
+  const activeHeadcount = useMemo(() => active.filter(item => !item.isApprentice), [active]);
   const filtered = useMemo(() => active.filter(item => {
     const term = search.trim().toLowerCase();
     return !term || [item.fullName, item.documentNumber, item.projectName, item.analyticalAccount, item.position, item.area].some(value => value?.toLowerCase().includes(term));
@@ -174,7 +179,7 @@ export function CompanyWorkforcePage() {
       <div className="flex gap-1 p-2 border-b overflow-x-auto">{tabs.map(([value,label]) => <button key={value} onClick={() => setTab(value)} className={`px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap ${tab === value ? 'bg-[#008C3C] text-white' : 'text-gray-500 hover:bg-gray-50'}`}>{label}</button>)}</div>
 
       {tab === 'summary' && <div className="p-5 grid lg:grid-cols-3 gap-4">
-        <SummaryCard title="Distribución por cuenta analítica" rows={unique(active.map(item => item.projectName || item.analyticalAccount)).map(name => [name, new Set(active.filter(item => (item.projectName || item.analyticalAccount) === name).map(item => item.employeeId)).size] as [string, number])} empty="No hay cuentas analíticas asociadas" />
+        <SummaryCard title="Distribución por cuenta analítica" rows={unique(activeHeadcount.map(item => item.projectName || item.analyticalAccount)).map(name => [name, new Set(activeHeadcount.filter(item => (item.projectName || item.analyticalAccount) === name).map(item => item.employeeId)).size] as [string, number])} empty="No hay cuentas analíticas asociadas" />
         <SummaryCard title="Cargos principales" rows={unique(active.map(item => item.position)).map(name => [name, new Set(active.filter(item => item.position === name).map(item => item.employeeId)).size] as [string, number]).sort((a,b) => b[1]-a[1]).slice(0,8)} empty="No hay cargos registrados" />
         <SummaryCard title="Regionales" rows={unique(active.map(item => item.regional)).map(name => [name, new Set(active.filter(item => item.regional === name).map(item => item.employeeId)).size] as [string, number])} empty="No hay regionales registradas" />
       </div>}
@@ -248,7 +253,7 @@ export function CompanyWorkforcePage() {
 
       {tab === 'people' && <div><div className="p-4 border-b flex flex-col sm:flex-row gap-3 sm:items-center"><div className="relative flex-1"><Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><Input className="pl-9" value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar persona, cédula, cargo o cuenta analítica…" /></div><Button variant="outline" size="sm" disabled={!filtered.length} onClick={handleExportPeople} className="flex-shrink-0"><Download className="w-4 h-4 mr-1.5" />Exportar Excel</Button></div><PeopleTable rows={filtered} onOpen={setEmployeeId} /></div>}
 
-      {tab === 'projects' && <div className="p-5 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{data.projects.map(project => { const count = new Set(active.filter(item => item.projectName?.toLowerCase() === project.name.toLowerCase()).map(item => item.employeeId)).size; return <div key={project.id} className="rounded-xl border p-4"><div className="flex justify-between gap-2"><p className="font-semibold text-gray-800">{project.name}</p><span className={`h-fit text-[10px] px-2 py-1 rounded-full ${project.status === 'activo' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{project.status}</span></div><p className="text-sm text-gray-500 mt-3"><Users className="inline w-4 h-4 mr-1" />{count} personas activas</p><p className="text-xs text-gray-400 mt-1">{project.area || project.sede || 'Sin clasificación'}</p></div>; })}{!data.projects.length && <p className="text-gray-400">No hay cuentas analíticas vinculadas.</p>}</div>}
+      {tab === 'projects' && <div className="p-5 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{data.projects.map(project => { const count = new Set(activeHeadcount.filter(item => item.projectName?.toLowerCase() === project.name.toLowerCase()).map(item => item.employeeId)).size; return <div key={project.id} className="rounded-xl border p-4"><div className="flex justify-between gap-2"><p className="font-semibold text-gray-800">{project.name}</p><span className={`h-fit text-[10px] px-2 py-1 rounded-full ${project.status === 'activo' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{project.status}</span></div><p className="text-sm text-gray-500 mt-3"><Users className="inline w-4 h-4 mr-1" />{count} personas activas</p><p className="text-xs text-gray-400 mt-1">{project.area || project.sede || 'Sin clasificación'}</p></div>; })}{!data.projects.length && <p className="text-gray-400">No hay cuentas analíticas vinculadas.</p>}</div>}
 
       {tab === 'payroll' && canSeePayroll && <div className="p-5 space-y-5">
         <div className="rounded-xl border border-green-200 bg-green-50 p-4 flex gap-3"><Banknote className="w-5 h-5 text-green-700" /><div><p className="font-semibold text-green-800">Costo salarial mensual estimado</p><p className="text-xs text-green-700 mt-1">Calculado con las relaciones activas y la última información importada. No incluye prestaciones ni aportes patronales.</p></div></div>

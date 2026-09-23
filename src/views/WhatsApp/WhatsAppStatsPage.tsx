@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   RefreshCw, Loader2, MessageCircle, CheckCircle2, XCircle, AlertTriangle,
-  TrendingUp, Search, ChevronDown, ChevronUp, Eye, MessagesSquare, Inbox,
+  TrendingUp, Search, ChevronDown, ChevronUp, Eye,
   Filter, Info, Download,
 } from 'lucide-react';
 import {
@@ -39,6 +39,17 @@ const KPI_EXPLANATIONS: Record<string, KpiExplanation> = {
     description: 'Cantidad de campañas de WhatsApp que cumplen los filtros aplicados (fecha, empresa, estado), sobre el total de campañas registradas.',
     source: 'Documentos de whatsapp/data/campaigns que pasan los filtros.',
   },
+  enviados: {
+    title: 'Enviados',
+    description: 'Total de destinatarios registrados en las campañas que cumplen los filtros aplicados — es el punto de partida del embudo (100%) e incluye a todos los que se intentó contactar, sin importar el resultado final.',
+    source: 'Documentos de whatsapp/data/campaigns/{id}/recipients que pasan los filtros.',
+  },
+  aceptados: {
+    title: 'Aceptados',
+    formula: 'aceptados ÷ enviados × 100',
+    description: 'De los enviados, cuántos fueron aceptados por Meta para su envío. "Aceptado" solo confirma que Meta recibió la solicitud — no garantiza que el mensaje haya llegado al teléfono; incluye también a los que luego fallaron en la entrega.',
+    source: 'Campo status = "sent" del destinatario.',
+  },
   entrega: {
     title: 'Tasa de entrega',
     formula: 'entregados ÷ aceptados por Meta × 100',
@@ -55,6 +66,22 @@ const KPI_EXPLANATIONS: Record<string, KpiExplanation> = {
     title: 'Fallidos',
     description: 'Mensajes que no se pudieron enviar (rechazados por Meta al intentarlo) u omitidos (destinatario inválido o duplicado antes de intentar el envío), más los que Meta aceptó pero luego reportó como fallidos en la entrega.',
     source: 'Destinatarios con status = "failed" o "skipped", o deliveryStatus = "failed" reportado por el webhook.',
+  },
+  entregado_sin_leer: {
+    title: 'Entregado sin leer',
+    description: 'Mensajes que Meta confirmó como entregados al teléfono del destinatario, pero que todavía no tienen doble check azul de lectura. Puede ser que el destinatario aún no lo haya visto, o que tenga desactivadas las confirmaciones de lectura (en ese caso nunca pasará a "Leído" aunque sí lo haya leído).',
+    source: 'deliveryStatus = "delivered" del destinatario, reportado por el webhook de WhatsApp.',
+  },
+  pendientes: {
+    title: 'Pendientes',
+    formula: 'aceptados − entregados − fallidos en entrega',
+    description: 'Mensajes que Meta ya aceptó para enviar pero de los que aún no llega confirmación (ni de entrega exitosa ni de fallo). Suele deberse a envíos muy recientes (el webhook todavía no llega), al teléfono del destinatario apagado o sin conexión, o a que el webhook de estado no se procesó. Un número alto y sostenido en el tiempo suele indicar un problema de webhooks, no mensajes realmente "en camino".',
+    source: 'Destinatarios con status = "sent" cuyo deliveryStatus no es "delivered", "read" ni "failed".',
+  },
+  omitidos: {
+    title: 'Omitidos',
+    description: 'Destinatarios que nunca se intentaron enviar porque se detectaron como inválidos o duplicados antes de contactar a Meta (por ejemplo, número mal formado o repetido en la misma campaña).',
+    source: 'Destinatarios con status = "skipped".',
   },
 };
 
@@ -224,10 +251,10 @@ export const WhatsAppStatsPage = () => {
   const funnelSteps = useMemo(() => {
     const { total, accepted, delivered, read } = funnelStats;
     return [
-      { label: 'Enviados', value: total, ofTotal: 100 },
-      { label: 'Aceptados', value: accepted, ofTotal: rate(accepted, total) },
-      { label: 'Entregados', value: delivered, ofTotal: rate(delivered, total) },
-      { label: 'Leídos', value: read, ofTotal: rate(read, total) },
+      { label: 'Enviados', value: total, ofTotal: 100, explainKey: 'enviados' },
+      { label: 'Aceptados', value: accepted, ofTotal: rate(accepted, total), explainKey: 'aceptados' },
+      { label: 'Entregados', value: delivered, ofTotal: rate(delivered, total), explainKey: 'entrega' },
+      { label: 'Leídos', value: read, ofTotal: rate(read, total), explainKey: 'leidos' },
     ];
   }, [funnelStats]);
 
@@ -282,11 +309,11 @@ export const WhatsAppStatsPage = () => {
   );
 
   const pieData = [
-    { name: 'Leídos', value: filteredDistribution.read, fill: '#008C3C' },
-    { name: 'Entregado sin leer', value: Math.max(0, filteredDistribution.delivered - filteredDistribution.read), fill: '#3b82f6' },
-    { name: 'Pendientes', value: Math.max(0, filteredDistribution.sent - filteredDistribution.delivered - filteredDistribution.deliveryFailed), fill: '#f59e0b' },
-    { name: 'Fallidos', value: filteredDistribution.failed, fill: '#ef4444' },
-    { name: 'Omitidos', value: filteredDistribution.skipped, fill: '#9ca3af' },
+    { name: 'Leídos', value: filteredDistribution.read, fill: '#008C3C', explainKey: 'leidos' },
+    { name: 'Entregado sin leer', value: Math.max(0, filteredDistribution.delivered - filteredDistribution.read), fill: '#3b82f6', explainKey: 'entregado_sin_leer' },
+    { name: 'Pendientes', value: Math.max(0, filteredDistribution.sent - filteredDistribution.delivered - filteredDistribution.deliveryFailed), fill: '#f59e0b', explainKey: 'pendientes' },
+    { name: 'Fallidos', value: filteredDistribution.failed, fill: '#ef4444', explainKey: 'fallidos' },
+    { name: 'Omitidos', value: filteredDistribution.skipped, fill: '#9ca3af', explainKey: 'omitidos' },
   ].filter(d => d.value > 0);
   const pieTotal = pieData.reduce((s, d) => s + d.value, 0);
 
@@ -407,7 +434,11 @@ export const WhatsAppStatsPage = () => {
           <div className="space-y-2.5">
             {funnelSteps.map((step, i) => (
               <div key={step.label} className="flex items-center gap-3">
-                <span className="w-24 shrink-0 text-xs font-medium text-gray-500 text-right">{step.label}</span>
+                <button type="button" onClick={() => setExplainKey(step.explainKey)}
+                  className="w-24 shrink-0 flex items-center justify-end gap-1 text-xs font-medium text-gray-500 hover:text-[#00a884] group">
+                  {step.label}
+                  <Info className="w-3 h-3 text-gray-300 group-hover:text-[#00a884]" />
+                </button>
                 <div className="flex-1 h-8 bg-gray-50 rounded-lg overflow-hidden relative">
                   <div className="h-full rounded-lg flex items-center px-3 transition-all"
                     style={{ width: `${Math.max(step.ofTotal, 3)}%`, background: 'linear-gradient(90deg, #00a884, #22c55e)', opacity: 1 - i * 0.08 }}>
@@ -479,16 +510,18 @@ export const WhatsAppStatsPage = () => {
               </ResponsiveContainer>
               <div className="w-full space-y-2 mt-2">
                 {pieData.map(entry => (
-                  <div key={entry.name} className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-gray-500">
+                  <button type="button" key={entry.name} onClick={() => setExplainKey(entry.explainKey)}
+                    className="flex items-center justify-between text-xs w-full hover:bg-gray-50 rounded-lg px-1.5 py-0.5 -mx-1.5 group">
+                    <span className="flex items-center gap-2 text-gray-500 group-hover:text-gray-700">
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.fill }} />
                       {entry.name}
+                      <Info className="w-3 h-3 text-gray-300 group-hover:text-[#00a884]" />
                     </span>
                     <span className="font-semibold text-gray-800">
                       {entry.value.toLocaleString('es-CO')}
                       <span className="text-gray-400 font-normal ml-1">({Math.round((entry.value / pieTotal) * 100)}%)</span>
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -524,26 +557,6 @@ export const WhatsAppStatsPage = () => {
           )}
         </div>
       )}
-
-      {/* ── Conversaciones — resumen rápido ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-[#00a884]/10"><MessagesSquare className="w-4 h-4 text-[#00a884]" /></div>
-          <div><p className="text-lg font-bold text-gray-900">{conversationStats.total}</p><p className="text-[11px] text-gray-400">Conversaciones</p></div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-blue-50"><Inbox className="w-4 h-4 text-blue-500" /></div>
-          <div><p className="text-lg font-bold text-gray-900">{conversationStats.open}</p><p className="text-[11px] text-gray-400">Abiertas</p></div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-gray-100"><MessageCircle className="w-4 h-4 text-gray-500" /></div>
-          <div><p className="text-lg font-bold text-gray-900">{conversationStats.closed}</p><p className="text-[11px] text-gray-400">Cerradas</p></div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-orange-50"><AlertTriangle className="w-4 h-4 text-orange-500" /></div>
-          <div><p className="text-lg font-bold text-gray-900">{conversationStats.unread}</p><p className="text-[11px] text-gray-400">Mensajes sin leer</p></div>
-        </div>
-      </div>
 
       {/* ── Tabs ── */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">

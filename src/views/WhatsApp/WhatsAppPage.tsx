@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
   listenNumbers, listenInbox, listenConversation,
-  listenMessages, fetchOlderMessages, markConversationRead,
+  listenMessages, fetchOlderMessages, fetchOlderConversations, markConversationRead,
   isMetaWindowOpen,
 } from "@/services/whatsappService";
 import type { WaNumber, WaConversation, WaMessage } from "@/models/types/WhatsApp";
@@ -279,21 +279,56 @@ function InboxPanel({
 }: {
   numberId: string; activeConvId: string | null; onSelect: (id: string) => void;
 }) {
-  const [convs, setConvs]   = useState<WaConversation[]>([]);
+  const [convs, setConvs]         = useState<WaConversation[]>([]);
+  const [olderConvs, setOlderConvs] = useState<WaConversation[]>([]);
+  const [hasMore, setHasMore]     = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
+    setOlderConvs([]);
+    setHasMore(true);
     return listenInbox(numberId, setConvs);
   }, [numberId]);
 
+  const allConvs = useMemo(() => {
+    const seen = new Set(convs.map(c => c.id));
+    return [...convs, ...olderConvs.filter(c => !seen.has(c.id))];
+  }, [convs, olderConvs]);
+
   const filtered = useMemo(() =>
-    convs.filter(c => {
+    allConvs.filter(c => {
       if (!search) return true;
       const q = search.toLowerCase();
       return (c.userName?.toLowerCase().includes(q) || c.userAddress.includes(q));
     }),
-    [convs, search]
+    [allConvs, search]
   );
+
+  const loadMore = async () => {
+    const last = allConvs[allConvs.length - 1];
+    if (!last || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const older = await fetchOlderConversations(numberId, last.lastMessageAt);
+      if (older.length === 0) setHasMore(false);
+      setOlderConvs(prev => [...prev, ...older]);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) loadMore();
+  };
+
+  // Al buscar, si no hay coincidencias en lo ya cargado, sigue paginando
+  // hasta encontrar algo o agotar el histórico — de lo contrario una
+  // conversación antigua nunca aparecería aunque exista.
+  useEffect(() => {
+    if (search && filtered.length === 0 && hasMore && !loadingMore) loadMore();
+  }, [search, filtered.length, hasMore, loadingMore]);
 
   return (
     <div className="flex flex-col h-full bg-white border-r border-gray-200">
@@ -316,7 +351,7 @@ function InboxPanel({
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" onScroll={handleListScroll}>
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-400">
             <MessageCircle className="w-8 h-8 opacity-30" />
@@ -355,6 +390,11 @@ function InboxPanel({
               </button>
             );
           })
+        )}
+        {!search && loadingMore && (
+          <div className="flex items-center justify-center py-3 text-gray-400">
+            <Loader2 className="w-4 h-4 animate-spin" />
+          </div>
         )}
       </div>
     </div>

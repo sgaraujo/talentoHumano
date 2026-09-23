@@ -55,16 +55,26 @@ const normalize = (value?: string) => String(value ?? '').toLowerCase().normaliz
   .replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]/g, '');
 
 // Los aprendices SENA no hacen parte de la base ni de los retiros usados para
-// calcular rotación. Se aceptan las variantes históricas del tipo de contrato.
+// calcular rotación, ni del headcount de ninguna empresa/cuenta analítica. Se
+// aceptan las variantes históricas del tipo de contrato, pero en muchos
+// registros antiguos ese campo quedó vacío — en esos casos la cuenta
+// analítica "SENA" es la única señal confiable de que la persona es aprendiz.
 export const isSenaApprentice = (relation: any): boolean => {
   const contractType = normalize(
     relation?.contractType
       ?? relation?.contract?.contractType
       ?? relation?.contractInfo?.contract?.contractType
   );
-  return contractType.includes('aprendizaje')
+  if (contractType.includes('aprendizaje')
     || contractType.includes('aprendizsena')
-    || contractType === 'aprendiz';
+    || contractType === 'aprendiz') return true;
+
+  const projectName = normalize(
+    relation?.projectName
+      ?? relation?.project
+      ?? relation?.contractInfo?.assignment?.project
+  );
+  return projectName.includes('sena');
 };
 
 const matchesCompany = (relation: any, companyName: string, companies: Company[]) => {
@@ -367,7 +377,6 @@ class AnalyticsService {
       const rotacionGeneral    = rotationHeadcount > 0 ? round2((retirosVoluntarios / rotationHeadcount) * 100) : 0;
       const rotacionVoluntaria = rotationHeadcount > 0 ? round2((retirosVoluntarios / rotationHeadcount) * 100) : 0;
       const rotacionEvitable   = rotacionVoluntaria;
-      const tasaVoluntaria     = retiros.length > 0 ? round2((retirosVoluntarios / retiros.length) * 100) : 0;
       const cubrimiento        = retiros.length > 0 ? round2((ingresos.length / retiros.length) * 100) : 0;
 
       const monthlyData: MonthlyData[] = [];
@@ -436,8 +445,6 @@ class AnalyticsService {
         rotacionEvitable,
         headcountBaseLabel,
         headcountBase: rotationHeadcount,
-        tasaVoluntaria,
-        tasaVoluntariaExterna: tasaVoluntaria,
         cubrimiento,
         voluntarioVsInvoluntario: { voluntario: retirosVoluntarios, involuntario: retirosInvoluntarios },
         externoVsInterno: { externo: retirosVoluntarios, interno: retirosInvoluntarios },

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   Building2, Plus, Pencil, Search, Loader2,
-  Users, Upload, Download, BriefcaseBusiness, UserRoundX, AlertTriangle,
+  Users, Upload, Download, BriefcaseBusiness, UserRoundX, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCompanyWorkforceOverview, type CompanyWorkforceOverview } from '@/services/companyWorkforceService';
@@ -67,6 +67,14 @@ export const CompaniesPage = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Al volver a la pestaña (p. ej. tras editar personas o cuentas analíticas
+  // en otra ventana) se recalculan los indicadores para no mostrar datos viejos.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   const regionales = useMemo(() => [...new Set(companies.map(c => c.regional).filter(Boolean))].sort() as string[], [companies]);
   const bases       = useMemo(() => [...new Set(companies.map(c => c.baseDeOperacion).filter(Boolean))].sort() as string[], [companies]);
@@ -129,6 +137,9 @@ export const CompaniesPage = () => {
           <p className="text-[#4A4A4A]/70 mt-1 text-sm">Vista ejecutiva de la estructura laboral por empresa</p>
         </div>
         <div className="flex gap-2">
+          <Button onClick={load} disabled={loading} variant="outline" className="border-gray-200 text-gray-600 hover:bg-gray-50">
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Actualizar
+          </Button>
           <Button onClick={handleExport} variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
             <Download className="w-4 h-4 mr-2" /> Exportar
           </Button>

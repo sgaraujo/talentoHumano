@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import { projectService } from '@/services/projectService';
 import { membershipService } from '@/services/membershipService';
 import { companyService } from '@/services/companyService';
-import { userService } from '@/services/userService';
+import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
 import type { Project } from '@/models/types/Project';
 import type { Company } from '@/models/types/Company';
 
@@ -33,6 +33,20 @@ const PRIORITY_COLOR: Record<string, string> = {
 const EMPTY_FORM = {
   name: '', companyId: '', sede: '', priority: 'media' as Project['priority'],
 };
+
+// Un colaborador puede tener varias asignaciones activas a la vez (multi-
+// empresa/proyecto); `contractInfo.assignment` solo trae la primera, así que
+// para no perderse las demás hay que revisar `_assignments` cuando existe.
+type Assignment = { company?: string; project?: string; location?: string };
+const assignmentsOf = (u: any): Assignment[] =>
+  u._assignments?.length ? u._assignments : [u.contractInfo?.assignment].filter(Boolean);
+
+// Clave de comparación, no de presentación: sin esto, "Claro OT Datafill" y
+// "CLARO OT DATAFILL" (o con tildes distintas) no cruzaban entre Expedientes
+// y el nombre registrado de la cuenta analítica, y la persona simplemente
+// desaparecía de la cuenta aunque sí estuviera asignada.
+const normalize = (value?: string) => String(value ?? '').trim().normalize('NFD')
+  .replace(/[̀-ͯ]/g, '').toLocaleLowerCase('es');
 
 export const ProjectsPage = () => {
   const [projects, setProjects]     = useState<Project[]>([]);
@@ -64,36 +78,46 @@ export const ProjectsPage = () => {
   const [memberVal, setMemberVal]       = useState('');
 
   // ── Load + migrate legacy projects from user profiles ────────────────────
+  // Fuente de personas: "Expedientes y control" (empleados + contratos), la
+  // misma base canónica que Rotación y el Dashboard — no la colección
+  // `identity/data/users`, que queda desincronizada de las altas/bajas reales
+  // y por eso mostraba personas que ya no estaban ni en la empresa ni en la
+  // cuenta analítica.
   const load = async () => {
     setLoading(true);
     try {
-      const [projs, comps, users] = await Promise.all([
+      const [projs, comps, employees] = await Promise.all([
         projectService.getAll(),
         companyService.getAll(),
-        userService.getAll(),
+        getEmployeeDirectoryUsers(),
       ]);
       setCompanies(comps.filter(c => c.active));
+      const users = employees.filter(u => u.role === 'colaborador');
       setAllUsers(users);
 
       // Auto-migrate: create Firestore docs for projects that only exist as
-      // strings in user profiles (contractInfo.assignment.project)
+      // strings in user profiles (contractInfo.assignment.project). Recorre
+      // TODAS las asignaciones activas de cada persona, no solo la primera,
+      // para no perderse cuentas analíticas de quien tiene varias a la vez.
       const knownKeys = new Set(
-        projs.map(p => `${(p.companyName || '').toLowerCase()}::${p.name.toLowerCase()}`)
+        projs.map(p => `${normalize(p.companyName)}::${normalize(p.name)}`)
       );
 
       const toCreate: Array<{ name: string; companyId: string; companyName: string; sede: string }> = [];
       users.forEach(u => {
-        const a = u.contractInfo?.assignment;
-        if (!a?.project?.trim()) return;
-        const key = `${(a.company || '').toLowerCase()}::${a.project.trim().toLowerCase()}`;
-        if (knownKeys.has(key)) return;
-        knownKeys.add(key);
-        const company = comps.find(c => c.name === a.company);
-        toCreate.push({
-          name: a.project.trim(),
-          companyId: company?.id || '',
-          companyName: a.company || '',
-          sede: a.location || '',
+        const assignments = assignmentsOf(u);
+        assignments.forEach(a => {
+          if (!a?.project?.trim()) return;
+          const key = `${normalize(a.company)}::${normalize(a.project)}`;
+          if (knownKeys.has(key)) return;
+          knownKeys.add(key);
+          const company = comps.find(c => normalize(c.name) === normalize(a.company));
+          toCreate.push({
+            name: a.project.trim(),
+            companyId: company?.id || '',
+            companyName: a.company || '',
+            sede: a.location || '',
+          });
         });
       });
 
@@ -141,20 +165,35 @@ export const ProjectsPage = () => {
   }, [projects, filterCompany, filterStatus, search, companies]);
 
   const getCompanyName = (p: Project) =>
-    p.companyName || companies.find(c => c.id === p.companyId)?.name || '—';
+    p.companyName || companies.find(c => c.id === p.companyId)?.name || 'Sin empresa asignada';
+
+  // Jerarquía pedida: Empresa → Cuenta analítica → Personas. Se agrupa aquí
+  // en vez de solo filtrar por empresa, para que la relación quede visible
+  // aunque el filtro esté en "Todas las empresas".
+  const groupedByCompany = useMemo(() => {
+    const map = new Map<string, Project[]>();
+    filtered.forEach(p => {
+      const name = getCompanyName(p);
+      if (!map.has(name)) map.set(name, []);
+      map.get(name)!.push(p);
+    });
+    return [...map.entries()]
+      .map(([name, projs]) => ({ name, projects: [...projs].sort((a, b) => a.name.localeCompare(b.name, 'es')) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }, [filtered, companies]);
 
   const getCompanyUsers = (p: Project) => {
     // If project has companyId, prefer matching by it; fallback to companyName match; else return all
     if (p.companyId) {
       const byId = allUsers.filter(u =>
         u.companyIds?.includes(p.companyId) ||
-        u.contractInfo?.assignment?.company === p.companyName
+        assignmentsOf(u).some(a => normalize(a.company) === normalize(p.companyName))
       );
       if (byId.length > 0) return byId;
     }
     if (p.companyName) {
       const byName = allUsers.filter(u =>
-        u.contractInfo?.assignment?.company === p.companyName
+        assignmentsOf(u).some(a => normalize(a.company) === normalize(p.companyName))
       );
       if (byName.length > 0) return byName;
     }
@@ -168,11 +207,18 @@ export const ProjectsPage = () => {
     return companyUsers;
   };
 
-  // Miembros = usuarios cuyo projectIds incluye el id, O cuyo assignment.project coincide con el nombre
+  // Miembros = usuarios cuyo projectIds incluye el id, O cuyo assignment coincide
+  // en nombre de cuenta analítica Y en empresa. El nombre solo no basta: hay
+  // cuentas con el mismo nombre (ej. "Administración") repetidas en varias
+  // empresas, y sin exigir también la empresa se mezclaban personas de una
+  // empresa con la cuenta analítica de otra completamente distinta.
   const getMembersForProject = (p: Project) => {
     const fromProfiles = allUsers.filter(u =>
       u.projectIds?.includes(p.id) ||
-      (p.name && u.contractInfo?.assignment?.project === p.name)
+      (p.name && assignmentsOf(u).some(a =>
+        normalize(a.project) === normalize(p.name) &&
+        normalize(a.company) === normalize(p.companyName)
+      ))
     ).map(u => ({ userId: u.id, projectId: p.id, role: 'miembro' }));
 
     // Agregar manualmente añadidos vía membersMap que no estén ya en fromProfiles
@@ -309,10 +355,10 @@ export const ProjectsPage = () => {
     try {
       // Remove from project_memberships collection (if exists there)
       await membershipService.removeFromProject(userId, projectId);
-      // Reload users so getMembersForProject recomputes from allUsers
-      const { userService: us } = await import('@/services/userService');
-      const updated = await us.getAll();
-      setAllUsers(updated);
+      // Reload desde Expedientes y control para que getMembersForProject
+      // recalcule con la asignación real, no la colección legada.
+      const updated = await getEmployeeDirectoryUsers();
+      setAllUsers(updated.filter(u => u.role === 'colaborador'));
       toast.success('Persona removida');
     } catch (e: any) {
       toast.error('Error', { description: e.message });
@@ -429,13 +475,24 @@ export const ProjectsPage = () => {
           )}
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map(p => {
+        <div className="space-y-7">
+          {groupedByCompany.map(group => (
+            <div key={group.name}>
+              <div className="flex items-center gap-2 mb-3">
+                <Building2 className="w-4 h-4 text-[#008C3C] flex-shrink-0" />
+                <h2 className="text-sm font-bold text-[#4A4A4A] uppercase tracking-wide">{group.name}</h2>
+                <span className="text-xs text-gray-400">
+                  {group.projects.length} cuenta{group.projects.length !== 1 ? 's' : ''} analítica{group.projects.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="space-y-3">
+          {group.projects.map(p => {
             const isExpanded   = expandedId === p.id;
             const members      = getMembersForProject(p);
             const isAddingHere = addingMember === p.id;
             const available    = availableToAdd(p);
             const companyName  = getCompanyName(p);
+            const sinPersonalActivo = members.length === 0;
 
             return (
               <div key={p.id} className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -461,6 +518,14 @@ export const ProjectsPage = () => {
                       {p.priority && (
                         <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium capitalize ${PRIORITY_COLOR[p.priority] || ''}`}>
                           {p.priority}
+                        </span>
+                      )}
+                      {sinPersonalActivo && (
+                        <span
+                          title="Nadie con contrato vigente está asignado a esta cuenta analítica en Expedientes y control"
+                          className="text-[10px] px-2 py-0.5 rounded-full border font-medium bg-red-50 text-red-600 border-red-200"
+                        >
+                          Sin personal activo
                         </span>
                       )}
                     </div>
@@ -648,6 +713,9 @@ export const ProjectsPage = () => {
               </div>
             );
           })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

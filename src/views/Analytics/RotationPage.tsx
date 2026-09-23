@@ -319,7 +319,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
           </div>
 
           {/* ── Tasas de Rotación ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
             <Card className="group relative border-[#E7E9EE] shadow-sm rounded-xl cursor-help" tabIndex={0}>
               <CardHeader className="pb-1 pt-4 px-4">
                 <CardTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">% Rot. General <CircleHelp className="h-3.5 w-3.5" /></CardTitle>
@@ -361,24 +361,6 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
                   ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.headcountBase}) × 100 = ${metrics.rotacionVoluntaria}%`
                   : 'Sin headcount disponible = 0%'}
                 note={metrics.headcountBaseLabel}
-              />
-            </Card>
-
-            <Card className="group relative border-[#E7E9EE] shadow-sm rounded-xl cursor-help" tabIndex={0}>
-              <CardHeader className="pb-1 pt-4 px-4">
-                <CardTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">Tasa Voluntaria <CircleHelp className="h-3.5 w-3.5" /></CardTitle>
-                <CardDescription className="text-[10px] text-[#8B93A1]">Voluntarios / Total retiros</CardDescription>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
-                <div className="text-xl sm:text-2xl font-bold text-[#14171C] tracking-tight">{metrics.tasaVoluntaria}%</div>
-              </CardContent>
-              <CalculationTooltip
-                title="Cálculo de tasa voluntaria"
-                formula="(Retiros voluntarios ÷ Total de retiros) × 100"
-                operation={metrics.totalRetiros > 0
-                  ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.totalRetiros}) × 100 = ${metrics.tasaVoluntaria}%`
-                  : 'Sin retiros en el período = 0%'}
-                note="Indica qué proporción de todos los retiros fue voluntaria."
               />
             </Card>
 

@@ -17,8 +17,6 @@ export interface RotationMetrics {
   rotacionGeneral: number; // porcentaje
   rotacionVoluntaria: number;
   rotacionEvitable: number;
-  tasaVoluntaria: number;
-  tasaVoluntariaExterna: number;
   cubrimiento: number;
 
   // Base de headcount usada en rotacionGeneral/rotacionVoluntaria (para mostrar

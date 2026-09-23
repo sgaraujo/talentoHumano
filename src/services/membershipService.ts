@@ -10,6 +10,22 @@ class MembershipService {
   private companyCol = FIRESTORE_COLLECTIONS.companyMemberships;
   private projectCol = FIRESTORE_COLLECTIONS.projectMemberships;
 
+  // Cache denormalizado en `identity/data/users/{userId}` para queries rápidas
+  // desde pantallas que aún leen esa colección legada. Cada vez más personas
+  // (las que vienen de Expedientes y control sin cuenta en esa colección) no
+  // tienen ese documento — en ese caso el cache simplemente no aplica, pero
+  // eso no debe tumbar la membresía real, que ya quedó guardada en su propia
+  // colección arriba.
+  private async syncLegacyUserArray(userId: string, field: 'companyIds' | 'projectIds', op: 'union' | 'remove', value: string): Promise<void> {
+    try {
+      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
+        [field]: op === 'union' ? arrayUnion(value) : arrayRemove(value),
+      });
+    } catch (error: any) {
+      if (error?.code !== 'not-found') throw error;
+    }
+  }
+
   // ── Company memberships ───────────────────────────────────────────────────
 
   async addToCompany(userId: string, companyId: string, role: MembershipRole = 'miembro'): Promise<void> {
@@ -29,9 +45,7 @@ class MembershipService {
       });
     }
     // Mantener array en usuario para queries rápidos
-    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
-      companyIds: arrayUnion(companyId),
-    });
+    await this.syncLegacyUserArray(userId, 'companyIds', 'union', companyId);
   }
 
   async removeFromCompany(userId: string, companyId: string): Promise<void> {
@@ -41,9 +55,7 @@ class MembershipService {
         where('companyId', '==', companyId))
     );
     for (const d of snap.docs) await deleteDoc(doc(db, this.companyCol, d.id));
-    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
-      companyIds: arrayRemove(companyId),
-    });
+    await this.syncLegacyUserArray(userId, 'companyIds', 'remove', companyId);
   }
 
   async getUserCompanies(userId: string): Promise<CompanyMembership[]> {
@@ -78,9 +90,7 @@ class MembershipService {
         joinedAt: serverTimestamp(),
       });
     }
-    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
-      projectIds: arrayUnion(projectId),
-    });
+    await this.syncLegacyUserArray(userId, 'projectIds', 'union', projectId);
   }
 
   async removeFromProject(userId: string, projectId: string): Promise<void> {
@@ -90,9 +100,7 @@ class MembershipService {
         where('projectId', '==', projectId))
     );
     for (const d of snap.docs) await deleteDoc(doc(db, this.projectCol, d.id));
-    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
-      projectIds: arrayRemove(projectId),
-    });
+    await this.syncLegacyUserArray(userId, 'projectIds', 'remove', projectId);
   }
 
   async getUserProjects(userId: string): Promise<ProjectMembership[]> {

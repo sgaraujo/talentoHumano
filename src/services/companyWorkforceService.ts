@@ -3,6 +3,7 @@ import { db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '@/config/firestoreCollections';
 import type { Company } from '@/models/types/Company';
 import type { Project } from '@/models/types/Project';
+import { isSenaApprentice } from '@/services/analyticsService';
 
 export interface CompanyWorkforcePerson {
   employeeId: string;
@@ -14,6 +15,7 @@ export interface CompanyWorkforcePerson {
   companyName: string;
   projectName?: string;
   analyticalAccount?: string;
+  contractType?: string;
   position?: string;
   area?: string;
   regional?: string;
@@ -25,6 +27,7 @@ export interface CompanyWorkforcePerson {
   terminationReason?: string;
   terminationCost?: number;
   status: 'active' | 'retired';
+  isApprentice?: boolean;
   payroll?: {
     baseSalary?: number;
     transportAllowance?: number;
@@ -62,6 +65,45 @@ const belongsToCompany = (relation: any, company: Company) => {
   return acceptedNames.includes(normalize(relation.companyName));
 };
 
+const belongsProjectToCompany = (project: any, company: Company) =>
+  project.companyId === company.id || (!!project.companyName && normalize(project.companyName) === normalize(company.name));
+
+interface MetricsRelation {
+  employeeId: string;
+  status: 'active' | 'retired';
+  isApprentice: boolean;
+  identityUserId?: string | null;
+  projectName?: string;
+  analyticalAccount?: string;
+  position?: string;
+  corporateEmail?: string;
+  corporatePhone?: string;
+}
+
+// Única fuente de verdad para los KPI de empresa: la tarjeta en /empresas y el
+// detalle /empresas/:id deben mostrar exactamente los mismos números.
+// Los aprendices SENA no cuentan como headcount (mismo criterio que en
+// Rotación y en el Dashboard de Talento Humano), pero sí siguen contando en
+// "Sin acceso" y "Datos incompletos" porque son relaciones reales que hay
+// que gestionar.
+function computeCompanyMetrics(relations: MetricsRelation[], projects: Array<{ status?: string }>) {
+  const active = relations.filter(item => item.status === 'active');
+  const uniqueActive = new Set(active.filter(item => !item.isApprentice).map(item => item.employeeId));
+  const uniqueRetired = new Set(relations.filter(item => item.status === 'retired').map(item => item.employeeId));
+  return {
+    activePeople: uniqueActive.size,
+    retiredPeople: [...uniqueRetired].filter(id => !uniqueActive.has(id)).length,
+    withoutAccess: new Set(active.filter(item => !item.identityUserId).map(item => item.employeeId)).size,
+    activeProjects: projects.filter(item => item.status === 'activo').length,
+    // "Cuenta analítica" se considera presente con projectName (vinculado al
+    // proyecto/cuenta maestro) O analyticalAccount (texto libre del Excel) —
+    // el expediente muestra analyticalAccount, así que si solo falta
+    // projectName (pendiente de vincular al proyecto) no debe marcarse como
+    // dato faltante para la persona.
+    incompleteRecords: active.filter(item => (!item.projectName && !item.analyticalAccount) || !item.position || !item.corporateEmail || !item.corporatePhone).length,
+  };
+}
+
 export async function getCompanyWorkforce(companyId: string): Promise<CompanyWorkforceSummary> {
   const [companySnap, employeeSnap, employmentSnap, projectSnap] = await Promise.all([
     getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
@@ -89,6 +131,7 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
         companyName: relation.companyName || companyValue.name,
         projectName: relation.projectName,
         analyticalAccount: relation.analyticalAccount,
+        contractType: relation.contractType,
         position: relation.position,
         area: relation.area,
         regional: relation.regional,
@@ -100,35 +143,25 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
         terminationReason: relation.terminationReason,
         terminationCost: relation.terminationCost,
         status: relation.status === 'active' ? 'active' : 'retired',
+        isApprentice: isSenaApprentice(relation),
         payroll: payrollSnap.exists() ? payrollSnap.data() : undefined,
       } as CompanyWorkforcePerson;
     }));
-  const uniqueActive = new Set(people.filter(item => item.status === 'active').map(item => item.employeeId));
-  const uniqueRetired = new Set(people.filter(item => item.status === 'retired').map(item => item.employeeId));
-  const activePeople = people.filter(item => item.status === 'active');
-  const payrollPeople = activePeople.filter((item, index, all) => all.findIndex(value => value.employeeId === item.employeeId) === index);
+  const activePeopleAll = people.filter(item => item.status === 'active');
+  const payrollPeople = activePeopleAll.filter((item, index, all) => all.findIndex(value => value.employeeId === item.employeeId) === index);
   const amount = (value: unknown) => Number(value) || 0;
   const allowanceFields = ['transportAllowance', 'operationalAllowance', 'foodAllowance', 'supportAllowance', 'vehicleAllowance', 'toolsAllowance', 'communicationAllowance'] as const;
   const monthlyBaseSalary = payrollPeople.reduce((total, item) => total + amount(item.payroll?.baseSalary), 0);
   const monthlyAllowances = payrollPeople.reduce((total, item) => total + allowanceFields.reduce((sum, field) => sum + amount(item.payroll?.[field]), 0), 0);
   const monthlySalaryKpi = payrollPeople.reduce((total, item) => total + amount(item.payroll?.salaryKpi), 0);
   const projects = projectSnap.docs.map(item => ({ id: item.id, ...item.data() } as Project))
-    .filter(item => item.companyId === companyId || normalize(item.companyName) === normalize(companyValue.name))
+    .filter(item => belongsProjectToCompany(item, companyValue))
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
   return {
     company: companyValue,
     people,
     projects,
-    activePeople: uniqueActive.size,
-    retiredPeople: [...uniqueRetired].filter(id => !uniqueActive.has(id)).length,
-    withoutAccess: new Set(activePeople.filter(item => !item.identityUserId).map(item => item.employeeId)).size,
-    activeProjects: projects.filter(item => item.status === 'activo').length,
-    // "Cuenta analítica" se considera presente con projectName (vinculado al
-    // proyecto/cuenta maestro) O analyticalAccount (texto libre del Excel) —
-    // el expediente muestra analyticalAccount, así que si solo falta
-    // projectName (pendiente de vincular al proyecto) no debe marcarse como
-    // dato faltante para la persona.
-    incompleteRecords: activePeople.filter(item => (!item.projectName && !item.analyticalAccount) || !item.position || !item.corporateEmail || !item.corporatePhone).length,
+    ...computeCompanyMetrics(people.map(item => ({ ...item, isApprentice: !!item.isApprentice })), projects),
     monthlyBaseSalary,
     monthlyAllowances,
     monthlySalaryKpi,
@@ -152,37 +185,35 @@ export async function getCompanyWorkforceOverview(): Promise<Record<string, Comp
   ]);
   const companies = companiesSnap.docs.map(item => ({ id: item.id, ...item.data() } as Company));
   const employees = new Map(employeeSnap.docs.map(item => [item.id, item.data() as any]));
-  const buckets = new Map(companies.map(company => [company.id, {
-    active: new Set<string>(), withoutAccess: new Set<string>(), incomplete: new Set<string>(),
-  }]));
+  const projects = projectSnap.docs.map(item => item.data() as any);
+  const relationsByCompany = new Map<string, MetricsRelation[]>(companies.map(company => [company.id, []]));
 
   employmentsSnap.docs.forEach(item => {
     const relation = item.data() as any;
-    if (relation.status !== 'active') return;
-    const company = companies.find(value => belongsToCompany(relation, value));
     const employeeId = relation.employeeId || item.ref.parent.parent?.id;
-    if (!company || !employeeId) return;
-    const bucket = buckets.get(company.id)!;
-    bucket.active.add(employeeId);
+    if (!employeeId) return;
     const employee = employees.get(employeeId) ?? {};
-    if (!employee.identityUserId) bucket.withoutAccess.add(employeeId);
-    if (!relation.projectName || !relation.position || !employee.corporateEmail || !employee.corporatePhone) bucket.incomplete.add(employeeId);
-  });
-
-  const activeProjectsByCompany = new Map<string, number>();
-  projectSnap.docs.forEach(item => {
-    const project = item.data() as any;
-    if (project.status !== 'activo' || !project.companyId) return;
-    activeProjectsByCompany.set(project.companyId, (activeProjectsByCompany.get(project.companyId) ?? 0) + 1);
+    const value: MetricsRelation = {
+      employeeId,
+      status: relation.status === 'active' ? 'active' : 'retired',
+      isApprentice: isSenaApprentice(relation),
+      identityUserId: employee.identityUserId,
+      projectName: relation.projectName,
+      analyticalAccount: relation.analyticalAccount,
+      position: relation.position,
+      corporateEmail: employee.corporateEmail,
+      corporatePhone: employee.corporatePhone,
+    };
+    companies.forEach(company => { if (belongsToCompany(relation, company)) relationsByCompany.get(company.id)!.push(value); });
   });
 
   return Object.fromEntries(companies.map(company => {
-    const bucket = buckets.get(company.id)!;
+    const metrics = computeCompanyMetrics(relationsByCompany.get(company.id)!, projects.filter(project => belongsProjectToCompany(project, company)));
     return [company.id, {
-      activePeople: bucket.active.size,
-      activeProjects: activeProjectsByCompany.get(company.id) ?? 0,
-      withoutAccess: bucket.withoutAccess.size,
-      incompleteRecords: bucket.incomplete.size,
+      activePeople: metrics.activePeople,
+      activeProjects: metrics.activeProjects,
+      withoutAccess: metrics.withoutAccess,
+      incompleteRecords: metrics.incompleteRecords,
     }];
   }));
 }

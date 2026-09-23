@@ -273,6 +273,7 @@ export const DashboardPage = () => {
   const demographicAssignmentsOf = (u: any): DashboardAssignment[] => {
     const relationships: DashboardAssignment[] = u._allAssignments?.length ? u._allAssignments : assignmentsOf(u);
     return relationships.filter(relationship => {
+      if (isSenaApprentice(relationship)) return false;
       if (relationship.status !== 'active' && relationship.status !== 'retired') return false;
       if (demographicCutoff >= now) {
         if (relationship.status !== 'active') return false;
@@ -353,11 +354,14 @@ export const DashboardPage = () => {
 
   // ── Company headcount (for cards) ──────────────────────────────────────────
   // Se cuenta cada colaborador una sola vez por empresa (Set de ids), aunque
-  // tenga varias asignaciones activas en ella.
+  // tenga varias asignaciones activas en ella. Los aprendices SENA no cuentan
+  // como headcount (igual criterio que "Colaboradores activos" y Rotación).
   const companyHeadcount = useMemo(() => {
     const map = new Map<string, Set<string>>();
     allUsers.filter(u => u.role === 'colaborador').forEach(u => {
-      const companiesForUser = new Set(assignmentsOf(u).map(a => a.company?.trim()).filter(Boolean) as string[]);
+      const companiesForUser = new Set(
+        assignmentsOf(u).filter(a => !isSenaApprentice(a)).map(a => a.company?.trim()).filter(Boolean) as string[]
+      );
       companiesForUser.forEach(c => {
         if (!map.has(c)) map.set(c, new Set());
         map.get(c)!.add(u.id);
@@ -670,7 +674,7 @@ export const DashboardPage = () => {
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-2xl font-bold text-[#14171C] leading-none">{project.count}</p>
-                      <p className="mt-1 text-[10px] text-[#8B93A1]">aprendiz{project.count === 1 ? '' : 'es'}</p>
+                      <p className="mt-1 text-[10px] text-[#8B93A1]">{project.count === 1 ? 'aprendiz' : 'aprendices'}</p>
                     </div>
                   </div>
                 </div>

@@ -198,6 +198,9 @@ export const RolesPage = () => {
 
     // Mapa final: email normalizado → UserRow
     const result = new Map<string, UserRow>();
+    // Correos de platform_roles ya vinculados a un empleado por una vía
+    // alterna (ver más abajo) — para no volver a crearlos como fila fantasma.
+    const matchedRoleEmails = new Set<string>();
 
     // 1. Cargar desde Expedientes y control (empleados + contratos) — misma
     // fuente canónica que el resto de la app, deduplicando por email.
@@ -212,19 +215,36 @@ export const RolesPage = () => {
     });
     empMap.forEach((u, key) => {
       const legacy = legacyByEmail.get(key);
+      // El rol de plataforma se pudo asignar con un correo distinto al que
+      // hoy usa Expedientes como principal (corporativo vs. personal, o el
+      // correo legado de `identity/data/users`) — se prueban todas las
+      // variantes conocidas para no mostrar "Sin acceso" a quien sí lo tiene.
+      const candidateEmails = [
+        key,
+        (u.location?.corporateEmail ?? '').toLowerCase().trim(),
+        (u.location?.personalEmail ?? '').toLowerCase().trim(),
+        (legacy?.email ?? '').toLowerCase().trim(),
+      ].filter(Boolean);
+      let platformUser: PlatformUser | undefined;
+      for (const email of candidateEmails) {
+        const match = roleMap.get(email);
+        if (match) { platformUser = match; matchedRoleEmails.add(email); break; }
+      }
       result.set(key, {
         userId:       legacy?.id || '',
         email:        u.email,
         fullName:     u.fullName || legacy?.fullName || '',
         userRole:     legacy?.role ?? 'colaborador',
-        platformUser: roleMap.get(key),
+        platformUser,
       });
     });
 
     // 2. Agregar usuarios que solo existen en platform_roles (sin expediente de
     // empleado) — evita que alguien con acceso ya otorgado se vuelva imposible
     // de encontrar/editar solo porque no está en Expedientes (ej. un externo).
+    // Se excluyen los correos ya vinculados en el paso 1 por una vía alterna.
     roleMap.forEach((r, key) => {
+      if (matchedRoleEmails.has(key)) return;
       if (!result.has(key)) {
         const legacy = legacyByEmail.get(key);
         result.set(key, {
@@ -487,7 +507,7 @@ export const RolesPage = () => {
 
               return (
                 <div
-                  key={row.userId}
+                  key={row.email}
                   className="grid grid-cols-12 px-5 py-3.5 items-center hover:bg-gray-50/60 transition-colors group cursor-pointer"
                   onClick={() => openAssign(row)}
                 >
