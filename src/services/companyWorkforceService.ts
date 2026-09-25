@@ -65,6 +65,22 @@ const belongsToCompany = (relation: any, company: Company) => {
   return acceptedNames.includes(normalize(relation.companyName));
 };
 
+// Ejecuta `fn` sobre `items` con un máximo de `limit` promesas en vuelo, para
+// no disparar miles de lecturas a la vez (Firestore responde "Too many
+// outstanding requests" en empresas grandes como INTEEGRA).
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 const belongsProjectToCompany = (project: any, company: Company) =>
   project.companyId === company.id || (!!project.companyName && normalize(project.companyName) === normalize(company.name));
 
@@ -116,11 +132,14 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
   const companyValue = { id: company.id, ...company.data() } as Company;
   const employees = new Map(employeeSnap.docs.map(item => [item.id, item.data() as any]));
   const companyRelations = employmentSnap.docs.filter(item => belongsToCompany(item.data(), companyValue));
-  const people = await Promise.all(companyRelations.map(async item => {
+  const people = await mapWithConcurrency(companyRelations, 20, async item => {
       const data = item.data();
       const relation = { id: item.id, ...data, employeeId: data.employeeId || item.ref.parent.parent?.id } as any;
       const employee = employees.get(relation.employeeId) ?? {};
-      const payrollSnap = await getDoc(doc(item.ref, FIRESTORE_SUBCOLLECTIONS.employeePrivateData, 'payroll'));
+      // La nómina solo se usa para vínculos activos; no se lee la de retirados.
+      const payrollSnap = relation.status === 'active'
+        ? await getDoc(doc(item.ref, FIRESTORE_SUBCOLLECTIONS.employeePrivateData, 'payroll')).catch(() => null)
+        : null;
       return {
         employeeId: relation.employeeId,
         documentNumber: employee.documentNumber || relation.employeeId,
@@ -144,9 +163,9 @@ export async function getCompanyWorkforce(companyId: string): Promise<CompanyWor
         terminationCost: relation.terminationCost,
         status: relation.status === 'active' ? 'active' : 'retired',
         isApprentice: isSenaApprentice(relation),
-        payroll: payrollSnap.exists() ? payrollSnap.data() : undefined,
+        payroll: payrollSnap?.exists() ? payrollSnap.data() : undefined,
       } as CompanyWorkforcePerson;
-    }));
+    });
   const activePeopleAll = people.filter(item => item.status === 'active');
   const payrollPeople = activePeopleAll.filter((item, index, all) => all.findIndex(value => value.employeeId === item.employeeId) === index);
   const amount = (value: unknown) => Number(value) || 0;
