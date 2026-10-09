@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, CheckCircle2, ClipboardList, User, Mail } from "lucide-react";
+import { Loader2, CheckCircle2, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { functions } from "@/config/firebase";
 import { httpsCallable } from "firebase/functions";
@@ -33,41 +33,38 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
   );
 }
 
-type Step = "identity" | "form" | "done" | "already" | "unavailable";
+type Step = "form" | "done" | "already" | "unavailable";
 
 export const PublicFormPage = () => {
   const { questionnaireId } = useParams<{ questionnaireId: string }>();
 
   const [loadingQ, setLoadingQ] = useState(true);
   const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(null);
-  const [step, setStep] = useState<Step>("identity");
-
-  // Identity
-  const [name, setName]   = useState("");
-  const [email, setEmail] = useState("");
+  const [step, setStep] = useState<Step>("form");
 
   // Answers
-  const [answers, setAnswers]     = useState<Record<string, any>>({});
+  const [answers, setAnswers] = useState<Record<string, any>>({});
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!questionnaireId) { setLoadingQ(false); setStep("unavailable"); return; }
+    if (!questionnaireId) {
+      setLoadingQ(false);
+      setStep("unavailable");
+      return;
+    }
+
     httpsCallable(functions, "getPublicQuestionnaire")({ questionnaireId })
       .then((res: any) => {
         const data = res?.data;
-        if (!data?.id) { setStep("unavailable"); return; }
+        if (!data?.id) {
+          setStep("unavailable");
+          return;
+        }
         setQuestionnaire(data as Questionnaire);
       })
       .catch(() => setStep("unavailable"))
       .finally(() => setLoadingQ(false));
   }, [questionnaireId]);
-
-  const handleIdentitySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) { toast.error("Escribe tu nombre"); return; }
-    if (!email.trim() || !email.includes("@")) { toast.error("Ingresa un correo válido"); return; }
-    setStep("form");
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,8 +84,6 @@ export const PublicFormPage = () => {
     try {
       await httpsCallable(functions, "submitPublicFormResponse")({
         questionnaireId,
-        name: name.trim(),
-        email: email.toLowerCase().trim(),
         answers,
       });
       setStep("done");
@@ -227,7 +222,6 @@ export const PublicFormPage = () => {
       }).length
     : 0;
 
-  // ── Loading ──────────────────────────────────────────────────────────
   if (loadingQ) {
     return (
       <div className="min-h-screen flex flex-col">
@@ -239,7 +233,6 @@ export const PublicFormPage = () => {
     );
   }
 
-  // ── No disponible ────────────────────────────────────────────────────────
   if (step === "unavailable") {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
@@ -260,7 +253,6 @@ export const PublicFormPage = () => {
     );
   }
 
-  // ── Ya respondió ────────────────────────────────────────────────────────
   if (step === "already") {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
@@ -272,7 +264,7 @@ export const PublicFormPage = () => {
             </div>
             <h2 className="text-2xl font-bold text-[#4A4A4A] mb-2">Ya respondiste</h2>
             <p className="text-gray-500 text-sm">
-              El correo <strong>{email}</strong> ya completó este formulario anteriormente.
+              Este formulario ya fue completado anteriormente.
             </p>
           </div>
         </div>
@@ -281,7 +273,6 @@ export const PublicFormPage = () => {
     );
   }
 
-  // ── Completado ─────────────────────────────────────────────────────────
   if (step === "done") {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
@@ -291,7 +282,7 @@ export const PublicFormPage = () => {
             <div className="w-20 h-20 rounded-full bg-[#008C3C]/10 flex items-center justify-center mx-auto mb-5">
               <CheckCircle2 className="w-10 h-10 text-[#008C3C]" />
             </div>
-            <h2 className="text-2xl font-bold text-[#4A4A4A] mb-2">¡Gracias, {name.split(" ")[0]}!</h2>
+            <h2 className="text-2xl font-bold text-[#4A4A4A] mb-2">¡Gracias!</h2>
             <p className="text-gray-600 font-medium mb-1">Tus respuestas fueron guardadas correctamente.</p>
             <p className="text-gray-400 text-sm">Puedes cerrar esta ventana.</p>
           </div>
@@ -301,63 +292,6 @@ export const PublicFormPage = () => {
     );
   }
 
-  // ── Pantalla de identidad ─────────────────────────────────────────────────
-  if (step === "identity") {
-    return (
-      <div className="min-h-screen flex flex-col bg-gray-50">
-        <Header />
-        <div className="flex-1 flex items-center justify-center p-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 max-w-md w-full">
-            <div className="text-center mb-6">
-              <div className="w-14 h-14 rounded-full bg-[#008C3C]/10 flex items-center justify-center mx-auto mb-3">
-                <ClipboardList className="w-7 h-7 text-[#008C3C]" />
-              </div>
-              <h2 className="text-xl font-bold text-[#4A4A4A]">{questionnaire?.title}</h2>
-              {questionnaire?.description && (
-                <p className="text-gray-500 text-sm mt-1">{questionnaire.description}</p>
-              )}
-            </div>
-
-            <form onSubmit={handleIdentitySubmit} className="space-y-4">
-              <div>
-                <Label className="text-sm font-medium text-gray-700 flex items-center gap-1.5 mb-1">
-                  <User className="w-3.5 h-3.5" /> Nombre completo
-                </Label>
-                <Input
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  placeholder="Ej: María García"
-                  className="border-gray-200 focus-visible:ring-[#008C3C]"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-gray-700 flex items-center gap-1.5 mb-1">
-                  <Mail className="w-3.5 h-3.5" /> Correo electrónico
-                </Label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="correo@ejemplo.com"
-                  className="border-gray-200 focus-visible:ring-[#008C3C]"
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full bg-[#008C3C] hover:bg-[#006B2E] text-white mt-2"
-              >
-                Comenzar formulario
-              </Button>
-            </form>
-          </div>
-        </div>
-        <footer className="py-4 text-center text-xs text-gray-400">© {new Date().getFullYear()} Inteegrados</footer>
-      </div>
-    );
-  }
-
-  // ── Formulario ────────────────────────────────────────────────────────────
   if (!questionnaire) return null;
 
   return (
@@ -365,7 +299,6 @@ export const PublicFormPage = () => {
       <Header />
 
       <div className="flex-1 max-w-2xl mx-auto w-full p-4 pb-8 space-y-4">
-        {/* Meta */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h2 className="text-lg font-bold text-[#4A4A4A] mb-1">{questionnaire.title}</h2>
           {questionnaire.description && (
@@ -375,12 +308,8 @@ export const PublicFormPage = () => {
           <p className="text-xs text-gray-400 mt-1.5">
             {answeredCount} de {questionnaire.questions.length} respondidas
           </p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Respondiendo como: <strong className="text-gray-600">{name}</strong> · {email}
-          </p>
         </div>
 
-        {/* Preguntas */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {[...questionnaire.questions]
             .sort((a, b) => a.order - b.order)
