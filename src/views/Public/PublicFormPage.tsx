@@ -227,7 +227,7 @@ export const PublicFormPage = () => {
       }).length
     : 0;
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // ── Loading ──────────────────────────────────────────────────────────
   if (loadingQ) {
     return (
       <div className="min-h-screen flex flex-col">
@@ -239,7 +239,7 @@ export const PublicFormPage = () => {
     );
   }
 
-  // ── No disponible ─────────────────────────────────────────────────────────
+  // ── No disponible ────────────────────────────────────────────────────────
   if (step === "unavailable") {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
@@ -260,7 +260,7 @@ export const PublicFormPage = () => {
     );
   }
 
-  // ── Ya respondió ──────────────────────────────────────────────────────────
+  // ── Ya respondió ────────────────────────────────────────────────────────
   if (step === "already") {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
@@ -281,7 +281,7 @@ export const PublicFormPage = () => {
     );
   }
 
-  // ── Completado ────────────────────────────────────────────────────────────
+  // ── Completado ─────────────────────────────────────────────────────────
   if (step === "done") {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
@@ -316,9 +316,6 @@ export const PublicFormPage = () => {
               {questionnaire?.description && (
                 <p className="text-gray-500 text-sm mt-1">{questionnaire.description}</p>
               )}
-              <p className="text-xs text-gray-400 mt-3">
-                {questionnaire?.questions.length} pregunta{questionnaire?.questions.length !== 1 ? "s" : ""}
-              </p>
             </div>
 
             <form onSubmit={handleIdentitySubmit} className="space-y-4">
