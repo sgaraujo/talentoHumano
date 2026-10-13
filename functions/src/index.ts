@@ -614,12 +614,17 @@ export const submitPublicResponse = onCall(
     }
     const questionnaire = qDoc.data()!;
 
+    // Anónimo: la respuesta no guarda identidad ni se enlaza con la asignación
+    // (la asignación solo registra que la persona ya respondió). Onboarding siempre es identificado.
+    const anonymous = questionnaire.responseMode === "anonymous" && !questionnaire.isOnboarding;
+
     // 3) Guardar respuesta — incluir userName y userEmail para que sobrevivan recargas de BD
     const responseRef = await firestore.collection(QUESTIONNAIRE_COLLECTIONS.responses).add({
       questionnaireId,
-      userId,
-      userName:  assignment.userName  || "",
-      userEmail: assignment.userEmail || "",
+      userId:    anonymous ? null        : userId,
+      userName:  anonymous ? "Anónimo"   : (assignment.userName  || ""),
+      userEmail: anonymous ? null        : (assignment.userEmail || ""),
+      anonymous,
       answers,
       status: "completed",
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -632,22 +637,25 @@ export const submitPublicResponse = onCall(
     await assDoc.ref.update({
       status: "completed",
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
-      responseId: responseRef.id,
+      ...(anonymous ? { anonymous: true } : { responseId: responseRef.id }),
     });
 
     // 4b) Encuesta de offboarding: guardar respuestas junto con el texto de las
     // preguntas, para que el reporte no cambie si luego se edita el cuestionario.
+    // Si es anónima solo se marca como respondida, sin las respuestas.
     if (assignment.offboardingSurveyId) {
       try {
         await firestore.collection("human_resources/data/offboarding_surveys").doc(assignment.offboardingSurveyId).update({
           status: "responded",
           respondedAt: admin.firestore.FieldValue.serverTimestamp(),
-          responseId: responseRef.id,
-          answers,
-          questions: (questionnaire.questions || []).map((q: any) => ({
-            id: q.id, text: q.text, type: q.type, order: q.order ?? 0,
-            options: (q.options || []).map((o: any) => ({ label: o.label, value: o.value })),
-          })),
+          ...(anonymous ? { anonymous: true } : {
+            responseId: responseRef.id,
+            answers,
+            questions: (questionnaire.questions || []).map((q: any) => ({
+              id: q.id, text: q.text, type: q.type, order: q.order ?? 0,
+              options: (q.options || []).map((o: any) => ({ label: o.label, value: o.value })),
+            })),
+          }),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } catch (err) {
@@ -2208,6 +2216,8 @@ export const getPublicQuestionnaire = onCall(
       title:       q.title       ?? "",
       description: q.description ?? "",
       questions:   q.questions   ?? [],
+      // Sin definir = anónimo (comportamiento histórico del formulario público)
+      responseMode: q.responseMode === "identified" ? "identified" : "anonymous",
     };
   }
 );
@@ -2240,12 +2250,28 @@ export const submitPublicFormResponse = onCall(
       throw new HttpsError("permission-denied", "Este formulario no es público");
     }
 
-    // 2) Guardar respuesta anónima
+    // 2) Identidad: solo se guarda si el cuestionario pide nombre y correo
+    const identified = q.responseMode === "identified";
+    let respondentName: string | null = null;
+    let respondentEmail: string | null = null;
+    if (identified) {
+      respondentName  = String(request.data?.respondentName  ?? "").trim().slice(0, 200);
+      respondentEmail = String(request.data?.respondentEmail ?? "").trim().toLowerCase().slice(0, 200);
+      if (!respondentName) {
+        throw new HttpsError("invalid-argument", "El nombre es obligatorio");
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(respondentEmail)) {
+        throw new HttpsError("invalid-argument", "El correo no es válido");
+      }
+    }
+
+    // 3) Guardar respuesta
     await firestore.collection(QUESTIONNAIRE_COLLECTIONS.responses).add({
       questionnaireId,
       userId:    null,
-      userName:  "Anónimo",
-      userEmail: null,
+      userName:  identified ? respondentName : "Anónimo",
+      userEmail: identified ? respondentEmail : null,
+      anonymous: !identified,
       answers,
       status:      "completed",
       source:      "public",

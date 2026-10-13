@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, CheckCircle2, ClipboardList } from "lucide-react";
+import { Loader2, CheckCircle2, ClipboardList, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { functions } from "@/config/firebase";
 import { httpsCallable } from "firebase/functions";
@@ -46,6 +46,11 @@ export const PublicFormPage = () => {
   const [answers, setAnswers]     = useState<Record<string, any>>({});
   const [submitting, setSubmitting] = useState(false);
 
+  // Datos de quien responde (solo en modo identificado)
+  const [respondentName, setRespondentName]   = useState("");
+  const [respondentEmail, setRespondentEmail] = useState("");
+  const identified = questionnaire?.responseMode === "identified";
+
   useEffect(() => {
     if (!questionnaireId) { setLoadingQ(false); setStep("unavailable"); return; }
     httpsCallable(functions, "getPublicQuestionnaire")({ questionnaireId })
@@ -62,6 +67,17 @@ export const PublicFormPage = () => {
     e.preventDefault();
     if (!questionnaire) return;
 
+    if (identified) {
+      if (!respondentName.trim()) {
+        toast.error("Campos requeridos", { description: "Escribe tu nombre" });
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(respondentEmail.trim())) {
+        toast.error("Correo inválido", { description: "Escribe un correo electrónico válido" });
+        return;
+      }
+    }
+
     const missing = questionnaire.questions.filter(q => {
       if (!q.required) return false;
       const a = answers[q.id];
@@ -77,6 +93,7 @@ export const PublicFormPage = () => {
       await httpsCallable(functions, "submitPublicFormResponse")({
         questionnaireId,
         answers,
+        ...(identified ? { respondentName: respondentName.trim(), respondentEmail: respondentEmail.trim() } : {}),
       });
       setStep("done");
     } catch (err: any) {
@@ -280,10 +297,49 @@ export const PublicFormPage = () => {
           <p className="text-xs text-gray-400 mt-1.5">
             {answeredCount} de {questionnaire.questions.length} respondidas
           </p>
+          {!identified && (
+            <p className="text-xs text-gray-500 mt-3 flex items-center gap-1.5">
+              <EyeOff className="w-3.5 h-3.5 text-[#008C3C]" />
+              Este formulario es anónimo: no se guarda tu nombre ni tu correo.
+            </p>
+          )}
         </div>
 
         {/* Preguntas */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {identified && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+              <p className="text-gray-800 font-medium">Tus datos</p>
+              <div className="space-y-1.5">
+                <Label htmlFor="respondent-name" className="text-sm text-gray-600">
+                  Nombre completo<span className="text-red-500 ml-1">*</span>
+                </Label>
+                <Input
+                  id="respondent-name"
+                  autoComplete="name"
+                  className="border-gray-200 focus-visible:ring-[#008C3C]"
+                  value={respondentName}
+                  onChange={e => setRespondentName(e.target.value)}
+                  placeholder="Tu nombre"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="respondent-email" className="text-sm text-gray-600">
+                  Correo electrónico<span className="text-red-500 ml-1">*</span>
+                </Label>
+                <Input
+                  id="respondent-email"
+                  type="email"
+                  autoComplete="email"
+                  className="border-gray-200 focus-visible:ring-[#008C3C]"
+                  value={respondentEmail}
+                  onChange={e => setRespondentEmail(e.target.value)}
+                  placeholder="tucorreo@ejemplo.com"
+                />
+              </div>
+            </div>
+          )}
+
           {[...questionnaire.questions]
             .sort((a, b) => a.order - b.order)
             .map((question, idx) => (

@@ -25,6 +25,7 @@ import {
     Users,
     Globe,
     Copy,
+    EyeOff,
 } from 'lucide-react';
 import { CreateQuestionnaireDialog } from '@/components/questionnaires/CreateQuestionnaireDialog';
 import { ViewQuestionnaireDialog } from '@/components/questionnaires/ViewQuestionnaireDialog';
@@ -335,6 +336,12 @@ export const QuestionnairesPage = () => {
                                                 <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                                                     <Globe className="w-3 h-3" />
                                                     Público
+                                                </span>
+                                            )}
+                                            {questionnaire.responseMode === 'anonymous' && (
+                                                <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                                                    <EyeOff className="w-3 h-3" />
+                                                    Anónima
                                                 </span>
                                             )}
                                         </div>

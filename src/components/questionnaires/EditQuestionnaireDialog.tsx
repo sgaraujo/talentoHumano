@@ -23,7 +23,8 @@ import { Switch } from '@/components/ui/switch';
 import { Loader2, Plus, Trash2, GripVertical, ArrowRight, ArrowUp, ArrowDown, Copy, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuestionReorder, UNMAPPED_FIELD } from './useQuestionReorder';
-import type { Question, QuestionType, Questionnaire } from '@/models/types/Questionnaire';
+import { ResponseModeField } from './ResponseModeField';
+import type { Question, QuestionType, Questionnaire, ResponseMode } from '@/models/types/Questionnaire';
 
 const FIELD_GROUPS = [
   {
@@ -149,6 +150,7 @@ export const EditQuestionnaireDialog = ({
     isOnboarding: false,
     isRequired: false,
     allowMultipleCompletions: false,
+    responseMode: 'identified' as ResponseMode,
   });
   const [questions, setQuestions] = useState<Question[]>([]);
   const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
@@ -165,6 +167,8 @@ export const EditQuestionnaireDialog = ({
         isOnboarding: questionnaire.isOnboarding ?? false,
         isRequired: questionnaire.isRequired ?? false,
         allowMultipleCompletions: questionnaire.allowMultipleCompletions ?? false,
+        // Cuestionarios antiguos: el formulario público se respondía anónimo.
+        responseMode: questionnaire.responseMode ?? (questionnaire.isPublic && !questionnaire.isOnboarding ? 'anonymous' : 'identified'),
       });
       setQuestions([...questionnaire.questions]);
       setFieldMappings(
@@ -334,6 +338,12 @@ export const EditQuestionnaireDialog = ({
               </Select>
             </div>
 
+            <ResponseModeField
+              value={formData.responseMode}
+              onChange={(responseMode) => setFormData({ ...formData, responseMode })}
+              anonymousDisabled={formData.isOnboarding}
+            />
+
             <div className="h-px bg-gray-100" />
 
             <div className="flex items-center justify-between">
@@ -353,7 +363,13 @@ export const EditQuestionnaireDialog = ({
               <Switch
                 id="edit-isOnboarding"
                 checked={formData.isOnboarding}
-                onCheckedChange={(checked) => setFormData({ ...formData, isOnboarding: checked, isRequired: false, allowMultipleCompletions: false })}
+                onCheckedChange={(checked) => setFormData({
+                  ...formData,
+                  isOnboarding: checked,
+                  isRequired: false,
+                  allowMultipleCompletions: false,
+                  responseMode: checked ? 'identified' : formData.responseMode,
+                })}
               />
             </div>
 

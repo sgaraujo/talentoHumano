@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, CheckCircle2, ClipboardList, ChevronRight } from "lucide-react";
+import { Loader2, CheckCircle2, ClipboardList, ChevronRight, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import type { Questionnaire, Question } from "@/models/types/Questionnaire";
 import { functions } from "@/config/firebase";
@@ -293,6 +293,7 @@ export const AnswerQuestionnairePage = () => {
 
   const questions = [...(questionnaire.questions ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const total = questions.length;
+  const anonymous = questionnaire.responseMode === "anonymous" && !questionnaire.isOnboarding;
 
   // ── Questionnaire form ────────────────────────────────────────────────────
   return (
@@ -305,7 +306,13 @@ export const AnswerQuestionnairePage = () => {
           <div className="flex items-center justify-between mb-2">
             <div>
               <p className="font-semibold text-[#4A4A4A] text-sm leading-tight">{questionnaire.title}</p>
-              <p className="text-xs text-gray-400">Respondiendo como: <span className="font-medium text-gray-600">{assignment.userName}</span></p>
+              {anonymous ? (
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <EyeOff className="w-3 h-3" /> Respuesta anónima
+                </p>
+              ) : (
+                <p className="text-xs text-gray-400">Respondiendo como: <span className="font-medium text-gray-600">{assignment.userName}</span></p>
+              )}
             </div>
             <span className="text-xs font-semibold text-[#008C3C] bg-[#008C3C]/10 px-2.5 py-1 rounded-full">
               {answeredCount}/{total}
@@ -330,6 +337,12 @@ export const AnswerQuestionnairePage = () => {
               </p>
             </div>
             <div className="bg-white px-5 py-4 space-y-2 text-sm text-gray-600 leading-relaxed">
+              {anonymous && (
+                <p className="flex items-start gap-2 text-gray-500">
+                  <EyeOff className="w-4 h-4 mt-0.5 flex-shrink-0 text-[#008C3C]" />
+                  Esta encuesta es anónima: tus respuestas se guardan sin tu nombre ni tu correo.
+                </p>
+              )}
               {questionnaire.description && (
                 <p className="mt-2 pt-2 border-t border-gray-100 text-gray-500 italic">
                   {questionnaire.description}

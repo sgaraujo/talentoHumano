@@ -63,6 +63,17 @@ export const ViewResponsesDialog = ({
         }
     };
 
+    // Respuestas anónimas no tienen asignación enlazada; las del formulario público
+    // guardan nombre y correo en la propia respuesta.
+    const getRespondent = (response: any) => {
+        if (response.anonymous) return { name: 'Anónimo', email: '' };
+        const assignment = assignments.find(a => a.responseId === response.id);
+        return {
+            name: assignment?.userName || response.userName || 'Desconocido',
+            email: assignment?.userEmail || response.userEmail || '',
+        };
+    };
+
     const getAnswerDisplay = (question: any, answer: any) => {
         const labels = answerLabels(question, answer);
         return labels.length ? labels.join(', ') : 'Sin respuesta';
@@ -82,14 +93,14 @@ export const ViewResponsesDialog = ({
 
             // Rows
             const rows = responses.map(response => {
-                const assignment = assignments.find(a => a.responseId === response.id);
+                const respondent = getRespondent(response);
                 const completedDate = response.completedAt instanceof Date
                     ? response.completedAt
                     : new Date(response.completedAt);
 
                 return [
-                    assignment?.userName || 'Desconocido',
-                    assignment?.userEmail || '',
+                    respondent.name,
+                    respondent.email,
                     completedDate.toLocaleString('es-CO'),
                     ...questionnaire.questions.map(q => {
                         const answer = response.answers[q.id];
@@ -241,11 +252,14 @@ export const ViewResponsesDialog = ({
                                     <CardContent>
                                         <div className="space-y-6">
                                             {responses.map((response) => {
-                                                const assignment = assignments.find(a => a.responseId === response.id);
+                                                const respondent = getRespondent(response);
                                                 return (
                                                     <div key={response.id} className="border-b pb-6 last:border-b-0">
                                                         <div className="mb-4">
-                                                            <p className="font-semibold text-lg">{assignment?.userName}</p>
+                                                            <p className="font-semibold text-lg">{respondent.name}</p>
+                                                            {respondent.email && (
+                                                                <p className="text-sm text-gray-500">{respondent.email}</p>
+                                                            )}
                                                             <p className="text-sm text-gray-500">
                                                                 Respondido el {response.completedAt instanceof Date
                                                                     ? response.completedAt.toLocaleString('es-CO', {

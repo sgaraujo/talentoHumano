@@ -24,7 +24,8 @@ import { Loader2, Plus, Trash2, GripVertical, ArrowRight, ArrowUp, ArrowDown, Co
 import { generateQuestionnaireDraft } from '@/services/questionnaireAiService';
 import { toast } from 'sonner';
 import { useQuestionReorder, UNMAPPED_FIELD } from './useQuestionReorder';
-import type { Question, QuestionType } from '@/models/types/Questionnaire';
+import { ResponseModeField } from './ResponseModeField';
+import type { Question, QuestionType, ResponseMode } from '@/models/types/Questionnaire';
 
 const FIELD_GROUPS = [
     {
@@ -148,6 +149,7 @@ export const CreateQuestionnaireDialog = ({
         isOnboarding: false,
         isRequired: false,
         allowMultipleCompletions: false,
+        responseMode: 'identified' as ResponseMode,
     });
     const [questions, setQuestions] = useState<Question[]>([]);
     const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
@@ -270,7 +272,7 @@ export const CreateQuestionnaireDialog = ({
                 description: `${formData.title} ha sido creado exitosamente.`,
             });
 
-            setFormData({ title: '', description: '', targetRole: 'all', active: true, isOnboarding: false, isRequired: false, allowMultipleCompletions: false });
+            setFormData({ title: '', description: '', targetRole: 'all', active: true, isOnboarding: false, isRequired: false, allowMultipleCompletions: false, responseMode: 'identified' });
             setQuestions([]);
             setFieldMappings([]);
             setCurrentStep('info');
@@ -392,6 +394,12 @@ export const CreateQuestionnaireDialog = ({
                             </Select>
                         </div>
 
+                        <ResponseModeField
+                            value={formData.responseMode}
+                            onChange={(responseMode) => setFormData({ ...formData, responseMode })}
+                            anonymousDisabled={formData.isOnboarding}
+                        />
+
                         <div className="h-px bg-gray-100" />
 
                         <div className="flex items-center justify-between">
@@ -411,7 +419,13 @@ export const CreateQuestionnaireDialog = ({
                             <Switch
                                 id="isOnboarding"
                                 checked={formData.isOnboarding}
-                                onCheckedChange={(checked) => setFormData({ ...formData, isOnboarding: checked, isRequired: false, allowMultipleCompletions: false })}
+                                onCheckedChange={(checked) => setFormData({
+                                    ...formData,
+                                    isOnboarding: checked,
+                                    isRequired: false,
+                                    allowMultipleCompletions: false,
+                                    responseMode: checked ? 'identified' : formData.responseMode,
+                                })}
                             />
                         </div>
 
