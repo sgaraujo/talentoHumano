@@ -10,10 +10,18 @@ export default defineConfig({
     },
   },
   build: {
-    // La aplicación integra Firebase, gráficos, Excel y generación de PDF en el
-    // bundle principal. Conservamos una alerta útil si supera el tamaño actual
-    // esperado, sin emitir el umbral genérico de 500 kB en cada compilación.
-    chunkSizeWarningLimit: 3500,
+    // Las páginas se cargan con React.lazy; las librerías grandes van en chunks
+    // propios para que el navegador las cachee entre despliegues.
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('/firebase/') || id.includes('/@firebase/')) return 'firebase';
+          if (id.includes('/react-dom/') || id.includes('/react/') || id.includes('/react-router') || id.includes('/scheduler/')) return 'react';
+        },
+      },
+    },
   },
   server: {
     watch: {

@@ -199,7 +199,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 bg-gray-50 min-h-screen">
+    <div className="p-4 sm:p-6 space-y-5 bg-gray-50 min-h-full">
 
       {/* Header — solo en modo standalone */}
       {!controlled && (

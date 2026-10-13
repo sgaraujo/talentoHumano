@@ -216,15 +216,15 @@ export const QuestionnairesPage = () => {
     );
 
     return (
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-4 sm:p-6 max-w-7xl mx-auto">
             {/* Header */}
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-900">Cuestionarios</h1>
+            <div className="mb-6 sm:mb-8">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Cuestionarios</h1>
                 <p className="text-gray-500 mt-1">Gestiona las encuestas y cuestionarios del sistema</p>
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
                 <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-4 shadow-sm">
                     <div className="p-3 bg-gray-100 rounded-lg">
                         <FileText className="w-5 h-5 text-gray-600" />

@@ -327,7 +327,7 @@ export const ViewUserProfileDialog = ({ open, onOpenChange, userId }: Props) => 
             <p className="text-center py-12 text-gray-500">No se pudo cargar el perfil</p>
           ) : (
             <Tabs defaultValue="general" className="w-full">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="flex w-full justify-start overflow-x-auto sm:grid sm:grid-cols-5">
                 <TabsTrigger value="general">General</TabsTrigger>
                 <TabsTrigger value="personal">Personal</TabsTrigger>
                 <TabsTrigger value="profesional">Profesional</TabsTrigger>

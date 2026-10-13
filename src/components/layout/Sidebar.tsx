@@ -189,7 +189,7 @@ export const Sidebar = () => {
 
   const SidebarContent = ({ collapsed = false }: { collapsed?: boolean }) => {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-b from-[#006330] via-[#008C3C] to-[#005528] shadow-2xl">
+      <div className="h-full flex flex-col bg-gradient-to-b from-[#006330] via-[#008C3C] to-[#005528] shadow-2xl">
 
         {/* Logo */}
         <div className={['flex items-center border-b border-white/10 transition-all duration-300',
@@ -302,14 +302,20 @@ export const Sidebar = () => {
 
   return (
     <>
-      {/* Mobile hamburger */}
-      <button
-        onClick={() => setIsOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2.5 bg-[#008C3C] text-white rounded-xl shadow-lg border border-[#7BCB6A]/40 hover:bg-[#006C2F] transition-colors"
-        aria-label="Abrir menu"
-      >
-        <Menu className="w-5 h-5" />
-      </button>
+      {/* Mobile top bar: ocupa su propio espacio para no tapar el título de cada página */}
+      <header className="lg:hidden flex-shrink-0 h-14 flex items-center gap-3 px-3 bg-gradient-to-r from-[#006330] to-[#008C3C] shadow-md z-30">
+        <button
+          onClick={() => setIsOpen(true)}
+          className="p-2 -ml-1 text-white rounded-lg hover:bg-white/10 transition-colors"
+          aria-label="Abrir menu"
+        >
+          <Menu className="w-6 h-6" />
+        </button>
+        <InteegradosLogo size={30} />
+        <span className="text-sm font-bold text-white tracking-widest uppercase truncate">
+          Inte<span className="text-[#7BCB6A] font-extrabold">e</span>grados
+        </span>
+      </header>
 
       {/* Mobile backdrop */}
       {isOpen && (
@@ -321,7 +327,7 @@ export const Sidebar = () => {
 
       {/* Mobile drawer */}
       <div className={[
-        'lg:hidden fixed top-0 left-0 h-full w-64 z-50 transition-transform duration-300 ease-in-out',
+        'lg:hidden fixed top-0 left-0 h-dvh w-72 max-w-[85vw] z-50 transition-transform duration-300 ease-in-out',
         isOpen ? 'translate-x-0' : '-translate-x-full',
       ].join(' ')}>
         <div className="relative h-full">

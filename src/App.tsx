@@ -1,42 +1,50 @@
+import { lazy, Suspense, type ComponentType } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { useAppRole } from './hooks/useAppRole';
-import { LoginPage } from './views/Auth/LoginPage';
-import { DashboardPage } from './views/Dashboard/DashboardPage';
-import { UsersPage } from './views/Users/UsersPage';
-import { HrControlPage } from './views/Users/HrControlPage';
-import { QuestionnairesPage } from './views/Questionnaires/QuestionnairesPage';
-import { NotificationsPage } from './views/Notifications/NotificationsPage'; // NUEVO
-import { AnswerQuestionnairePage } from './views/Public/AnswerQuestionnairePage';
 import { MainLayout } from './components/layout/MainLayout';
+import { PageLoader } from './components/layout/PageLoader';
 import { Toaster } from '@/components/ui/sonner';
-import { RotationPage } from './views/Analytics/RotationPage';
-import ExportQueueTable from './views/Exporter/ExporterPage';
-import { CompaniesPage } from './views/Companies/CompaniesPage';
-import { CompanyWorkforcePage } from './views/Companies/CompanyWorkforcePage';
-import { CompanySettingsPage } from './views/Companies/CompanySettingsPage';
-import { ProjectsPage } from './views/Projects/ProjectsPage';
-import { AnalyticalAccountStatsPage } from './views/Projects/AnalyticalAccountStatsPage';
-import { CommunicationsPage } from './views/Communications/CommunicationsPage';
-import { CommunicationsStatsPage } from './views/Communications/CommunicationsStatsPage';
-import { ReadCommunicationPage } from './views/Public/ReadCommunicationPage';
-import { CtaTrackingPage } from './views/Public/CtaTrackingPage';
-import { TaxCalendarPage } from './views/Accounting/TaxCalendarPage';
-import { TaxReportPage } from './views/Accounting/TaxReportPage';
-import { AccountingMessagesPage } from './views/Accounting/AccountingMessagesPage';
-import { RolesPage } from './views/Admin/RolesPage';
-import { QuestionnaireSendStatsPage } from './views/Questionnaires/QuestionnaireSendStatsPage';
-import { PublicFormPage } from './views/Public/PublicFormPage';
-import { EmailSendStatsPage } from './views/Questionnaires/EmailSendStatsPage';
-import { WhatsAppPage } from './views/WhatsApp/WhatsAppPage';
-import { WhatsAppStatsPage } from './views/WhatsApp/WhatsAppStatsPage';
-import { BulletinsPage } from './views/Bulletins/BulletinsPage';
-import { BulletinEditorPage } from './views/Bulletins/BulletinEditorPage';
-import { BulletinViewPage } from './views/Bulletins/BulletinViewPage';
-import { BulletinStatsPage } from './views/Bulletins/BulletinStatsPage';
-import { ManualPage } from './views/Manual/ManualPage';
 import { AssistantCompanion } from './components/ia/AssistantCompanion';
-import { OffboardingPage } from './views/Offboarding/OffboardingPage';
+
+// Cada página se descarga solo cuando se visita. Antes toda la app (Excel, PDF,
+// gráficas y ~35 páginas) iba en un único archivo de 3.4 MB, muy lento en celular.
+const page = <K extends string>(load: () => Promise<Record<K, ComponentType<any>>>, name: K) =>
+  lazy(() => load().then(m => ({ default: m[name] })));
+
+const LoginPage                  = page(() => import('./views/Auth/LoginPage'), 'LoginPage');
+const DashboardPage              = page(() => import('./views/Dashboard/DashboardPage'), 'DashboardPage');
+const UsersPage                  = page(() => import('./views/Users/UsersPage'), 'UsersPage');
+const HrControlPage              = page(() => import('./views/Users/HrControlPage'), 'HrControlPage');
+const QuestionnairesPage         = page(() => import('./views/Questionnaires/QuestionnairesPage'), 'QuestionnairesPage');
+const NotificationsPage          = page(() => import('./views/Notifications/NotificationsPage'), 'NotificationsPage');
+const AnswerQuestionnairePage    = page(() => import('./views/Public/AnswerQuestionnairePage'), 'AnswerQuestionnairePage');
+const RotationPage               = page(() => import('./views/Analytics/RotationPage'), 'RotationPage');
+const ExportQueueTable           = page(() => import('./views/Exporter/ExporterPage'), 'default');
+const CompaniesPage              = page(() => import('./views/Companies/CompaniesPage'), 'CompaniesPage');
+const CompanyWorkforcePage       = page(() => import('./views/Companies/CompanyWorkforcePage'), 'CompanyWorkforcePage');
+const CompanySettingsPage        = page(() => import('./views/Companies/CompanySettingsPage'), 'CompanySettingsPage');
+const ProjectsPage               = page(() => import('./views/Projects/ProjectsPage'), 'ProjectsPage');
+const AnalyticalAccountStatsPage = page(() => import('./views/Projects/AnalyticalAccountStatsPage'), 'AnalyticalAccountStatsPage');
+const CommunicationsPage         = page(() => import('./views/Communications/CommunicationsPage'), 'CommunicationsPage');
+const CommunicationsStatsPage    = page(() => import('./views/Communications/CommunicationsStatsPage'), 'CommunicationsStatsPage');
+const ReadCommunicationPage      = page(() => import('./views/Public/ReadCommunicationPage'), 'ReadCommunicationPage');
+const CtaTrackingPage            = page(() => import('./views/Public/CtaTrackingPage'), 'CtaTrackingPage');
+const TaxCalendarPage            = page(() => import('./views/Accounting/TaxCalendarPage'), 'TaxCalendarPage');
+const TaxReportPage              = page(() => import('./views/Accounting/TaxReportPage'), 'TaxReportPage');
+const AccountingMessagesPage     = page(() => import('./views/Accounting/AccountingMessagesPage'), 'AccountingMessagesPage');
+const RolesPage                  = page(() => import('./views/Admin/RolesPage'), 'RolesPage');
+const QuestionnaireSendStatsPage = page(() => import('./views/Questionnaires/QuestionnaireSendStatsPage'), 'QuestionnaireSendStatsPage');
+const PublicFormPage             = page(() => import('./views/Public/PublicFormPage'), 'PublicFormPage');
+const EmailSendStatsPage         = page(() => import('./views/Questionnaires/EmailSendStatsPage'), 'EmailSendStatsPage');
+const WhatsAppPage               = page(() => import('./views/WhatsApp/WhatsAppPage'), 'WhatsAppPage');
+const WhatsAppStatsPage          = page(() => import('./views/WhatsApp/WhatsAppStatsPage'), 'WhatsAppStatsPage');
+const BulletinsPage              = page(() => import('./views/Bulletins/BulletinsPage'), 'BulletinsPage');
+const BulletinEditorPage         = page(() => import('./views/Bulletins/BulletinEditorPage'), 'BulletinEditorPage');
+const BulletinViewPage           = page(() => import('./views/Bulletins/BulletinViewPage'), 'BulletinViewPage');
+const BulletinStatsPage          = page(() => import('./views/Bulletins/BulletinStatsPage'), 'BulletinStatsPage');
+const ManualPage                 = page(() => import('./views/Manual/ManualPage'), 'ManualPage');
+const OffboardingPage            = page(() => import('./views/Offboarding/OffboardingPage'), 'OffboardingPage');
 
 
 /** Redirects authenticated users to their role's home page */
@@ -75,6 +83,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<PageLoader fullScreen />}>
       <Routes>
         {/* Rutas públicas — no requieren autenticación */}
         <Route path="/responder/:token"           element={<AnswerQuestionnairePage />} />
@@ -354,8 +363,8 @@ function App() {
           }
         />
 
-        
       </Routes>
+      </Suspense>
       <AssistantCompanion />
       <Toaster />
     </BrowserRouter>

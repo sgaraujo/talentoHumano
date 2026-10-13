@@ -208,15 +208,15 @@ export const EmailSendStatsPage = () => {
   const trackingTotal = globalStats.sent + globalStats.failed;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Estadísticas de Correos</h1>
           <p className="text-sm text-gray-400 mt-0.5">Seguimiento de entregas de cuestionarios por correo electrónico</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {globalStats.noStatus > 0 && (
             <button
               onClick={handleMigrate}
@@ -641,7 +641,7 @@ export const EmailSendStatsPage = () => {
                               {/* Recipients table */}
                               {recs.length > 0 && (
                                 <div className="rounded-xl border border-gray-100 overflow-hidden bg-white">
-                                  <div className="max-h-52 overflow-y-auto">
+                                  <div className="max-h-52 overflow-auto">
                                     <table className="w-full text-xs">
                                       <thead className="sticky top-0 bg-gray-50/90">
                                         <tr className="text-gray-400 border-b border-gray-100">

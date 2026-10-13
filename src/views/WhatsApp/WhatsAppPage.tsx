@@ -467,7 +467,7 @@ export const WhatsAppPage = () => {
   // el número único todavía no se ha autoseleccionado.
   if (!numbersLoaded) {
     return (
-      <div className="flex items-center justify-center h-full" style={{ height: "calc(100vh - 64px)" }}>
+      <div className="flex items-center justify-center h-full">
         <Loader2 className="w-8 h-8 animate-spin text-[#00a884]" />
       </div>
     );
@@ -476,8 +476,8 @@ export const WhatsAppPage = () => {
   if (!numberId) return <NumberSelect numbers={numbers} onSelect={setNumberId} />;
 
   return (
-    <div className="flex flex-col h-full" style={{ height: "calc(100vh - 64px)" }}>
-      <div className="h-12 flex-shrink-0 bg-white border-b border-gray-200 px-4 flex items-center justify-between">
+    <div className="flex flex-col h-full">
+      <div className="h-12 flex-shrink-0 bg-white border-b border-gray-200 px-2 sm:px-4 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           <button onClick={() => setSection("inbox")}
             className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${section === "inbox" ? "bg-[#00a884]/10 text-[#007c65] font-semibold" : "text-gray-500 hover:bg-gray-50"}`}>

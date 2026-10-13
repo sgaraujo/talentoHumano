@@ -86,7 +86,7 @@ export function CompanySettingsPage() {
     catch (reason: any) { toast.error('No fue posible eliminar', { description: reason?.message }); }
   };
 
-  return <div className="p-4 sm:p-6 bg-gray-50 min-h-screen space-y-5">
+  return <div className="p-4 sm:p-6 bg-gray-50 min-h-full space-y-5">
     <div className="flex items-start justify-between gap-3 flex-wrap"><div><h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Settings2 className="w-6 h-6 text-[#008C3C]" />Configuración de empresas</h1><p className="text-sm text-gray-500 mt-1">Catálogo maestro, nombres oficiales, alias y módulos habilitados</p></div><Button onClick={create} className="bg-[#008C3C] hover:bg-[#006C2F]"><Plus className="w-4 h-4 mr-2" />Nueva empresa</Button></div>
     <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"><b>Esta pantalla configura el catálogo.</b> La dotación, nómina, cuentas analíticas e indicadores se consultan desde el módulo Empresas y no se guardan aquí.</div>
     <div className="bg-white border rounded-xl overflow-hidden"><div className="p-4 border-b relative"><Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><Input value={search} onChange={event => setSearch(event.target.value)} className="pl-9" placeholder="Buscar nombre, NIT o alias…" /></div>

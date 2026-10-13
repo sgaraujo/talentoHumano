@@ -169,7 +169,7 @@ export const ViewResponsesDialog = ({
                     ) : (
                         <>
                             {/* Estadísticas */}
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-3 gap-2 sm:gap-4">
                                 <Card>
                                     <CardHeader className="pb-3">
                                         <CardTitle className="text-sm font-medium text-gray-600">

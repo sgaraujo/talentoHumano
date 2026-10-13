@@ -382,7 +382,7 @@ export const EditUserDialog = ({ open, onOpenChange, user, onUserUpdated }: Prop
         </DialogHeader>
 
         <Tabs defaultValue="basic" className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="flex w-full justify-start overflow-x-auto sm:grid sm:grid-cols-4">
             <TabsTrigger value="basic">Básico</TabsTrigger>
             <TabsTrigger value="contract">Contrato</TabsTrigger>
             <TabsTrigger value="salary">Salario</TabsTrigger>

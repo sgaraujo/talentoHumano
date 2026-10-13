@@ -129,7 +129,7 @@ export const CompaniesPage = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+    <div className="p-4 sm:p-6 bg-gray-50 min-h-full">
 
       {/* Header */}
       <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">

@@ -339,10 +339,10 @@ export const QuestionnaireSendStatsPage = () => {
   const maxTimeline = Math.max(...timeline.map(t => t.completions), 1);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Estadísticas de Envíos</h1>
           <p className="text-sm text-gray-400 mt-0.5">Seguimiento de cuestionarios, respuestas y pendientes</p>
@@ -471,8 +471,9 @@ export const QuestionnaireSendStatsPage = () => {
 
         {/* ── Por Rol ───────────────────────────────────────────────────────── */}
         {activeTab === 'roles' && (
-          <div className="p-5 grid md:grid-cols-2 gap-4">
-            <table className="w-full text-sm bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="p-4 sm:p-5 grid md:grid-cols-2 gap-4">
+            <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
+            <table className="w-full min-w-[420px] text-sm">
               <thead>
                 <tr className="text-xs text-gray-400 bg-gray-50/70 border-b border-gray-100">
                   <th className="text-left px-4 py-3 font-medium">Rol</th>
@@ -497,6 +498,7 @@ export const QuestionnaireSendStatsPage = () => {
                 ))}
               </tbody>
             </table>
+            </div>
             <div className="bg-white rounded-xl border border-gray-100 p-4">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Comparativo por rol</p>
               <ResponsiveContainer width="100%" height={240}>
@@ -519,8 +521,8 @@ export const QuestionnaireSendStatsPage = () => {
 
         {/* ── Tendencia ─────────────────────────────────────────────────────── */}
         {activeTab === 'tendencia' && (
-          <div className="p-5">
-            <div className="flex items-center justify-between mb-4">
+          <div className="p-4 sm:p-5">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
               <div>
                 <p className="text-sm font-semibold text-gray-800">Respuestas por día</p>
                 <p className="text-xs text-gray-400 mt-0.5">Últimos 30 días</p>
@@ -551,7 +553,8 @@ export const QuestionnaireSendStatsPage = () => {
               <p className="text-xs mt-1">Todos respondieron dentro de los 3 días</p>
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-xs text-gray-400 bg-gray-50/70 border-b border-gray-100">
                   <th className="text-left px-5 py-3 font-medium">Persona</th>
@@ -581,6 +584,7 @@ export const QuestionnaireSendStatsPage = () => {
                 ))}
               </tbody>
             </table>
+            </div>
           )
         )}
       </div>

@@ -381,7 +381,7 @@ export const RolesPage = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+    <div className="p-4 sm:p-6 bg-gray-50 min-h-full">
 
       {/* Header */}
       <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
@@ -488,8 +488,8 @@ export const RolesPage = () => {
           <p className="text-gray-400">Sin resultados</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="grid grid-cols-12 px-5 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-x-auto">
+          <div className="grid grid-cols-12 min-w-[760px] px-5 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
             <span className="col-span-3">Colaborador</span>
             <span className="col-span-3">Email</span>
             <span className="col-span-3">Rol plataforma</span>
@@ -508,7 +508,7 @@ export const RolesPage = () => {
               return (
                 <div
                   key={row.email}
-                  className="grid grid-cols-12 px-5 py-3.5 items-center hover:bg-gray-50/60 transition-colors group cursor-pointer"
+                  className="grid grid-cols-12 min-w-[760px] px-5 py-3.5 items-center hover:bg-gray-50/60 transition-colors group cursor-pointer"
                   onClick={() => openAssign(row)}
                 >
                   {/* Name */}

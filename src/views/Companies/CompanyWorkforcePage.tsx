@@ -155,7 +155,7 @@ export function CompanyWorkforcePage() {
     return { months, retiredThisYearCount: retiredThisYear.length, rotacionAnual, avgTenure, genderData, motivosData, costoRetiros, retiredCount: retired.length };
   }, [data, active]);
 
-  if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-[#008C3C]" /></div>;
+  if (loading) return <div className="min-h-full bg-gray-50 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-[#008C3C]" /></div>;
   if (!data || error) return <div className="p-6"><Button variant="outline" onClick={() => navigate('/empresas')}><ArrowLeft className="w-4 h-4 mr-2" />Empresas</Button><p className="mt-8 text-red-600">{error}</p></div>;
 
   const stats = [
@@ -166,11 +166,11 @@ export function CompanyWorkforcePage() {
   ] as const;
   const tabs: Array<[Tab, string]> = [['summary','Resumen'],['stats','Estadísticas'],['people','Personas'],['projects','Cuentas analíticas'],...(canSeePayroll ? [['payroll','Nómina'] as [Tab, string]] : []),['quality','Calidad de datos']];
 
-  return <div className="p-4 sm:p-6 bg-gray-50 min-h-screen space-y-5">
+  return <div className="p-4 sm:p-6 bg-gray-50 min-h-full space-y-5">
     <div className="flex items-start gap-3">
       <Button variant="outline" size="sm" onClick={() => navigate('/empresas')}><ArrowLeft className="w-4 h-4" /></Button>
-      <div className="w-11 h-11 rounded-xl bg-green-100 flex items-center justify-center">{data.company.logo ? <img src={data.company.logo} className="w-9 h-9 object-contain" /> : <Building2 className="w-6 h-6 text-[#008C3C]" />}</div>
-      <div className="flex-1"><h1 className="text-2xl font-bold text-gray-800">{data.company.name}</h1><p className="text-sm text-gray-500">NIT {data.company.nit} · Empresas y dotación</p></div>
+      <div className="hidden sm:flex w-11 h-11 flex-shrink-0 rounded-xl bg-green-100 items-center justify-center">{data.company.logo ? <img src={data.company.logo} className="w-9 h-9 object-contain" /> : <Building2 className="w-6 h-6 text-[#008C3C]" />}</div>
+      <div className="flex-1 min-w-0"><h1 className="text-xl sm:text-2xl font-bold text-gray-800 break-words">{data.company.name}</h1><p className="text-sm text-gray-500">NIT {data.company.nit} · Empresas y dotación</p></div>
     </div>
 
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{stats.map(([label,value,Icon,color]) => <div key={label} className={`rounded-xl border border-white p-4 ${color}`}><Icon className="w-5 h-5 mb-2" /><p className="text-2xl font-bold">{value.toLocaleString('es-CO')}</p><p className="text-xs font-medium">{label}</p></div>)}</div>

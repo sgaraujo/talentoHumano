@@ -176,7 +176,7 @@ export function OffboardingPage() {
   const configured = settings.enabled && !!settings.questionnaireId;
 
   return (
-    <div className="p-4 sm:p-6 bg-gray-50 min-h-screen space-y-5">
+    <div className="p-4 sm:p-6 bg-gray-50 min-h-full space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-start gap-3">
           <div className="w-11 h-11 rounded-xl bg-[#008C3C]/10 flex items-center justify-center"><DoorOpen className="w-6 h-6 text-[#008C3C]" /></div>

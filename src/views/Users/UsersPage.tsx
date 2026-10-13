@@ -241,7 +241,7 @@ export const UsersPage = () => {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+    <div className="p-4 sm:p-6 bg-gray-50 min-h-full">
 
       {/* Header */}
       <div className="mb-6">

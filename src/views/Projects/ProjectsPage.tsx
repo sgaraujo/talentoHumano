@@ -421,15 +421,15 @@ export const ProjectsPage = () => {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+    <div className="p-4 sm:p-6 bg-gray-50 min-h-full">
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-[#4A4A4A]">Cuentas analíticas</h1>
           <p className="text-[#4A4A4A]/70 mt-1 text-sm">Gestión de cuentas analíticas por empresa</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button onClick={handleExport} variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
             <Download className="w-4 h-4 mr-2" /> Exportar
           </Button>
