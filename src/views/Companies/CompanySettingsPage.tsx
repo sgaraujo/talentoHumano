@@ -7,14 +7,32 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { companyService } from '@/services/companyService';
 import { useAppRole } from '@/hooks/useAppRole';
 import type { Company } from '@/models/types/Company';
+import type { AppRole } from '@/models/types/AppRole';
 import { toast } from 'sonner';
 
 type CompanyForm = Omit<Company, 'id' | 'createdAt' | 'updatedAt'>;
-const emptyForm = (): CompanyForm => ({
-  name: '', nit: '', address: '', phone: '', email: '', logo: '', regional: '', baseDeOperacion: '',
-  aliases: [], active: true, activeTH: true, activeContabilidad: false,
-  modules: { humanResources: true, accounting: false, communications: true },
-});
+type ModuleField = 'humanResources' | 'accounting' | 'communications';
+
+const hasTH = (company: Partial<Company>) => Boolean(company.activeTH || company.modules?.humanResources);
+const hasAccounting = (company: Partial<Company>) => Boolean(company.activeContabilidad || company.modules?.accounting);
+
+// TH crea empresas solo de TH y Contabilidad solo de Contabilidad (mismo criterio que firestore.rules.next).
+const emptyForm = (role: AppRole | null): CompanyForm => {
+  const accountingOnly = role === 'contabilidad';
+  return {
+    name: '', nit: '', address: '', phone: '', email: '', logo: '', regional: '', baseDeOperacion: '',
+    aliases: [], active: true, activeTH: !accountingOnly, activeContabilidad: accountingOnly,
+    modules: { humanResources: !accountingOnly, accounting: accountingOnly, communications: !accountingOnly },
+  };
+};
+
+const canManage = (role: AppRole | null, company: Company) =>
+  role === 'admin'
+  || (role === 'talento_humano' && hasTH(company))
+  || (role === 'contabilidad' && hasAccounting(company));
+
+const canToggleModule = (role: AppRole | null, field: ModuleField) =>
+  role === 'admin' || (role === 'talento_humano' && field === 'communications');
 
 export function CompanySettingsPage() {
   const { role } = useAppRole();
@@ -23,26 +41,29 @@ export function CompanySettingsPage() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Company | null>(null);
-  const [form, setForm] = useState<CompanyForm>(emptyForm());
+  const [form, setForm] = useState<CompanyForm>(emptyForm(role));
   const [open, setOpen] = useState(false);
   const [aliasesText, setAliasesText] = useState('');
   const load = async () => { setLoading(true); try { setCompanies((await companyService.getAll()).sort((a,b) => a.name.localeCompare(b.name, 'es'))); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
   const filtered = useMemo(() => companies.filter(item => [item.name,item.nit,...(item.aliases ?? [])].some(value => value?.toLowerCase().includes(search.toLowerCase()))), [companies,search]);
-  const create = () => { setSelected(null); setForm(emptyForm()); setAliasesText(''); setOpen(true); };
+  const create = () => { setSelected(null); setForm(emptyForm(role)); setAliasesText(''); setOpen(true); };
   const edit = (company: Company) => {
+    if (!canManage(role, company)) return;
+    const th = hasTH(company);
+    const accounting = hasAccounting(company);
     setSelected(company);
     setForm({
       name: company.name, nit: company.nit, address: company.address || '', phone: company.phone || '', email: company.email || '', logo: company.logo || '',
       regional: company.regional || '', baseDeOperacion: company.baseDeOperacion || '', aliases: company.aliases ?? [], active: company.active,
-      activeTH: company.activeTH ?? company.modules?.humanResources ?? false,
-      activeContabilidad: company.activeContabilidad ?? company.modules?.accounting ?? false,
-      modules: company.modules ?? { humanResources: company.activeTH ?? false, accounting: company.activeContabilidad ?? false, communications: true },
+      activeTH: th,
+      activeContabilidad: accounting,
+      modules: { humanResources: th, accounting, communications: company.modules?.communications ?? false },
     });
     setAliasesText((company.aliases ?? []).join('\n')); setOpen(true);
   };
   const setField = <K extends keyof CompanyForm>(field: K, value: CompanyForm[K]) => setForm(previous => ({ ...previous, [field]: value }));
-  const toggleModule = (field: 'humanResources' | 'accounting' | 'communications') => setForm(previous => ({
+  const toggleModule = (field: ModuleField) => canToggleModule(role, field) && setForm(previous => ({
     ...previous,
     activeTH: field === 'humanResources' ? !previous.modules?.humanResources : previous.activeTH,
     activeContabilidad: field === 'accounting' ? !previous.modules?.accounting : previous.activeContabilidad,
@@ -69,7 +90,7 @@ export function CompanySettingsPage() {
     <div className="flex items-start justify-between gap-3 flex-wrap"><div><h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Settings2 className="w-6 h-6 text-[#008C3C]" />Configuración de empresas</h1><p className="text-sm text-gray-500 mt-1">Catálogo maestro, nombres oficiales, alias y módulos habilitados</p></div><Button onClick={create} className="bg-[#008C3C] hover:bg-[#006C2F]"><Plus className="w-4 h-4 mr-2" />Nueva empresa</Button></div>
     <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"><b>Esta pantalla configura el catálogo.</b> La dotación, nómina, cuentas analíticas e indicadores se consultan desde el módulo Empresas y no se guardan aquí.</div>
     <div className="bg-white border rounded-xl overflow-hidden"><div className="p-4 border-b relative"><Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><Input value={search} onChange={event => setSearch(event.target.value)} className="pl-9" placeholder="Buscar nombre, NIT o alias…" /></div>
-      {loading ? <div className="py-16 text-center text-gray-400"><Loader2 className="w-7 h-7 animate-spin mx-auto" /></div> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-gray-50 text-xs text-gray-500"><tr><th className="text-left px-4 py-3">Empresa</th><th className="text-left px-4 py-3">Alias</th><th className="text-left px-4 py-3">Módulos</th><th className="text-left px-4 py-3">Estado</th><th className="px-4 py-3"></th></tr></thead><tbody className="divide-y">{filtered.map(company => <tr key={company.id} className="hover:bg-gray-50"><td className="px-4 py-3"><div className="flex items-center gap-2"><Building2 className="w-4 h-4 text-[#008C3C]" /><div><p className="font-semibold text-gray-700">{company.name}</p><p className="text-xs text-gray-400">{company.nit}</p></div></div></td><td className="px-4 py-3 text-xs text-gray-500 max-w-xs">{company.aliases?.join(', ') || 'Sin alias'}</td><td className="px-4 py-3"><div className="flex gap-1 flex-wrap">{(company.modules?.humanResources ?? company.activeTH) && <Tag>TH</Tag>}{(company.modules?.accounting ?? company.activeContabilidad) && <Tag>Contabilidad</Tag>}{company.modules?.communications && <Tag>Correos</Tag>}</div></td><td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${company.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{company.active ? 'Activa' : 'Inactiva'}</span></td><td className="px-4 py-3"><div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => edit(company)}><Pencil className="w-3.5 h-3.5" /></Button>{role === 'admin' && <Button size="sm" variant="outline" className="text-red-500" onClick={() => remove(company)}><Trash2 className="w-3.5 h-3.5" /></Button>}</div></td></tr>)}</tbody></table></div>}
+      {loading ? <div className="py-16 text-center text-gray-400"><Loader2 className="w-7 h-7 animate-spin mx-auto" /></div> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-gray-50 text-xs text-gray-500"><tr><th className="text-left px-4 py-3">Empresa</th><th className="text-left px-4 py-3">Alias</th><th className="text-left px-4 py-3">Módulos</th><th className="text-left px-4 py-3">Estado</th><th className="px-4 py-3"></th></tr></thead><tbody className="divide-y">{filtered.map(company => <tr key={company.id} className="hover:bg-gray-50"><td className="px-4 py-3"><div className="flex items-center gap-2"><Building2 className="w-4 h-4 text-[#008C3C]" /><div><p className="font-semibold text-gray-700">{company.name}</p><p className="text-xs text-gray-400">{company.nit}</p></div></div></td><td className="px-4 py-3 text-xs text-gray-500 max-w-xs">{company.aliases?.join(', ') || 'Sin alias'}</td><td className="px-4 py-3"><div className="flex gap-1 flex-wrap">{(company.modules?.humanResources ?? company.activeTH) && <Tag>TH</Tag>}{(company.modules?.accounting ?? company.activeContabilidad) && <Tag>Contabilidad</Tag>}{company.modules?.communications && <Tag>Correos</Tag>}</div></td><td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${company.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{company.active ? 'Activa' : 'Inactiva'}</span></td><td className="px-4 py-3"><div className="flex justify-end gap-2">{canManage(role, company) && <Button size="sm" variant="outline" onClick={() => edit(company)}><Pencil className="w-3.5 h-3.5" /></Button>}{role === 'admin' && <Button size="sm" variant="outline" className="text-red-500" onClick={() => remove(company)}><Trash2 className="w-3.5 h-3.5" /></Button>}</div></td></tr>)}</tbody></table></div>}
     </div>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{selected ? 'Configurar empresa' : 'Nueva empresa'}</DialogTitle></DialogHeader><div className="grid sm:grid-cols-2 gap-4 py-2">
       <Field label="Razón social *"><Input value={form.name} onChange={event => setField('name', event.target.value)} /></Field><Field label="NIT *"><Input value={form.nit} onChange={event => setField('nit', event.target.value)} /></Field>
@@ -77,7 +98,7 @@ export function CompanySettingsPage() {
       <Field label="Dirección"><Input value={form.address} onChange={event => setField('address', event.target.value)} /></Field><Field label="Ubicación principal"><Input value={form.baseDeOperacion} onChange={event => setField('baseDeOperacion', event.target.value)} placeholder="Bogotá" /></Field>
       <Field label="Regional"><Input value={form.regional} onChange={event => setField('regional', event.target.value)} /></Field><Field label="URL del logo"><Input value={form.logo} onChange={event => setField('logo', event.target.value)} /></Field>
       <div className="sm:col-span-2"><Label>Alias históricos</Label><textarea value={aliasesText} onChange={event => setAliasesText(event.target.value)} rows={3} className="mt-1 w-full rounded-md border px-3 py-2 text-sm" placeholder={'INTEEGRA S.A.S BIC\nINTEEGRA SAS BIC'} /><p className="text-xs text-gray-400 mt-1">Uno por línea. Sirven para relacionar registros antiguos con la empresa oficial.</p></div>
-      <div className="sm:col-span-2"><Label>Módulos habilitados</Label><div className="grid sm:grid-cols-3 gap-2 mt-2">{([['humanResources','Talento Humano'],['accounting','Contabilidad'],['communications','Correos']] as const).map(([field,label]) => <button type="button" key={field} onClick={() => toggleModule(field)} className={`rounded-lg border px-3 py-2 text-sm font-medium ${form.modules?.[field] ? 'bg-green-50 border-green-300 text-green-700' : 'bg-gray-50 text-gray-400'}`}>{form.modules?.[field] ? '✓ ' : ''}{label}</button>)}</div></div>
+      <div className="sm:col-span-2"><Label>Módulos habilitados</Label><div className="grid sm:grid-cols-3 gap-2 mt-2">{([['humanResources','Talento Humano'],['accounting','Contabilidad'],['communications','Correos']] as const).map(([field,label]) => <button type="button" key={field} onClick={() => toggleModule(field)} disabled={!canToggleModule(role, field)} className={`rounded-lg border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 ${form.modules?.[field] ? 'bg-green-50 border-green-300 text-green-700' : 'bg-gray-50 text-gray-400'}`}>{form.modules?.[field] ? '✓ ' : ''}{label}</button>)}</div>{role !== 'admin' && <p className="text-xs text-gray-400 mt-1">{role === 'contabilidad' ? 'Las empresas que crea Contabilidad quedan solo con el módulo de Contabilidad.' : 'Las empresas que crea Talento Humano quedan solo con el módulo de Talento Humano.'} Para cambiar los módulos de otra área, pide ayuda a un administrador.</p>}</div>
       <div className="sm:col-span-2"><button type="button" onClick={() => setField('active', !form.active)} className={`w-full rounded-lg border px-3 py-2 text-sm font-medium ${form.active ? 'bg-green-50 border-green-300 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{form.active ? '✓ Empresa activa' : 'Empresa inactiva'}</button></div>
     </div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={save} disabled={saving || !form.name.trim() || !form.nit.trim()} className="bg-[#008C3C] hover:bg-[#006C2F]">{saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar</Button></DialogFooter></DialogContent></Dialog>
   </div>;

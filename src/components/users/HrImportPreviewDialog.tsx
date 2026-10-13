@@ -1,10 +1,13 @@
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, Loader2, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileSpreadsheet, Loader2, ShieldCheck, UserMinus, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { HrExcelPreview } from '@/domain/humanResources/hrExcelPreview';
 
+export type HrStaleActive = { id: string; fullName: string; documentNumber: string; companies: string[] };
+
 export function HrImportPreviewDialog({
   open, onOpenChange, preview, loading, loadingLabel, error, applying, applyProgress, onApply,
+  staleActives, retireStale = false, onRetireStaleChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -15,6 +18,10 @@ export function HrImportPreviewDialog({
   applying: boolean;
   applyProgress: number;
   onApply: () => void;
+  /** Activos en la plataforma que no están activos en el Excel (solo carga completa). */
+  staleActives?: HrStaleActive[];
+  retireStale?: boolean;
+  onRetireStaleChange?: (value: boolean) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -81,6 +88,40 @@ export function HrImportPreviewDialog({
                 )}
               </div>
             </div>
+
+            {(preview.dateIssues > 0 || preview.unclassifiedReasons > 0) && (
+              <p className="text-xs text-gray-500">
+                {preview.dateIssues > 0 && <>{preview.dateIssues} fechas opcionales no se pudieron interpretar y se conservará el valor actual. </>}
+                {preview.unclassifiedReasons > 0 && <>{preview.unclassifiedReasons} motivos de retiro no están en el catálogo y quedarán como “Sin clasificar”.</>}
+              </p>
+            )}
+
+            {staleActives && staleActives.length > 0 && (
+              <div className="border border-rose-200 rounded-xl overflow-hidden">
+                <div className="bg-rose-50 px-4 py-2 flex items-center gap-2 text-sm font-semibold text-rose-800">
+                  <UserMinus className="w-4 h-4" /> Activos en la plataforma que no están activos en el Excel ({staleActives.length.toLocaleString('es-CO')})
+                </div>
+                <div className="max-h-44 overflow-y-auto divide-y">
+                  {staleActives.slice(0, 300).map(person => (
+                    <div key={person.id} className="px-4 py-1.5 text-xs flex gap-3">
+                      <span className="font-mono text-gray-500 w-24 shrink-0">{person.documentNumber}</span>
+                      <span className="text-gray-700 flex-1">{person.fullName}</span>
+                      <span className="text-gray-400 truncate max-w-[40%]">{person.companies.join(', ')}</span>
+                    </div>
+                  ))}
+                </div>
+                <label className="flex items-start gap-2 px-4 py-3 border-t bg-white text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5" checked={retireStale} disabled={applying}
+                    onChange={event => onRetireStaleChange?.(event.target.checked)} />
+                  <span>
+                    Marcar estas {staleActives.length.toLocaleString('es-CO')} personas como <b>retiradas</b> al aplicar.
+                    <span className="block text-xs text-gray-400">
+                      Sus relaciones activas pasan a retiradas sin fecha de retiro y con motivo “Sin clasificar”. La decisión queda registrada en el historial de importaciones.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
 
             {preview.issues.length > 0 && (
               <div className="border border-amber-200 rounded-xl overflow-hidden">

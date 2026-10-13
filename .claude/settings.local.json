@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "Write(scripts/reset-hr-employees.mjs)",
+      "Bash(node scripts/reset-hr-employees.mjs:*)",
       "Bash(git config:*)",
       "Bash(git -C /mnt/c/Users/hp/nelyoda ls-files -- .env scripts/serviceAccount.json)",
       "Bash(npx tsc:*)",

@@ -137,7 +137,7 @@ export const sendWaTemplate = onCall(
     if (!templateSnap.exists) throw new HttpsError("not-found", "Plantilla no encontrada.");
 
     const { phoneNumberId, metaToken } = numberSnap.data() as { phoneNumberId: string; metaToken: string };
-    const tplData = templateSnap.data() as { providerTemplateName: string; bodyText?: string; displayName?: string };
+    const tplData = templateSnap.data() as { providerTemplateName: string; bodyText?: string; displayName?: string; languageCode?: string };
 
     const conv = await getOrCreateConversation(numberId, userAddress, { userId, userName });
     const params = parameters ?? [];
@@ -155,7 +155,7 @@ export const sendWaTemplate = onCall(
         messaging_product: "whatsapp", to: userAddress, type: "template",
         template: {
           name: tplData.providerTemplateName,
-          language: { code: "es_CO" },
+          language: { code: tplData.languageCode || "es_CO" },
           ...(components.length > 0 && { components }),
         },
       }),

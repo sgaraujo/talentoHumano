@@ -13,6 +13,9 @@ export interface Project {
   leaderId?: string;       // userId del líder del proyecto
   leaderName?: string;     // desnormalizado
 
+  /** Otros nombres con que aparece la cuenta en Expedientes (ej. "ZTE - MPW"). */
+  aliases?: string[];
+
   // Clasificación
   area?: string;
   sede?: string;

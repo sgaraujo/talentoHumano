@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de Inteegrados</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#F7F9F6; --surface:#FFFFFF; --ink:#18231D; --muted:#56635B; --line:#DCE3DD;
+  --accent:#008C3C; --accent-soft:#E3F2E8; --accent-ink:#006C2F;
+  --blue:#1F8FBF; --blue-soft:#E2F1F8; --amber:#9A5B00; --amber-soft:#FBF0DC;
+  --violet:#6B4FB3; --violet-soft:#EEE9F8;
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --body:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --paper:#111713; --surface:#18201B; --ink:#E6ECE7; --muted:#9AA8A0; --line:#2B3630;
+  --accent:#3DBB6E; --accent-soft:#16301F; --accent-ink:#6FD497;
+  --blue:#5DB6DE; --blue-soft:#132A36; --amber:#E8B25A; --amber-soft:#33260F;
+  --violet:#B19BEB; --violet-soft:#241D38;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#111713; --surface:#18201B; --ink:#E6ECE7; --muted:#9AA8A0; --line:#2B3630;
+  --accent:#3DBB6E; --accent-soft:#16301F; --accent-ink:#6FD497;
+  --blue:#5DB6DE; --blue-soft:#132A36; --amber:#E8B25A; --amber-soft:#33260F;
+  --violet:#B19BEB; --violet-soft:#241D38;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font:16px/1.65 var(--body);padding-inline:16px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:260px minmax(0,1fr);gap:48px;padding-block:40px 80px}
+@media (max-width:880px){.wrap{grid-template-columns:1fr;gap:24px;padding-block:24px 64px}}
+
+/* Índice */
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 24px);align-self:start;max-height:calc(100vh - 48px);overflow:auto;padding-right:8px}
+@media (max-width:880px){nav.toc{position:static;max-height:none;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:14px 16px}}
+.toc .brand{font:700 1.05rem/1.2 var(--display);color:var(--accent-ink);margin:0 0 14px}
+.toc label{display:block;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.toc input{width:100%;font:inherit;font-size:.9rem;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.toc input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.toc h4{font:600 .72rem/1 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:20px 0 8px}
+.toc ol{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.toc a{display:block;padding:4px 8px;border-radius:6px;color:var(--ink);text-decoration:none;font-size:.92rem}
+.toc a:hover{background:var(--accent-soft)}
+.toc a:focus-visible{outline:2px solid var(--accent)}
+.toc a.dim{opacity:.35}
+
+/* Contenido */
+main{min-width:0}
+header.intro{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:8px}
+.eyebrow{font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-ink);font-weight:600;margin:0 0 8px}
+h1{font:700 clamp(2rem,4.5vw,2.9rem)/1.08 var(--display);margin:0 0 14px;text-wrap:balance;letter-spacing:-.01em}
+.lede{font-size:1.1rem;color:var(--muted);max-width:62ch;margin:0}
+.part{margin-top:56px}
+.part-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:8px}
+.part-head span{font:600 .8rem var(--mono);color:var(--muted)}
+.part-head h2{font:700 1.7rem/1.2 var(--display);margin:0}
+section.mod{padding-block:30px;border-bottom:1px solid var(--line);scroll-margin-top:20px}
+section.mod[hidden]{display:none}
+h3{font:600 1.35rem/1.25 var(--display);margin:0 0 6px;text-wrap:balance}
+.meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:0 0 14px;font-size:.82rem;color:var(--muted)}
+code,.path{font:500 .82em var(--mono);background:var(--accent-soft);color:var(--accent-ink);padding:1px 6px;border-radius:4px}
+.role{font-size:.74rem;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid transparent}
+.r-admin{background:var(--violet-soft);color:var(--violet)}
+.r-th{background:var(--accent-soft);color:var(--accent-ink)}
+.r-cont{background:var(--blue-soft);color:var(--blue)}
+.r-fin{background:var(--amber-soft);color:var(--amber)}
+p{margin:0 0 12px;max-width:68ch}
+h5{font:600 .95rem var(--body);margin:18px 0 6px}
+ul,ol.steps{margin:0 0 12px;padding-left:1.3em;max-width:68ch}
+li{margin-bottom:5px}
+ol.steps li::marker{font-weight:600;color:var(--accent-ink)}
+.ui{font-weight:600;white-space:nowrap}
+.note{border-left:3px solid var(--amber);background:var(--amber-soft);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0;max-width:68ch;font-size:.95rem}
+.note.tip{border-color:var(--accent);background:var(--accent-soft)}
+.table-wrap{overflow-x:auto;margin:10px 0 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:var(--paper)}
+tr:last-child td{border-bottom:0}
+td.c{text-align:center}
+.yes{color:var(--accent-ink);font-weight:700}
+.no{color:var(--muted)}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 14px;font-size:.85rem}
+.flow b{background:var(--surface);border:1px solid var(--line);padding:4px 10px;border-radius:6px;font-weight:600}
+.flow i{color:var(--muted);font-style:normal}
+.empty{display:none;padding:28px 0;color:var(--muted)}
+footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<nav class="toc" aria-label="Índice del manual">
+  <p class="brand">Manual de Inteegrados</p>
+  <label for="q">Buscar en el manual</label>
+  <input id="q" type="search" placeholder="Ej: retiro, WhatsApp, IVA…" autocomplete="off">
+  <h4>Primeros pasos</h4>
+  <ol>
+    <li><a href="#ingreso">Ingresar a la plataforma</a></li>
+    <li><a href="#roles">Qué ve cada rol</a></li>
+    <li><a href="#navegacion">Navegación y filtros</a></li>
+  </ol>
+  <h4>Parte 1 · Uso diario</h4>
+  <ol>
+    <li><a href="#dashboard">Analítica de Talento Humano</a></li>
+    <li><a href="#expedientes">Expedientes y control</a></li>
+    <li><a href="#offboarding">Offboarding</a></li>
+    <li><a href="#empresas">Empresas</a></li>
+    <li><a href="#cuentas">Cuentas analíticas</a></li>
+    <li><a href="#correos">Correos</a></li>
+    <li><a href="#boletines">Boletines</a></li>
+    <li><a href="#whatsapp">WhatsApp</a></li>
+    <li><a href="#notificaciones">Notificaciones</a></li>
+    <li><a href="#estadisticas">Estadísticas de campañas</a></li>
+    <li><a href="#cuestionarios">Cuestionarios</a></li>
+    <li><a href="#exportador">Exportador</a></li>
+    <li><a href="#asistente">Asistente del manual</a></li>
+    <li><a href="#calendario">Calendario Tributario</a></li>
+    <li><a href="#informe">Informe Tributario</a></li>
+    <li><a href="#mensajes">Mensajes de Contabilidad</a></li>
+  </ol>
+  <h4>Parte 2 · Administración</h4>
+  <ol>
+    <li><a href="#usuarios">Usuarios y accesos</a></li>
+    <li><a href="#rolesacc">Roles y Accesos</a></li>
+    <li><a href="#config-empresas">Configuración de empresas</a></li>
+    <li><a href="#importaciones">Importaciones desde Excel</a></li>
+    <li><a href="#problemas">Problemas frecuentes</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="intro">
+  <p class="eyebrow">Inteegrados · Gestión de Talento Humano</p>
+  <h1>Manual de usuario</h1>
+  <p class="lede">Cómo usar cada módulo de la plataforma: desde consultar la dotación de una empresa hasta enviar un comunicado o llevar un vencimiento tributario hasta el pago. La Parte 1 cubre el trabajo del día a día; la Parte 2, las tareas que solo hace un administrador.</p>
+</header>
+
+<div class="part" id="p0">
+  <div class="part-head"><span>Primeros pasos</span><h2>Antes de empezar</h2></div>
+
+  <section class="mod" id="ingreso" data-k="login acceso código contraseña sesión correo">
+    <h3>Ingresar a la plataforma</h3>
+    <p>Se ingresa con el correo corporativo. Hay dos formas de hacerlo:</p>
+    <h5>Con código de verificación (recomendado)</h5>
+    <ol class="steps">
+      <li>Escribe tu correo y pulsa <span class="ui">Enviar código de verificación</span>.</li>
+      <li>Revisa tu bandeja de entrada: llega un código de 6 dígitos.</li>
+      <li>Escríbelo en la pantalla <span class="ui">Verificar identidad</span>. El código expira en 10 minutos; si vence, pide uno nuevo.</li>
+    </ol>
+    <h5>Con contraseña</h5>
+    <p>Pulsa <span class="ui">Iniciar sesión con contraseña</span>, escribe correo y contraseña. Para volver al método anterior usa <span class="ui">Volver al acceso con código</span>.</p>
+    <p>Para salir, usa <span class="ui">Cerrar sesión</span> al pie del menú lateral.</p>
+    <div class="note">Si ingresas y no ves ningún módulo, tu usuario no tiene un rol asignado. Pide a un administrador que te lo asigne en <a href="#rolesacc">Roles y Accesos</a>.</div>
+  </section>
+
+  <section class="mod" id="roles" data-k="roles permisos administrador talento humano contabilidad financiera">
+    <h3>Qué ve cada rol</h3>
+    <p>Cada persona tiene un único rol de plataforma. El menú lateral solo muestra los módulos que ese rol puede abrir.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Módulo</th><th>Administrador</th><th>Talento Humano</th><th>Contabilidad</th><th>Financiera</th></tr></thead>
+      <tbody>
+        <tr><td>Analítica de TH, Expedientes, Offboarding, Empresas, Cuentas analíticas</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Correos, Boletines, WhatsApp, Notificaciones</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Estadísticas de campañas y de WhatsApp</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Cuestionarios, Exportador</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Estadísticas de envíos de cuestionarios</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Calendario e Informe Tributario, Mensajes</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c yes">Sí</td><td class="c yes">Sí¹</td></tr>
+        <tr><td>Configuración de empresas</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Usuarios y accesos, Roles y Accesos</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+      </tbody>
+    </table></div>
+    <p style="font-size:.88rem;color:var(--muted)">¹ Financiera ve el proceso tributario pero no lo avanza: su paso es registrar el pago.</p>
+    <p>La información sensible del expediente (salario, datos bancarios, seguridad social) solo la ven Administrador y Talento Humano.</p>
+  </section>
+
+  <section class="mod" id="navegacion" data-k="menú navegación filtros exportar excel buscar">
+    <h3>Navegación y filtros</h3>
+    <ul>
+      <li>El menú lateral agrupa los módulos en <span class="ui">Personas y organización</span>, <span class="ui">Comunicaciones</span>, <span class="ui">Formularios y análisis</span>, <span class="ui">Herramientas</span>, <span class="ui">Contabilidad</span> y <span class="ui">Administración</span>. En el celular se abre con el botón de menú.</li>
+      <li>Casi todas las pantallas tienen un buscador y filtros por empresa, cuenta analítica y mes. Los números de las tarjetas superiores respetan los filtros aplicados.</li>
+      <li>Los botones <span class="ui">Exportar</span> o <span class="ui">Exportar Excel</span> descargan exactamente lo que estás viendo con los filtros actuales.</li>
+      <li>En las estadísticas, al hacer clic en una tarjeta de indicador se abre <span class="ui">De dónde sale el dato</span>, que explica cómo se calcula.</li>
+    </ul>
+  </section>
+</div>
+
+<div class="part" id="p1">
+  <div class="part-head"><span>Parte 1</span><h2>Uso diario</h2></div>
+
+  <section class="mod" id="dashboard" data-k="dashboard analítica headcount rotación ingresos retiros sena demografía">
+    <h3>Analítica de Talento Humano</h3>
+    <div class="meta"><span class="path">/dashboard</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Tablero con el estado de la planta de personal. Usa los <span class="ui">Filtros</span> de mes, empresa y cuenta analítica para acotar.</p>
+    <ul>
+      <li><b>Resumen:</b> colaboradores activos, empresas de TH, cuentas analíticas activas, ingresos y retiros del mes.</li>
+      <li><b>Movimientos:</b> rotación mensual con semáforo (≤3 % óptima, ≤7 % moderada, más de 7 % alta) y tendencia de ingresos y retiros de los últimos 6 meses.</li>
+      <li><b>Demografía:</b> distribución por empresa, cuenta analítica, género, modalidad de trabajo, rango de edad, ciudad y tipo de contrato.</li>
+      <li><b>Solapamiento de talento:</b> alerta de personas con más de un contrato vigente.</li>
+    </ul>
+    <h5>Aprendices SENA activos</h5>
+    <p>En <b>Resumen</b>, la sección <span class="ui">Aprendices SENA activos</span> muestra a los aprendices con contrato vigente (contrato laboral especial o cuenta analítica APRENDICES), tomados de Expedientes:</p>
+    <ul>
+      <li>Totales: aprendices activos, en <b>etapa productiva</b>, en <b>etapa lectiva</b> e ingresados en el año. La etapa se toma del tipo de contrato.</li>
+      <li>Cuántos aprendices hay <b>por cuenta analítica</b> y <b>por empresa</b>.</li>
+      <li>La lista de aprendices con empresa, cuenta analítica, etapa, fecha de ingreso y meses en la empresa. Puedes buscar por nombre, documento, empresa o cuenta, filtrar por etapa o cuenta y pulsar <span class="ui">Excel</span> para descargar la lista filtrada. Haz clic en una persona para abrir su expediente.</li>
+      <li>Respeta el filtro de empresa del tablero.</li>
+    </ul>
+    <div class="note tip">Los aprendices SENA no cuentan en el headcount de rotación; por eso se muestran aparte.</div>
+    <p>Para el análisis histórico detallado (rotación general y voluntaria, motivos, costos de retiro, fracaso de contratación en menos de 3 meses) usa la vista <span class="ui">Rotación &amp; Talento</span> en <span class="path">/rotacion-talento</span>.</p>
+  </section>
+
+  <section class="mod" id="expedientes" data-k="expedientes control persona cédula contrato retiro desactivar activar nueva persona">
+    <h3>Expedientes y control</h3>
+    <div class="meta"><span class="path">/talento-humano/control</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Es la base oficial de personas. Cada persona tiene un expediente con sus datos y una o varias relaciones laborales (empresa + cuenta analítica).</p>
+    <h5>Buscar y filtrar</h5>
+    <p>Busca por nombre, cédula, empresa o cuenta analítica. Los filtros rápidos son <span class="ui">Todos</span>, <span class="ui">Activos</span>, <span class="ui">Retirados</span>, <span class="ui">Sin acceso</span> (sin cuenta en la plataforma) y <span class="ui">Vínculo múltiple</span>.</p>
+    <h5>Crear una persona</h5>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nueva persona</span>.</li>
+      <li>Completa los datos personales (cédula y nombre como mínimo).</li>
+      <li>En <span class="ui">Relación laboral inicial</span> elige empresa y cuenta analítica. Es opcional: sin empresa, el expediente queda sin vínculo activo.</li>
+    </ol>
+    <h5>Consultar o editar un expediente</h5>
+    <ol class="steps">
+      <li>En la fila de la persona pulsa <span class="ui">Abrir expediente</span>.</li>
+      <li>Revisa datos personales y de contacto, contrato, salario, información bancaria y seguridad social.</li>
+      <li>Usa <span class="ui">Editar expediente</span> para cambiar todo, o <span class="ui">Editar campos específicos</span> para ajustar solo algunos datos.</li>
+    </ol>
+    <h5>Registrar un retiro</h5>
+    <ol class="steps">
+      <li>Dentro del expediente, en la relación laboral, pulsa <span class="ui">Desactivar contrato</span>.</li>
+      <li>Indica <span class="ui">Fecha de retiro</span> y <span class="ui">Motivo de retiro</span> (obligatorios) y, si aplica, el <span class="ui">Costo de retiro</span>.</li>
+      <li>Para corregirlo después usa <span class="ui">Editar retiro</span>; para reintegrar a la persona, <span class="ui">Activar contrato</span>.</li>
+    </ol>
+    <p>Si era el último contrato activo de la persona, pasa a excolaborador y, con el envío automático activo, recibe la encuesta de salida en su correo personal. Ver <a href="#offboarding">Offboarding</a>.</p>
+    <div class="note">El motivo y el costo del retiro alimentan los indicadores de rotación voluntaria y costo de retiros. Registrarlos bien evita cifras engañosas.</div>
+  </section>
+
+  <section class="mod" id="offboarding" data-k="offboarding enviar manual excolaboradores antiguos encuesta de salida excolaborador retiro renuncia despedida correo personal enlace reenviar indicadores satisfacción">
+    <h3>Offboarding</h3>
+    <div class="meta"><span class="path">/offboarding</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Encuesta de salida automática para quienes terminan su vinculación. Talento Humano no tiene que crear ni enviar nada a mano.</p>
+    <h5>Cómo funciona</h5>
+    <div class="flow"><b>Activo</b><i>→</i><b>TH registra el retiro</b><i>→</i><b>Excolaborador</b><i>→</i><b>Enlace único al correo personal</b><i>→</i><b>Respondida</b></div>
+    <ul>
+      <li>Se activa cuando se registra el retiro del <b>último contrato activo</b> de la persona en <a href="#expedientes">Expedientes y control</a>. Si todavía tiene otro contrato activo, no es excolaborador y no se envía.</li>
+      <li>El correo llega al <b>correo personal</b> del expediente con un mensaje de despedida y el enlace. La persona responde sin necesidad de acceso a la plataforma.</li>
+      <li>Cada retiro genera <b>una sola encuesta</b>. Reenviar usa el mismo enlace, sin duplicados.</li>
+      <li>No se envía cuando el motivo de retiro es Fallecimiento o Anulado, ni cuando el retiro es más antiguo que el límite de días configurado (protege contra cargas históricas desde Excel).</li>
+    </ul>
+    <h5>Configurarlo por primera vez</h5>
+    <ol class="steps">
+      <li>Abre la pestaña <span class="ui">Configuración</span>.</li>
+      <li>Pulsa <span class="ui">Crear encuesta sugerida</span> (trae las preguntas de motivo de retiro, experiencia general, líder, clima, comunicación, compensación, crecimiento, bienestar, procesos, aspectos positivos y por mejorar, recomendación y comentarios) o elige un cuestionario existente. Las preguntas se editan en <a href="#cuestionarios">Cuestionarios</a>.</li>
+      <li>Ajusta el máximo de días de antigüedad del retiro (30 por defecto).</li>
+      <li>Pulsa <span class="ui">Activar envío automático</span>.</li>
+    </ol>
+    <h5>Enviar a excolaboradores que ya se retiraron</h5>
+    <p>Para quienes se retiraron antes de activar el módulo, o hace más días que el límite configurado, usa el botón <span class="ui">Enviar a excolaboradores</span>. La encuesta de salida no se envía desde Cuestionarios: allí solo aparecen usuarios de la plataforma, no los excolaboradores de Expedientes.</p>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Enviar a excolaboradores</span>. Se listan las personas de Expedientes y control sin contratos activos.</li>
+      <li>Busca por nombre, cédula, proyecto o cargo y marca a quienes quieres enviarles la encuesta (máximo 100 por envío).</li>
+      <li>Pulsa <span class="ui">Enviar encuesta</span>. Cada persona recibe su enlace único y aparece en la lista de encuestas.</li>
+    </ol>
+    <p>No se pueden seleccionar quienes ya tienen encuesta, quienes no tienen correo personal registrado ni quienes tienen un motivo de retiro excluido.</p>
+    <h5>Consultar las encuestas</h5>
+    <p>La pestaña <span class="ui">Encuestas</span> muestra por cada excolaborador: nombre, proyecto o cliente, cargo, fecha de retiro, fecha de envío, fecha de respuesta y estado. Filtra por estado, proyecto y año, y usa <span class="ui">Exportar Excel</span> para descargar todas las respuestas.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Estado</th><th>Qué significa y qué hacer</th></tr></thead>
+      <tbody>
+        <tr><td>Respondida</td><td>La persona diligenció la encuesta. Usa <span class="ui">Ver respuestas</span> para leerlas completas.</td></tr>
+        <tr><td>Pendiente de respuesta</td><td>El correo se envió pero aún no responde. Puedes usar <span class="ui">Reenviar</span> (mismo enlace).</td></tr>
+        <tr><td>No enviada</td><td>El expediente no tiene correo personal o falló el envío. Registra el correo personal en el expediente y pulsa <span class="ui">Enviar</span>.</td></tr>
+      </tbody>
+    </table></div>
+    <h5>Indicadores</h5>
+    <p>La pestaña <span class="ui">Indicadores</span> resume, según los filtros: principales causas de retiro (según el excolaborador y según TH), satisfacción por dimensión (de 1 a 5), retiros voluntarios y satisfacción por proyecto y por líder, y resultados por mes.</p>
+  </section>
+
+  <section class="mod" id="empresas" data-k="empresas dotación activos sin acceso alertas nómina calidad de datos">
+    <h3>Empresas</h3>
+    <div class="meta"><span class="path">/empresas</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Vista ejecutiva de la estructura laboral por empresa. Cada tarjeta muestra cuatro indicadores:</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Indicador</th><th>Qué cuenta</th></tr></thead>
+      <tbody>
+        <tr><td>Activos</td><td>Personas distintas con contrato activo, sin incluir aprendices SENA.</td></tr>
+        <tr><td>Cuentas analíticas</td><td>Cuentas analíticas de la empresa en estado activo.</td></tr>
+        <tr><td>Sin acceso</td><td>Personas activas que aún no tienen cuenta en la plataforma.</td></tr>
+        <tr><td>Alertas</td><td>Vínculos activos a los que les falta cuenta analítica, cargo, correo corporativo o teléfono corporativo.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Pulsa <span class="ui">Actualizar</span> para recalcular después de hacer cambios. Filtra por estado, con o sin trabajadores, <span class="ui">Con inconsistencias</span>, regional y base de operación.</p>
+    <h5>Detalle de una empresa</h5>
+    <p>Al abrir una empresa ves las pestañas <span class="ui">Resumen</span>, <span class="ui">Estadísticas</span> (retiros del año, rotación anual, antigüedad promedio, género, motivos de retiro), <span class="ui">Personas</span> (exportable a Excel), <span class="ui">Cuentas analíticas</span>, <span class="ui">Nómina</span> y <span class="ui">Calidad de datos</span>.</p>
+    <p>La pestaña <span class="ui">Nómina</span> muestra el costo salarial mensual estimado (salario base + auxilios + KPI). No incluye prestaciones ni aportes patronales.</p>
+    <div class="note tip">Para bajar las alertas, abre <span class="ui">Calidad de datos</span>: lista a cada persona con el dato que le falta.</div>
+  </section>
+
+  <section class="mod" id="cuentas" data-k="cuentas analíticas proyectos líder sede prioridad alias otros nombres estadísticas headcount cargos antigüedad calidad de datos">
+    <h3>Cuentas analíticas</h3>
+    <div class="meta"><span class="path">/proyectos</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Cada cuenta analítica pertenece a una empresa y agrupa a las personas que trabajan en ella.</p>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nueva cuenta analítica</span>.</li>
+      <li>Elige <span class="ui">Empresa</span>, escribe el <span class="ui">Nombre de la cuenta analítica</span> y, si quieres, <span class="ui">Sede</span> y <span class="ui">Prioridad</span> (Baja, Media, Alta, Crítica).</li>
+      <li>Guarda. Luego puedes <span class="ui">Asignar líder</span> y <span class="ui">Agregar persona</span>.</li>
+    </ol>
+    <p>Los estados posibles son Activo, Inactivo y Completado. Solo las activas cuentan en los indicadores de Empresas.</p>
+    <h5>Otros nombres de la cuenta (alias)</h5>
+    <p>En contratos antiguos la misma cuenta puede aparecer escrita de otra forma (por ejemplo “ZTE - MPW” o “[ZTE] ZTE MPW” para ZTE MPW). Edita la cuenta con el lápiz y agrega esos nombres en <span class="ui">Otros nombres en Expedientes (alias)</span>: escribe el nombre y pulsa Enter, luego <span class="ui">Guardar</span>. Un nombre solo puede ser alias de una cuenta por empresa.</p>
+    <h5>Estadísticas de una cuenta analítica</h5>
+    <p>En cada tarjeta pulsa <span class="ui">Estadísticas</span>. Muestra la foto actual de la cuenta, con las personas que tienen contrato vigente según Expedientes:</p>
+    <ul>
+      <li><b>Headcount:</b> personas activas (sin aprendices SENA), aprendices SENA, antigüedad promedio, ingresos del año que siguen activos y personas con datos incompletos.</li>
+      <li><b>Composición del equipo:</b> cargos, tipo de contrato, antigüedad, modalidad, regional o base, jefe inmediato, género y rango de edad, con cantidad y porcentaje.</li>
+      <li><b>Calidad de datos:</b> quién no tiene cargo, correo corporativo, teléfono corporativo o fecha de ingreso. Haz clic en la persona para abrir su expediente y completarlo.</li>
+      <li><b>Personas de la cuenta:</b> lista con búsqueda; <span class="ui">Exportar personas</span> descarga la lista en Excel.</li>
+    </ul>
+    <div class="note tip">Por ahora es la foto del día de hoy. La rotación y los retiros por cuenta llegarán cuando cada cuenta tenga sus nombres alternativos (alias), porque en el histórico la misma cuenta aparece escrita de varias formas.</div>
+    <div class="note">Si una cuenta dice <em>“Nadie con contrato vigente está asignado”</em>, revisa en Expedientes que las relaciones laborales tengan esa cuenta analítica escrita igual.</div>
+  </section>
+
+  <section class="mod" id="correos" data-k="correos comunicados enviar acuse lectura reenviar pendientes adjuntos cuestionario">
+    <h3>Correos (comunicados)</h3>
+    <div class="meta"><span class="path">/comunicaciones</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Envía comunicados oficiales por correo y sigue quién los leyó.</p>
+    <h5>Enviar un comunicado</h5>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nuevo comunicado</span>.</li>
+      <li>En <span class="ui">Destinatarios</span> elige: todos los colaboradores, por empresa, por cuenta analítica o por empleado.</li>
+      <li>Escribe <span class="ui">Asunto</span> y <span class="ui">Mensaje</span>. Opcionalmente agrega hasta 3 adjuntos (10 MB cada uno), una imagen con enlace, un botón con URL de destino o un cuestionario.</li>
+      <li>Revisa la <span class="ui">Vista previa en vivo</span>: es exactamente lo que recibirá la persona.</li>
+      <li>Envía.</li>
+    </ol>
+    <h5>Seguimiento</h5>
+    <ul>
+      <li>La lista de comunicados muestra enviados, leídos, pendientes y porcentaje de apertura.</li>
+      <li><span class="ui">Reenviar a pendientes</span> vuelve a enviar solo a quienes no lo han abierto. También puedes reenviar a una persona.</li>
+      <li>Desde cada comunicado puedes <span class="ui">Editar</span>, <span class="ui">Duplicar</span> o ver sus estadísticas, y exportar a Excel o PDF.</li>
+    </ul>
+    <p>Cada correo lleva un enlace personal. Si el comunicado pide <b>acuse</b>, la persona confirma la lectura desde ese enlace.</p>
+  </section>
+
+  <section class="mod" id="boletines" data-k="boletines editor secciones publicar borrador compartir">
+    <h3>Boletines</h3>
+    <div class="meta"><span class="path">/boletines</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nuevo boletín</span>.</li>
+      <li>En <span class="ui">Información general</span> escribe título, subtítulo, categoría, color de fondo, texto de introducción y etiquetas.</li>
+      <li>Agrega <span class="ui">Secciones de contenido</span>: Texto, Imagen, Estadísticas, Acordeón, Tarjetas, Cita, Separador, Video (YouTube o Vimeo) o Links. Cada sección admite una animación de entrada.</li>
+      <li>El editor guarda borradores automáticamente. Cuando esté listo, publícalo.</li>
+      <li>Desde la vista del boletín usa <span class="ui">Enviar</span> para compartirlo o <span class="ui">Copiar enlace</span>.</li>
+    </ol>
+    <p>En la lista puedes filtrar por categoría, etiqueta y estado (Publicado o Borrador), y usar <span class="ui">Editar</span>, <span class="ui">Duplicar</span> y <span class="ui">Estadísticas</span>. Las estadísticas muestran vistas totales, personas únicas y el canal (email, WhatsApp o sesión).</p>
+  </section>
+
+  <section class="mod" id="whatsapp" data-k="whatsapp campañas plantilla chat conversaciones contactos externos">
+    <h3>WhatsApp</h3>
+    <div class="meta"><span class="path">/whatsapp</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <h5>Conversaciones</h5>
+    <p>Elige el número de WhatsApp Business desde el que trabajas (<span class="ui">Cambiar número</span> para otro), selecciona una conversación y responde.</p>
+    <h5>Crear una campaña</h5>
+    <ol class="steps">
+      <li>Abre <span class="ui">Nueva campaña</span> y ponle un nombre (ej. “Bienvenida julio”).</li>
+      <li><b>Configuración:</b> elige una <span class="ui">Plantilla aprobada</span> por Meta y completa sus variables. Si la plantilla lleva enlace, puedes tomar uno de un boletín publicado o un cuestionario público.</li>
+      <li><b>Usuarios de Inteegrados:</b> filtra por empresa o cuenta analítica y marca a las personas.</li>
+      <li><b>Contactos externos</b> (opcional): importa un Excel o CSV con columnas <code>nombre</code>, <code>telefono</code> y <code>grupo</code>. Los números repetidos o inválidos se excluyen solos.</li>
+      <li>Confirma que los destinatarios autorizaron recibir WhatsApp y envía.</li>
+    </ol>
+    <div class="note">Algunas personas no pueden recibir en su número corporativo; la plataforma lo avisa y, cuando existe, usa el celular personal.</div>
+    <p>En <span class="ui">Historial y resultados</span>, “Aceptado” significa que Meta recibió el mensaje. “Entregado” y “Leído” llegan después, de forma automática.</p>
+  </section>
+
+  <section class="mod" id="notificaciones" data-k="notificaciones cumpleaños aniversarios periodo de prueba fin de contrato calendario">
+    <h3>Notificaciones</h3>
+    <div class="meta"><span class="path">/notificaciones</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Calendario de eventos del equipo: cumpleaños, aniversarios, fin de periodo de prueba, inicio de contrato y fin de contrato.</p>
+    <p>Filtra por tipo de evento, empresa y período (próximos 30, 60 o 90 días, 6 meses o un año). Úsalo cada semana para anticipar vencimientos de periodos de prueba y contratos a término fijo.</p>
+  </section>
+
+  <section class="mod" id="estadisticas" data-k="estadísticas campañas correo whatsapp embudo apertura clics entregados leídos fallidos">
+    <h3>Estadísticas de campañas</h3>
+    <div class="meta"><span class="path">/estadisticas-campanas-correo</span><span class="path">/estadisticas-whatsapp</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Hay dos tableros, uno para correo y otro para WhatsApp. Ambos se leen igual:</p>
+    <ul>
+      <li><b>Embudo de conversión:</b> cuántas personas pasaron por cada etapa. En correo: enviado → abierto → clic → confirmó lectura. En WhatsApp: aceptado → entregado → leído.</li>
+      <li><b>Comparación entre campañas:</b> las 10 mejores según la métrica que elijas.</li>
+      <li><b>Pestañas:</b> <span class="ui">Por campaña</span>, <span class="ui">Destinatarios</span> y, en WhatsApp, <span class="ui">Fallidos</span> con el error de cada envío.</li>
+    </ul>
+    <p>Filtra por campaña, empresa y resultado. El listado de destinatarios de WhatsApp muestra los primeros 300; exporta a Excel para ver el listado completo.</p>
+  </section>
+
+  <section class="mod" id="cuestionarios" data-k="cuestionarios generar con ia inteligencia artificial borrador encuestas onboarding preguntas enviar respuestas plantillas editar modificar mover reordenar ordenar arrastrar subir bajar duplicar copiar mapeo campos">
+    <h3>Cuestionarios</h3>
+    <div class="meta"><span class="path">/questionarios</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <h5>Crear un cuestionario</h5>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nuevo Cuestionario</span> (o <span class="ui">Cargar plantillas</span> para traer los de onboarding predeterminados).</li>
+      <li>Escribe título, descripción y a quién va dirigido: Todos, Colaboradores, Aspirantes o Ex-colaboradores.</li>
+      <li>Agrega preguntas: texto corto, texto largo, selección única, selección múltiple, calificación, fecha o número. Marca las obligatorias. Puedes cambiar el orden, duplicar o eliminar preguntas igual que al editar (ver <i>Editar un cuestionario</i>).</li>
+      <li>Opciones especiales:
+        <ul>
+          <li><b>Cuestionario de onboarding:</b> las respuestas actualizan el perfil de la persona. Cada pregunta se puede mapear a un campo (documento, dirección, EPS, banco, etc.).</li>
+          <li><b>Onboarding obligatorio:</b> la persona debe completarlo para poder entrar.</li>
+          <li><b>Permitir múltiples respuestas.</b></li>
+        </ul>
+      </li>
+    </ol>
+    <h5>Crear un cuestionario con IA</h5>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nuevo Cuestionario</span>. Arriba verás el recuadro <span class="ui">Generar con IA</span>.</li>
+      <li>Describe qué quieres medir, a quién va dirigido y cuántas preguntas necesitas. Por ejemplo: “Encuesta de clima laboral para el equipo de campo de Bogotá, 10 preguntas, con énfasis en liderazgo y bienestar”.</li>
+      <li>Elige a quién va dirigido y pulsa <span class="ui">Generar borrador</span>. Tarda unos segundos.</li>
+      <li>La IA llena el título, la descripción y las preguntas con su tipo (calificación de 1 a 5, selección, texto, etc.). Revísalas, edita o elimina lo que no sirva y guarda.</li>
+    </ol>
+    <div class="note">La IA propone un borrador: nada se guarda ni se envía hasta que pulses guardar. Evita pedir datos sensibles (salud, religión, orientación sexual, afiliación política) salvo que exista un fin laboral legítimo, conforme a la Ley 1581 de 2012.</div>
+    <h5>Editar un cuestionario</h5>
+    <ol class="steps">
+      <li>En la lista de cuestionarios pulsa el ícono de lápiz (<span class="ui">Editar</span>) del cuestionario.</li>
+      <li><b>Información:</b> cambia título, descripción, a quién va dirigido, <span class="ui">Activo</span> y las opciones de onboarding. Pulsa <span class="ui">Siguiente: Preguntas</span>.</li>
+      <li><b>Preguntas:</b> cambia el texto, el tipo, las opciones y si es obligatoria. Para organizarlas:
+        <ul>
+          <li><b>Mover arrastrando:</b> mantén presionado el ícono de puntos (⋮⋮) a la izquierda de la pregunta, arrástrala a la nueva posición y suéltala. La posición de destino se resalta en verde.</li>
+          <li><b>Subir o bajar:</b> usa las flechas ↑ y ↓ que están encima y debajo de los puntos. Debajo de los puntos ves el número de la pregunta.</li>
+          <li><b>Duplicar:</b> el ícono de copiar, a la derecha, crea una copia de la pregunta (con sus opciones) justo debajo.</li>
+          <li><b>Eliminar:</b> el ícono rojo de papelera, a la derecha.</li>
+          <li><span class="ui">Agregar Pregunta</span> añade una nueva al final.</li>
+        </ul>
+      </li>
+      <li>Si es un cuestionario de onboarding, pulsa <span class="ui">Siguiente: Mapeo</span> y elige para cada pregunta el campo del perfil que actualiza, o <span class="ui">Sin mapear</span>. Con <span class="ui">Sobrescribir</span> activo, la respuesta reemplaza el dato que ya tenga la persona.</li>
+      <li>Pulsa <span class="ui">Guardar Cambios</span>. El nuevo orden de las preguntas es el que verá quien responda.</li>
+    </ol>
+    <div class="note">Nada se guarda hasta pulsar <span class="ui">Guardar Cambios</span>; si pulsas <span class="ui">Cancelar</span> se descartan los cambios. Si eliminas una pregunta que ya tenía respuestas, esas respuestas antiguas se conservan pero la pregunta deja de aparecer. Puedes editar un cuestionario ya enviado: quienes aún no respondan verán la versión nueva.</div>
+    <h5>Enviar y hacer seguimiento</h5>
+    <p>Desde la lista puedes enviar, <span class="ui">Ver quién respondió</span>, <span class="ui">Ver detalle</span>, <span class="ui">Activar</span>/<span class="ui">Desactivar</span> o <span class="ui">Detener envío</span>. El administrador además tiene <span class="ui">Estadísticas de envíos</span>: tasa de respuesta por cuestionario y por rol, tendencia diaria y alertas de quienes llevan más de 3 días sin responder.</p>
+    <div class="note">Eliminar un cuestionario borra también todas sus respuestas y no se puede deshacer. Si solo quieres dejar de usarlo, desactívalo.</div>
+  </section>
+
+  <section class="mod" id="exportador" data-k="exportador descargar excel respuestas">
+    <h3>Exportador</h3>
+    <div class="meta"><span class="path">/exportador</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Descarga en Excel las respuestas completadas de cualquier cuestionario activo. Elige el cuestionario, revisa el conteo de respuestas y pendientes y pulsa <span class="ui">Descargar Excel</span>. Usa <span class="ui">Refrescar</span> si acabas de recibir respuestas.</p>
+  </section>
+
+  <section class="mod" id="asistente" data-k="asistente ia chatbot acompañante ayuda preguntas redactar encuesta cuestionario talento humano buenas practicas">
+    <h3>Asistente del manual</h3>
+    <div class="meta"><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span></div>
+    <p>El botón verde de la esquina inferior derecha abre un asistente que te ayuda con tres tipos de preguntas: cómo usar la plataforma, cómo redactar preguntas para tus cuestionarios y encuestas, y dudas generales de Talento Humano. Está disponible en todas las pantallas y conserva la conversación mientras cambias de módulo.</p>
+    <ul>
+      <li>Sabe en qué módulo estás y te sugiere preguntas frecuentes de ese módulo; haz clic en una o escribe la tuya.</li>
+      <li><b>Uso de la plataforma:</b> responde únicamente con lo que dice este manual y al final indica la sección en que se basa. Si algo no está en el manual, te lo dirá.</li>
+      <li><b>Redactar preguntas:</b> pídele, por ejemplo, “Dame 8 preguntas para una encuesta de clima laboral para el equipo de campo” o pega tus preguntas y pídele que las mejore u ordene. Te propone cada pregunta con su tipo (texto, selección, calificación…), si es obligatoria y sus opciones, listas para pasar al editor de <a href="#cuestionarios">Cuestionarios</a>.</li>
+      <li><b>Dudas generales de Talento Humano:</b> da orientación de buenas prácticas. Estas respuestas terminan con “Fuente: conocimiento general de Talento Humano (no está en el manual)”: son una guía y no reemplazan la política interna ni una asesoría legal.</li>
+      <li>No consulta datos de personas, empresas ni cifras: te indica en qué módulo encontrarlos.</li>
+      <li>El botón ↺ inicia una conversación nueva; <span class="ui">Esc</span> cierra el asistente.</li>
+    </ul>
+  </section>
+
+  <section class="mod" id="calendario" data-k="calendario tributario vencimientos impuestos dian iva obligación presentado pagado financiera">
+    <h3>Calendario Tributario</h3>
+    <div class="meta"><span class="path">/contabilidad</span><span class="role r-admin">Administrador</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span></div>
+    <p>Lleva cada obligación tributaria de cada empresa desde que se inicia hasta que se paga. Las vistas <span class="ui">Próximos</span>, <span class="ui">Vencidos</span> y <span class="ui">Al día</span> muestran lo urgente primero.</p>
+    <h5>Crear un vencimiento</h5>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nuevo vencimiento</span>.</li>
+      <li>Elige la empresa (razón social y NIT), el ámbito (Nacional — DIAN, Distrital, Municipal, Departamental), el tipo de obligación, el período y la fecha de vencimiento.</li>
+    </ol>
+    <h5>Avanzar el proceso</h5>
+    <p>Dentro de la obligación, Contabilidad avanza los pasos en orden y Financiera cierra con el pago:</p>
+    <div class="flow"><b>Iniciar proceso</b><i>→</i><b>Marcar revisado</b><i>→</i><b>Enviar informe</b><i>→</i><b>Marcar presentado</b><i>→</i><b>Pagado</b></div>
+    <ul>
+      <li><span class="ui">Marcar presentado</span> exige adjuntar el archivo de presentación (PDF, Word, Excel o imagen, máximo 20 MB).</li>
+      <li>Al pagar se registran fecha de pago, valor pagado y una observación o soporte.</li>
+      <li>Si la obligación no aplica en ese período, márcala como <span class="ui">No aplica</span>.</li>
+      <li>Solo un administrador puede revertir un paso.</li>
+      <li><span class="ui">Historial de cambios</span> muestra quién hizo cada paso y cuándo.</li>
+    </ul>
+    <p><span class="ui">Auditoría (todas las empresas)</span> lista todos los vencimientos sin filtros para revisar la periodicidad. <span class="ui">Exportar Excel</span> descarga la vista actual.</p>
+  </section>
+
+  <section class="mod" id="informe" data-k="informe tributario completitud presentadas pagadas">
+    <h3>Informe Tributario</h3>
+    <div class="meta"><span class="path">/contabilidad/informe</span><span class="role r-admin">Administrador</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span></div>
+    <p>Resumen del cumplimiento por empresa y mes: obligaciones presentadas, pagadas, en proceso, sin iniciar y que no aplican, con su porcentaje de completitud. Filtra por mes, empresa, responsabilidades y estado, y exporta a Excel.</p>
+  </section>
+
+  <section class="mod" id="mensajes" data-k="mensajes contabilidad comunicado colaboradores">
+    <h3>Mensajes de Contabilidad</h3>
+    <div class="meta"><span class="path">/contabilidad/mensajes</span><span class="role r-admin">Administrador</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span></div>
+    <p>Envía un comunicado oficial del Equipo de Contabilidad por correo.</p>
+    <ol class="steps">
+      <li>En <span class="ui">Enviar a</span> elige todos los colaboradores, por empresa, por cuenta analítica o por colaborador (escribe al menos 2 letras para buscar).</li>
+      <li>Escribe asunto y mensaje, adjunta archivos si hace falta y envía.</li>
+    </ol>
+    <p>Abajo verás el historial de los últimos 6 meses: mensajes enviados, destinatarios alcanzados y promedio por envío.</p>
+  </section>
+</div>
+
+<div class="part" id="p2">
+  <div class="part-head"><span>Parte 2</span><h2>Administración</h2></div>
+
+  <section class="mod" id="usuarios" data-k="usuarios crear editar perfil colaboradores líderes aspirantes ex-colaboradores bienvenida">
+    <h3>Usuarios y accesos</h3>
+    <div class="meta"><span class="path">/usuarios</span><span class="role r-admin">Administrador</span></div>
+    <p>Lista de todas las personas registradas, con pestañas para Activos, Colaboradores, Líderes, Aspirantes y Ex-colaboradores. Busca por nombre, cédula, email o cargo y filtra por empresa y cuenta analítica.</p>
+    <h5>Crear un usuario</h5>
+    <ol class="steps">
+      <li>Abre <span class="ui">Crear Nuevo Usuario</span>.</li>
+      <li><b>Básico:</b> nombre, correo personal, tipo de usuario (Colaborador, Líder de cuenta analítica, Aspirante, Ex-colaborador, Descartado) y correo corporativo.</li>
+      <li><b>Contrato:</b> empresa, cuenta analítica, líder directo, área, cargo, sede, tipo de contrato y fecha de inicio.</li>
+      <li><b>Salario y seguridad social:</b> salario base, tipo de salario, auxilios, modalidad, EPS, AFP, caja de compensación y nivel de riesgo ARL.</li>
+      <li><b>Bancario:</b> banco, tipo y número de cuenta.</li>
+      <li>Decide si enviar el <span class="ui">Correo de bienvenida</span> y guarda.</li>
+    </ol>
+    <p><span class="ui">Ver perfil</span> muestra toda la información, incluido si la persona completó su cuestionario de onboarding.</p>
+  </section>
+
+  <section class="mod" id="rolesacc" data-k="roles accesos permisos plataforma quitar acceso reenviar bienvenida líderes">
+    <h3>Roles y Accesos</h3>
+    <div class="meta"><span class="path">/roles</span><span class="role r-admin">Administrador</span></div>
+    <p>Aquí se decide quién entra a la plataforma y con qué rol.</p>
+    <ul>
+      <li><b>Dar acceso:</b> busca a la persona, pulsa <span class="ui">Editar</span> y asígnale un rol de plataforma (Administrador, Talento Humano, Contabilidad o Financiera). La tabla de <a href="#roles">Qué ve cada rol</a> resume qué abre cada uno.</li>
+      <li><b>Cargo en el equipo:</b> marca a los líderes de equipo; aparecen en <span class="ui">Líderes de equipo</span>.</li>
+      <li><span class="ui">Reenviar correo de bienvenida</span> si la persona no recibió o perdió el primero.</li>
+      <li><span class="ui">Quitar acceso</span> cuando alguien deja el cargo o se retira. Su expediente se conserva.</li>
+      <li>El grupo <span class="ui">Sin acceso plataforma</span> lista a quienes aún no tienen usuario.</li>
+    </ul>
+    <div class="note">Revisa este módulo cada vez que registres un retiro: un retiro en Expedientes no quita automáticamente el acceso a la plataforma.</div>
+  </section>
+
+  <section class="mod" id="config-empresas" data-k="configuración empresas alias nit módulos catálogo logo regional">
+    <h3>Configuración de empresas</h3>
+    <div class="meta"><span class="path">/configuraciones/empresas</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <p>Catálogo maestro de empresas. Aquí se configura cada empresa; la dotación y la nómina se consultan en <a href="#empresas">Empresas</a>.</p>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Nueva empresa</span> e ingresa razón social y NIT (obligatorios), correo, teléfono, dirección, ubicación principal, regional y URL del logo.</li>
+      <li>En <span class="ui">Módulos habilitados</span> activa Talento Humano, Contabilidad y/o Correos según corresponda.</li>
+      <li>En <span class="ui">Alias históricos</span> escribe, uno por línea, los otros nombres con que la empresa aparece en archivos antiguos.</li>
+    </ol>
+    <div class="note tip">Los alias son la forma de corregir cifras bajas en Empresas: si un Excel dice “NETCOL SAS” y la empresa oficial es “NETCOL INGENIERÍA SAS BIC”, agrega el alias y esas personas pasarán a contar.</div>
+  </section>
+
+  <section class="mod" id="importaciones" data-k="importar excel actualización masiva parcial cédula nómina tributario">
+    <h3>Importaciones desde Excel</h3>
+    <div class="meta"><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span><span class="role r-cont">Contabilidad</span></div>
+    <h5>Base completa de personal — Expedientes y control</h5>
+    <p><span class="ui">Actualizar desde Excel</span> carga la base de Talento Humano. Antes de aplicar, la plataforma muestra una vista previa: filas activas y retiradas, historia detectada, cédulas y correos repetidos. Corrige el archivo si hay errores y vuelve a cargarlo. Al pie verás la <span class="ui">Última importación</span>.</p>
+    <h5>Actualización parcial por cédula</h5>
+    <ol class="steps">
+      <li>Pulsa <span class="ui">Actualización parcial</span>.</li>
+      <li>Crea un Excel nuevo con <code>CEDULA</code> en la primera columna (obligatoria).</li>
+      <li>Agrega solo las columnas que quieres cambiar, usando los nombres admitidos (ej. <code>EPS</code>, <code>TELEFONO CORPORATIVO</code>). La lista completa está en <span class="ui">Ver nombres de columnas admitidos</span>.</li>
+      <li>Una fila por persona, sin repetir cédulas.</li>
+      <li>Carga el archivo, revisa la validación y pulsa <span class="ui">Aplicar cambios</span>.</li>
+    </ol>
+    <h5>Calendario Tributario</h5>
+    <p><span class="ui">Actualizar desde Excel</span> en el calendario carga vencimientos en bloque. Abre <span class="ui">Ver formato del Excel</span> para ver las columnas, los tipos de obligación y los estados válidos. Si una fila falla, la vista previa indica qué valor corregir.</p>
+  </section>
+
+  <section class="mod" id="problemas" data-k="problemas errores ayuda no veo código cifras no cuadran">
+    <h3>Problemas frecuentes</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Situación</th><th>Qué hacer</th></tr></thead>
+      <tbody>
+        <tr><td>No me llega el código de ingreso</td><td>Revisa spam y correo no deseado. Espera un minuto y pide otro; cada código vence a los 10 minutos.</td></tr>
+        <tr><td>Entro pero no veo módulos</td><td>No tienes rol asignado. Un administrador lo asigna en Roles y Accesos.</td></tr>
+        <tr><td>Una empresa muestra menos personas de las esperadas</td><td>Revisa los alias en Configuración de empresas y que las relaciones laborales tengan el nombre de empresa correcto.</td></tr>
+        <tr><td>Muchas alertas en una empresa</td><td>Abre la empresa → Calidad de datos, y completa cuenta analítica, cargo, correo y teléfono corporativo (a mano o con Actualización parcial).</td></tr>
+        <tr><td>Las cifras no cambiaron tras editar</td><td>Pulsa Actualizar o recarga la página.</td></tr>
+        <tr><td>Un WhatsApp aparece “Aceptado” pero no “Entregado”</td><td>El teléfono puede estar apagado o no tener WhatsApp. Revisa la pestaña Fallidos en las estadísticas.</td></tr>
+        <tr><td>No puedo editar un cuestionario o no se guardan los cambios</td><td>Talento Humano y Administrador pueden editar cualquier cuestionario. Recarga la página e intenta de nuevo; si al guardar aparece un mensaje de error, envíalo a un administrador de la plataforma.</td></tr>
+        <tr><td>Quiero cambiar el orden de las preguntas</td><td>Edita el cuestionario y, en el paso Preguntas, arrastra desde el ícono de puntos o usa las flechas ↑ ↓. Luego pulsa Guardar Cambios.</td></tr>
+        <tr><td>No puedo retroceder un paso tributario</td><td>Solo un administrador puede revertir el proceso.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <p class="empty" id="empty">Ninguna sección coincide con la búsqueda.</p>
+</div>
+
+<footer>Manual de Inteegrados · versión septiembre de 2026.</footer>
+</main>
+</div>
+
+<script>
+(function(){
+  var q=document.getElementById('q'), mods=[].slice.call(document.querySelectorAll('section.mod')),
+      links=[].slice.call(document.querySelectorAll('.toc a')), empty=document.getElementById('empty');
+  var norm=function(s){return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');};
+  var idx=mods.map(function(m){return norm(m.textContent+' '+(m.dataset.k||''));});
+  q.addEventListener('input',function(){
+    var t=norm(q.value.trim()), shown=0;
+    mods.forEach(function(m,i){var ok=!t||idx[i].indexOf(t)>-1;m.hidden=!ok;if(ok)shown++;});
+    links.forEach(function(a){var s=document.querySelector(a.getAttribute('href'));a.classList.toggle('dim',!!(s&&s.hidden));});
+    document.querySelectorAll('.part').forEach(function(p){p.hidden=!p.querySelector('section.mod:not([hidden])');});
+    empty.style.display=shown?'none':'block';
+    if(!shown)document.getElementById('p2').hidden=false;
+  });
+})();
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@ import { analyticsService } from '../services/analyticsService';
 import { companyService } from '../services/companyService';
 import { projectService } from '../services/projectService';
 import type { MovementRecord } from '../models/types/Analytics';
-import { normalizeRetiroReason } from '../domain/humanResources/terminationReasons';
+import { normalizeRetiroReason, SIN_CLASIFICAR } from '../domain/humanResources/terminationReasons';
 import { parseExcelDate } from '../domain/humanResources/excelDate';
 
 type ImportProgress = {
@@ -507,7 +507,10 @@ export const useUsers = () => {
                 // Generar retiro si tiene fecha, o si es excolaborador
                 const fechaRetiroFinal = fechaRetiro || (isRetirado ? new Date() : null);
                 if (fechaRetiroFinal) {
-                    const { reason, notes } = normalizeRetiroReason(row['MOTIVO']);
+                    const normalized = normalizeRetiroReason(row['MOTIVO']);
+                    // Es un retiro: si el motivo viene vacío, queda sin clasificar (no se asume renuncia).
+                    const reason = normalized.reason ?? SIN_CLASIFICAR;
+                    const notes = normalized.raw;
                     movementsMap.set(email + '|retiro', {
                         type: 'retiro',
                         userId: '',
@@ -554,6 +557,8 @@ export const useUsers = () => {
                     const id = await companyService.create({
                         name, nit, active: true,
                         address: '', phone: '', email: '', logo: '', regional: '', baseDeOperacion: '',
+                        activeTH: true, activeContabilidad: false,
+                        modules: { humanResources: true, accounting: false, communications: true },
                     });
                     companyNameToId.set(name, id);
                 }

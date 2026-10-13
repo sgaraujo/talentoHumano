@@ -26,6 +26,12 @@ export interface HrExcelPreview {
   duplicateDocumentGroups: number;
   duplicateEmailGroups: number;
   multiEmploymentEmployees: number;
+  /** Fechas opcionales (nacimiento, expedición, etapa productiva) que no se pudieron interpretar. */
+  dateIssues: number;
+  /** Retiros cuyo motivo no está en el catálogo y quedarán como "Sin clasificar". */
+  unclassifiedReasons: number;
+  /** Cédulas con al menos una relación activa en el Excel. */
+  activeDocuments: string[];
   issues: HrPreviewIssue[];
 }
 
@@ -69,9 +75,48 @@ const numberValue = (value: unknown) => {
   const parsed = Number(normalized);
   return normalized && Number.isFinite(parsed) ? parsed : undefined;
 };
-// Normaliza a Date real; si no se puede parsear, conserva el texto crudo en
-// vez de perder el dato (para que quede visible que algo no cuadra).
-const dateValue = (value: unknown): Date | string | undefined => parseExcelDate(value) ?? (text(value) || undefined);
+export const STANDARD_ACCOUNT_COLUMN = 'CUENTA ANALITICA ESTANDAR';
+export const ACCOUNT_MAPPING_SHEET = 'Mapeo Cuentas Analiticas';
+// "NA" en CUENTA ANALITICA significa que la fila no tiene cuenta asignada.
+const NO_ACCOUNT = new Set(['', 'na', 'n/a', '-']);
+/**
+ * Cuenta analítica de la fila: la estandarizada si existe, si no la original.
+ * Desde 2026 el Excel ya no trae PROYECTO; la cuenta analítica es la que
+ * vincula a la persona con el catálogo de cuentas (projectName).
+ */
+function analyticalAccountOf(row: Record<string, unknown>): { account: string; original: string } {
+  const original = text(row['CUENTA ANALITICA']);
+  const account = text(row[STANDARD_ACCOUNT_COLUMN]) || original;
+  return { account: NO_ACCOUNT.has(account.toLowerCase()) ? '' : account, original };
+}
+
+/** Columnas de fecha: el worker las entrega con el valor sin formato de la celda. */
+export const HR_DATE_COLUMNS = [
+  'FECHA DE INGRESO', 'FECHA RETIRO', 'FECHA DE NACIMIENTO', 'FECHA EXPEDICION', 'INICIA PRODUCTIVA', 'FIN PRODUCTIVA',
+] as const;
+
+type ParsedDate = { date?: Date; empty: boolean; invalid: boolean; text: string };
+// Serial de Excel → fecha exacta. Texto → solo día/mes/año; no se adivina mes/día.
+// Vacío, "-" o "NA" cuentan como "sin fecha".
+function readDate(value: unknown, opts: { minYear?: number } = {}): ParsedDate {
+  const raw = text(value);
+  if (value === null || value === undefined || ['', '-', 'na', 'n/a'].includes(raw.toLowerCase())) return { empty: true, invalid: false, text: raw };
+  const date = parseExcelDate(value, { ...opts, dayFirstOnly: true });
+  return date ? { date, empty: false, invalid: false, text: raw } : { empty: false, invalid: true, text: raw };
+}
+// Fechas opcionales: si no se pueden interpretar se omiten (se conserva el valor
+// actual del expediente) y la vista previa lo reporta; nunca se guarda el texto.
+const dateValue = (value: unknown, opts: { minYear?: number } = {}): Date | undefined => readDate(value, opts).date;
+const OPTIONAL_DATE_COLUMNS: Array<[string, string, { minYear?: number }]> = [
+  ['FECHA DE NACIMIENTO', 'Fecha de nacimiento', { minYear: 1920 }],
+  ['FECHA EXPEDICION', 'Fecha de expedición', {}],
+  ['INICIA PRODUCTIVA', 'Inicio etapa productiva', {}],
+  ['FIN PRODUCTIVA', 'Fin etapa productiva', {}],
+];
+const terminationReasonOf = (row: Record<string, unknown>) => normalizeRetiroReason(
+  row['MOTIVO DE RETIRO'] || row['MOTIVO RETIRO'] || row.MOTIVO,
+  { active: !retired(row.ESTADO) },
+);
 
 export function buildHrImportPlan(
   fileName: string,
@@ -95,7 +140,12 @@ export function buildHrImportPlan(
     rows: meaningfulRows.flatMap(({ row, sourceRow }) => {
       const doc = documentNumber(row.CEDULA);
       const fullName = text(row['APELLIDOS Y NOMBRES']);
-      if (!doc || !fullName) return [];
+      const startDate = readDate(row['FECHA DE INGRESO']).date;
+      const endDate = readDate(row['FECHA RETIRO']);
+      // La vista previa bloquea estas filas; aquí solo se evita escribirlas.
+      if (!doc || !fullName || !startDate || endDate.invalid) return [];
+      const termination = terminationReasonOf(row);
+      const { account, original: originalAccount } = analyticalAccountOf(row);
       const currentUser = usersByDocument.get(doc);
       const corporateEmail = email(row['CORREO CORPORATIVO']);
       const personalEmail = email(row['CORREO ELECTRONICO PERSONAL']);
@@ -111,24 +161,30 @@ export function buildHrImportPlan(
           corporateEmail: validEmail(corporateEmail) ? corporateEmail : currentUser?.location?.corporateEmail,
           personalEmail: validEmail(personalEmail) ? personalEmail : currentUser?.location?.personalEmail,
           personalPhone: standardizePhone(row['TELEFONO PERSONAL']), corporatePhone: standardizePhone(row['TELEFONO CORPORATIVO']),
-          birthDate: dateValue(row['FECHA DE NACIMIENTO']), gender: text(row.GENERO),
+          birthDate: dateValue(row['FECHA DE NACIMIENTO'], { minYear: 1920 }), gender: text(row.GENERO),
+          documentExpeditionDate: dateValue(row['FECHA EXPEDICION']),
           nationality: text(row['PAIS - NACIONALIDAD']),
           residence: compact({ department: text(row['DEPARTAMENTO DE RESIDENCIA']), city: text(row['CIUDAD DE RESIDENCIA']), address: text(row['DIRECCION VIVIENDA']) }),
           education: compact({ academicLevel: text(row['NIVEL ACADEMICA'] || row['NIVEL ACADEMICO']), profession: text(row.PROFESION), professionalLicense: text(row['COPNIA/CPNI']) }),
         }),
-        employment: compact({
-          employeeId: doc, status, companyName: text(row.EMPRESA), projectName: text(row.PROYECTO),
-          position: text(row.CARGO), supervisor: text(row['JEFE INMEDIATO']), contractType: text(row['TIPO DE CONTRATO']),
-          startDate: dateValue(row['FECHA DE INGRESO']), endDate: dateValue(row['FECHA RETIRO']),
-          workday: text(row.JORNADA), modality: text(row.MODALIDAD), regional: text(row.REGIONAL),
-          baseLocation: text(row['BASE DE OPERACION']), area: text(row.DEPARTAMENTO), analyticalAccount: text(row['CUENTA ANALITICA']),
-          terminationReason: (() => {
-            const raw = text(row['MOTIVO DE RETIRO'] || row['MOTIVO RETIRO'] || row.MOTIVO);
-            return raw ? normalizeRetiroReason(raw).reason : undefined;
-          })(),
-          terminationCost: numberValue(row['COSTO DE RETIRO'] || row['COSTO RETIRO']),
-          sourceRow,
-        }),
+        employment: {
+          ...compact({
+            employeeId: doc, status, companyName: text(row.EMPRESA), projectName: text(row.PROYECTO) || account,
+            position: text(row.CARGO), supervisor: text(row['JEFE INMEDIATO']), contractType: text(row['TIPO DE CONTRATO']),
+            startDate,
+            productiveStartDate: dateValue(row['INICIA PRODUCTIVA']), productiveEndDate: dateValue(row['FIN PRODUCTIVA']),
+            workday: text(row.JORNADA), modality: text(row.MODALIDAD), regional: text(row.REGIONAL),
+            baseLocation: text(row['BASE DE OPERACION']), area: text(row.DEPARTAMENTO), analyticalAccount: account,
+            analyticalAccountRaw: originalAccount !== account ? originalAccount : '',
+            terminationCost: numberValue(row['COSTO DE RETIRO'] || row['COSTO RETIRO']),
+            sourceRow,
+          }),
+          // Se escriben explícitamente (también como null): "-" o vacío en FECHA
+          // RETIRO significa que no hay retiro, y una relación activa no tiene motivo.
+          endDate: endDate.date ?? null,
+          terminationReason: termination.reason,
+          terminationReasonRaw: termination.raw ?? null,
+        },
         payroll: compact({
           salaryType: text(row['TIPO DE SALARIO']), baseSalary: numberValue(row.Sueldo),
           transportAllowance: numberValue(row['Aux. de transporte/Aux. de conectividad digital'] || row['Aux. de transporte/conectividad']),
@@ -198,12 +254,38 @@ export function analyzeHrRows(
   let retiredRows = 0;
   let invalidEmails = 0;
   let withoutPlatformAccess = 0;
+  let dateIssues = 0;
+  let unclassifiedReasons = 0;
+  const activeDocuments = new Set<string>();
 
   indexedRows.forEach(({ row, rowNumber }) => {
     const doc = documentNumber(row.CEDULA);
     const reasons: string[] = [];
     if (!doc) reasons.push('Sin cédula');
-    if (retired(row.ESTADO)) retiredRows++; else activeRows++;
+    // La relación se identifica por empresa + fecha de ingreso: sin una fecha
+    // real, varias relaciones de la misma persona terminarían en un solo documento.
+    const start = readDate(row['FECHA DE INGRESO']);
+    if (start.empty) reasons.push('Sin fecha de ingreso');
+    else if (start.invalid) reasons.push(`Fecha de ingreso no interpretable: "${start.text}" (use fecha de Excel o dd/mm/aaaa)`);
+    const end = readDate(row['FECHA RETIRO']);
+    if (end.invalid) reasons.push(`Fecha de retiro no interpretable: "${end.text}" (use fecha de Excel, dd/mm/aaaa, "-" o vacío)`);
+    const optionalDateWarnings = OPTIONAL_DATE_COLUMNS.flatMap(([column, label, opts]) => {
+      const parsed = readDate(row[column], opts);
+      return parsed.invalid ? [`${label} no interpretable: "${parsed.text}"; se conserva el valor actual`] : [];
+    });
+    if (optionalDateWarnings.length) {
+      dateIssues += optionalDateWarnings.length;
+      issues.push({ row: rowNumber, action: 'update', reasons: optionalDateWarnings });
+    }
+    const termination = terminationReasonOf(row);
+    if (termination.raw) {
+      unclassifiedReasons++;
+      issues.push({ row: rowNumber, action: 'update', reasons: [`Motivo de retiro no reconocido: "${termination.raw}"; quedará como "Sin clasificar"`] });
+    }
+    if (retired(row.ESTADO)) retiredRows++; else {
+      activeRows++;
+      if (doc) activeDocuments.add(doc);
+    }
     if (reasons.length) issues.push({ row: rowNumber, action: 'rejected', reasons });
     if (doc) {
       if (!byDocument.has(doc)) byDocument.set(doc, []);
@@ -303,6 +385,9 @@ export function analyzeHrRows(
     duplicateDocumentGroups: [...byDocument.values()].filter(group => group.length > 1).length,
     duplicateEmailGroups: [...byEmail.values()].filter(group => group.length > 1).length,
     multiEmploymentEmployees,
+    dateIssues,
+    unclassifiedReasons,
+    activeDocuments: [...activeDocuments],
     issues: issues.sort((a, b) => {
       const priority: Record<HrPreviewAction, number> = {
         conflict: 0,

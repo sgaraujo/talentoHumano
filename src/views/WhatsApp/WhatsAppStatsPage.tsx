@@ -155,9 +155,9 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
 };
 
 export const WhatsAppStatsPage = () => {
-  const { loading, error, refresh, byCampaign, recipients, failures, conversationStats } = useWhatsAppStats();
+  const { loading, error, refresh, byCampaign, recipients, failures } = useWhatsAppStats();
 
-  const [tab, setTab] = useState<'campanas' | 'destinatarios' | 'fallidos' | 'conversaciones'>('campanas');
+  const [tab, setTab] = useState<'campanas' | 'destinatarios' | 'fallidos'>('campanas');
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -361,7 +361,7 @@ export const WhatsAppStatsPage = () => {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Estadísticas de WhatsApp</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Campañas, entregas y conversaciones</p>
+          <p className="text-sm text-gray-400 mt-0.5">Campañas y entregas</p>
         </div>
         <button
           onClick={refresh}
@@ -566,7 +566,6 @@ export const WhatsAppStatsPage = () => {
               { id: 'campanas', label: 'Por campaña', count: filteredCampaigns.length },
               { id: 'destinatarios', label: 'Destinatarios', count: filteredRecipients.length },
               { id: 'fallidos', label: 'Fallidos', count: filteredFailures.length, alert: filteredFailures.length > 0 },
-              { id: 'conversaciones', label: 'Conversaciones', count: conversationStats.byNumber.length },
             ] as Array<{ id: typeof tab; label: string; count: number; alert?: boolean }>).map(t => (
               <button
                 key={t.id}
@@ -835,31 +834,6 @@ export const WhatsAppStatsPage = () => {
           )
         )}
 
-        {/* ── Tab: Conversaciones ── */}
-        {tab === 'conversaciones' && (
-          conversationStats.byNumber.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <MessageCircle className="w-10 h-10 text-gray-200 mb-2" />
-              <p className="text-sm text-gray-400">No hay números de WhatsApp configurados</p>
-            </div>
-          ) : (
-            <div className="p-5 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {conversationStats.byNumber.map(n => (
-                <div key={n.numberId} className="rounded-xl border border-gray-100 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-full bg-[#00a884]/10 flex items-center justify-center"><MessageCircle className="w-4 h-4 text-[#00a884]" /></div>
-                    <p className="font-semibold text-gray-800 text-sm truncate">{n.displayName}</p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div><p className="text-lg font-bold text-gray-900">{n.conversations}</p><p className="text-[10px] text-gray-400">Total</p></div>
-                    <div><p className="text-lg font-bold text-blue-600">{n.open}</p><p className="text-[10px] text-gray-400">Abiertas</p></div>
-                    <div><p className="text-lg font-bold text-orange-500">{n.unread}</p><p className="text-[10px] text-gray-400">Sin leer</p></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )
-        )}
       </div>
       <p className="text-xs text-gray-400 flex items-center gap-1.5">
         <Eye className="w-3.5 h-3.5" /> Los datos de campaña se calculan sobre los destinatarios registrados en cada envío; entregado/leído llega mediante el webhook de Meta.

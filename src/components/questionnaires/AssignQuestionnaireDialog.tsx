@@ -10,7 +10,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Search, DoorOpen } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { userService } from '@/services/userService';
 import { assignmentService } from '@/services/assignmentService';
@@ -161,6 +162,19 @@ export const AssignQuestionnaireDialog = ({
             {questionnaire.title}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Los excolaboradores reales viven en Expedientes y control, no en
+            usuarios de plataforma: la encuesta de salida se envía desde Offboarding. */}
+        {questionnaire.targetRole === 'excolaborador' && (
+          <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+            <DoorOpen className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <p>
+              Aquí solo aparecen usuarios de la plataforma. Para enviar la encuesta de salida a los excolaboradores de
+              <b> Expedientes y control</b>, usa{' '}
+              <Link to="/offboarding" onClick={() => onOpenChange(false)} className="font-semibold underline">Offboarding → Enviar a excolaboradores</Link>.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
           {/* Búsqueda */}

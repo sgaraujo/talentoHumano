@@ -1,7 +1,13 @@
-/** Convierte número serial de Excel, Date o string a Date (medianoche local). */
+/**
+ * Convierte número serial de Excel, Date o string a Date (medianoche local).
+ * `dayFirstOnly`: los textos se interpretan únicamente como día/mes/año; un
+ * texto que solo sería válido como mes/día (ej. "6/30/26") se rechaza en vez
+ * de adivinar, porque en hojas con formatos mezclados la inversión silenciosa
+ * produce fechas equivocadas.
+ */
 export function parseExcelDate(
   val: any,
-  opts: { minYear?: number; maxYear?: number } = {}
+  opts: { minYear?: number; maxYear?: number; dayFirstOnly?: boolean } = {}
 ): Date | undefined {
   if (!val) return undefined;
   let parsed: Date | undefined;
@@ -21,10 +27,11 @@ export function parseExcelDate(
     parsed = new Date(val.getFullYear(), val.getMonth(), val.getDate());
   } else if (typeof val === 'number') {
     if (val <= 0) return undefined;
-    const excelEpoch = new Date(1899, 11, 30);
-    const tmp = new Date(excelEpoch.getTime() + Math.round(val) * 86400000);
+    // Se calcula en UTC para que ni el horario de verano ni los desfases
+    // históricos de zona horaria corran el día; luego se lleva a medianoche local.
+    const tmp = new Date(Date.UTC(1899, 11, 30) + Math.floor(val) * 86400000);
     if (isNaN(tmp.getTime())) return undefined;
-    parsed = new Date(tmp.getFullYear(), tmp.getMonth(), tmp.getDate());
+    parsed = fromParts(tmp.getUTCFullYear(), tmp.getUTCMonth() + 1, tmp.getUTCDate());
   } else if (typeof val === 'string') {
     const s = val.trim().split(/\s+/)[0];
     if (!s) return undefined;
@@ -46,7 +53,7 @@ export function parseExcelDate(
         const year = c < 100 ? (c < 50 ? 2000 + c : 1900 + c) : c;
         // Colombia: preferir dia/mes/anio. Si no es valido y mes/dia si lo es,
         // aceptar el formato alterno.
-        parsed = fromParts(year, b, a) || fromParts(year, a, b);
+        parsed = opts.dayFirstOnly ? fromParts(year, b, a) : fromParts(year, b, a) || fromParts(year, a, b);
       }
     }
   }

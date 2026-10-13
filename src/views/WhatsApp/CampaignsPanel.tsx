@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronUp, Download, Eye, FileSpreadsheet, Loader2, Megaphone, Search, Send, Users, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronUp, Download, Eye, FileSpreadsheet, Info, Loader2, Megaphone, RefreshCw, Search, Send, Upload, Users, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { getTemplates } from "@/services/whatsappService";
+import { getTemplates, headerMediaAccept, saveTemplateDefaultHeader, syncTemplates, uploadTemplateHeaderMedia } from "@/services/whatsappService";
 import {
   getCampaignAudienceData, getCampaignRecipients, getRecentCampaigns, parseExternalContacts, recipientsFromUsers, sendCampaign,
   usersMissingCorporatePhone,
@@ -13,6 +13,81 @@ import type { Project } from "@/models/types/Project";
 import type { User } from "@/models/types/User";
 import type { WaTemplate } from "@/models/types/WhatsApp";
 import type { WaCampaignRecipient } from "@/models/types/WhatsAppCampaign";
+
+/** Debe coincidir con RECIPIENT_NAME_VALUE en functions/src/whatsapp/campaignHandler.ts. */
+const RECIPIENT_NAME_VALUE = "__recipient_name__";
+
+const searchKey = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("es");
+
+// Cada palabra de la búsqueda debe aparecer en el nombre, en cualquier orden y
+// sin importar tildes: "Nelly Pinto" encuentra a "Pinto Sandoval Nelly Mayreth".
+function nameMatches(name: string, query: string): boolean {
+  const target = searchKey(name);
+  return searchKey(query).split(/\s+/).filter(Boolean).every(word => target.includes(word));
+}
+
+function variablesIn(text: string, isNamed: boolean): string[] {
+  const pattern = isNamed ? /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g : /\{\{\s*(\d+)\s*\}\}/g;
+  const found = [...new Set([...text.matchAll(pattern)].map(m => m[1]))];
+  return isNamed ? found : found.sort((a, b) => Number(a) - Number(b));
+}
+
+/**
+ * Campos que hay que completar para enviar la plantilla. Las claves siguen el
+ * contrato de sendWaCampaign: el cuerpo usa el nombre de la variable tal cual,
+ * el encabezado "header:<var>" y los botones URL "button:<índice>".
+ */
+type TemplateSlot = { key: string; variable: string; label: string; hint?: string };
+function variablesOf(template?: WaTemplate): TemplateSlot[] {
+  if (!template) return [];
+  const isNamed = template.parameterFormat === "NAMED";
+  const header = template.headerFormat === "TEXT"
+    ? variablesIn(template.headerText ?? "", isNamed).map(variable => ({ key: `header:${variable}`, variable, label: `Encabezado {{${variable}}}` }))
+    : [];
+  const body = variablesIn(template.bodyText, isNamed).map(variable => ({ key: variable, variable, label: `{{${variable}}}` }));
+  const buttons = (template.buttons ?? [])
+    .map((button, index) => ({ button, index }))
+    .filter(({ button }) => button.type === "URL" && /\{\{.+?\}\}/.test(button.url ?? ""))
+    .map(({ button, index }) => ({
+      key: `button:${index}`, variable: `button${index}`, label: `Botón «${button.text}»`,
+      hint: `Solo la parte variable: reemplaza {{1}} en ${button.url}`,
+    }));
+  return [...header, ...body, ...buttons];
+}
+
+// Valores con que arranca el formulario de una plantilla: las variables de
+// nombre ya resueltas y el archivo de encabezado guardado, si lo hay.
+function initialParameterValues(template: WaTemplate | undefined, modes: Record<string, VariableMode>): Record<string, string> {
+  return {
+    ...Object.fromEntries(Object.entries(modes).filter(([, mode]) => mode === "name").map(([key]) => [key, RECIPIENT_NAME_VALUE])),
+    ...(template?.defaultHeaderMediaUrl ? { header_media: template.defaultHeaderMediaUrl } : {}),
+  };
+}
+
+const MEDIA_HEADER_LABELS: Record<string, string> = { IMAGE: "imagen", VIDEO: "video", DOCUMENT: "documento" };
+
+type VariableMode = "name" | "content" | "text";
+
+// El modo inicial sale del nombre de la variable ("nombre", "enlace"...) o, en
+// plantillas posicionales, del texto que la precede: tras "aquí:", "enlace",
+// "link" o dos puntos va un enlace; tras un saludo ("Hola", "Estimado/a") va el
+// nombre. Así una plantilla cuyo {{1}} es el link no se rellena con el nombre.
+function defaultVariableModes(template?: WaTemplate): Record<string, VariableMode> {
+  const body = template?.bodyText ?? "";
+  const textBefore = (variable: string) => {
+    const index = body.search(new RegExp(`\\{\\{\\s*${variable}\\s*\\}\\}`));
+    return index < 0 ? "" : body.slice(Math.max(0, index - 40), index);
+  };
+  return Object.fromEntries(variablesOf(template).map(({ key, variable }) => {
+    if (key.startsWith("button:")) return [key, "text"];
+    if (/nombre|name/i.test(variable)) return [key, "name"];
+    if (/enlace|link|url/i.test(variable)) return [key, "content"];
+    const before = key === variable ? textBefore(variable) : "";
+    if (/(aqu[ií]|enlace|link|url|:)\s*$/i.test(before)) return [key, "content"];
+    if (/(hola|estimad[oa]s?|querid[oa]s?|buen(os|as)? \w+)[\s,]*$/i.test(before) || variable === "1") return [key, "name"];
+    return [key, variable === "2" ? "content" : "text"];
+  }));
+}
 
 export function CampaignsPanel({ numberId }: { numberId: string }) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -25,6 +100,7 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
   const [templateId, setTemplateId] = useState("");
   const [campaignName, setCampaignName] = useState("");
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
+  const [variableModes, setVariableModes] = useState<Record<string, VariableMode>>({});
   const [external, setExternal] = useState<WaCampaignRecipient[]>([]);
   const [includeInternal, setIncludeInternal] = useState(true);
   const [selectedInternalIds, setSelectedInternalIds] = useState<Set<string>>(new Set());
@@ -36,7 +112,27 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
   const [expandedCampaignId, setExpandedCampaignId] = useState("");
   const [campaignRecipients, setCampaignRecipients] = useState<WaCampaignRecipientResult[]>([]);
   const [loadingRecipients, setLoadingRecipients] = useState(false);
+  const [syncingTemplates, setSyncingTemplates] = useState(false);
+  const [uploadingHeader, setUploadingHeader] = useState(false);
+  const headerFileRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Trae de Meta las plantillas nuevas o actualizadas y recarga la lista. Si
+  // Meta falla, se queda con las que ya estaban guardadas en Firestore.
+  const refreshTemplates = async (notify: boolean) => {
+    setSyncingTemplates(true);
+    try {
+      const result = await syncTemplates(numberId);
+      if (notify) toast.success(`Plantillas sincronizadas: ${result.approved} aprobadas${result.added ? `, ${result.added} nuevas` : ""}`);
+    } catch (e) {
+      toast.error("No se pudieron sincronizar las plantillas con Meta", { description: e instanceof Error ? e.message : String(e) });
+    }
+    try {
+      setTemplates(await getTemplates(numberId));
+    } finally {
+      setSyncingTemplates(false);
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -47,6 +143,7 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
       })
       .catch((e) => toast.error("No se pudieron cargar los datos", { description: e.message }))
       .finally(() => setLoading(false));
+    refreshTemplates(false);
   }, [numberId]);
 
   const selectedCompany = companies.find(c => c.id === companyId);
@@ -70,11 +167,11 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
     [internalCandidates, selectedInternalIds]
   );
   const visiblePeople = useMemo(() => {
-    const query = peopleSearch.trim().toLocaleLowerCase("es");
+    const query = peopleSearch.trim();
     if (!query) return internalCandidates;
     const digits = query.replace(/\D/g, "");
     return internalCandidates.filter(person =>
-      person.name.toLocaleLowerCase("es").includes(query) ||
+      nameMatches(person.name, query) ||
       (digits.length > 0 && person.phone.includes(digits))
     );
   }, [internalCandidates, peopleSearch]);
@@ -87,10 +184,10 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
     [users, companyId, projectId, includeInternal, companies, projects]
   );
   const visibleMissingPhone = useMemo(() => {
-    const query = missingPhoneSearch.trim().toLocaleLowerCase("es");
+    const query = missingPhoneSearch.trim();
     if (!query) return missingPhoneUsers;
     return missingPhoneUsers.filter((person: WaMissingPhoneUser) =>
-      person.name.toLocaleLowerCase("es").includes(query) ||
+      nameMatches(person.name, query) ||
       (person.documentNumber ?? "").includes(query)
     );
   }, [missingPhoneUsers, missingPhoneSearch]);
@@ -100,10 +197,37 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
     return [...byPhone.values()];
   }, [internal, external]);
   const selectedTemplate = templates.find(t => t.id === templateId);
-  const variableNumbers = useMemo(() => {
-    const found = [...(selectedTemplate?.bodyText ?? "").matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map(m => Number(m[1]));
-    return [...new Set(found)].sort((a, b) => a - b);
-  }, [selectedTemplate]);
+  // Meta distingue plantillas POSITIONAL ({{1}}, {{2}}) y NAMED ({{nombre}});
+  // las variables se envían en el mismo formato con que se creó la plantilla.
+  const templateVariables = useMemo(() => variablesOf(selectedTemplate), [selectedTemplate]);
+  const headerMediaLabel = MEDIA_HEADER_LABELS[selectedTemplate?.headerFormat ?? ""];
+
+  // Plantilla con los encabezados exactos que reconoce parseExternalContacts.
+  const downloadExternalTemplate = () => {
+    const sheet = XLSX.utils.json_to_sheet([
+      { nombre: "Ana Pérez", telefono: "3001234567", grupo: "Proveedores" },
+      { nombre: "Luis Gómez", telefono: "+57 310 555 1234", grupo: "Clientes" },
+    ]);
+    sheet["!cols"] = [{ wch: 28 }, { wch: 20 }, { wch: 18 }];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Contactos");
+    XLSX.writeFile(workbook, "plantilla-contactos-whatsapp.xlsx");
+  };
+
+  const handleHeaderFile = async (file?: File) => {
+    if (!file || !selectedTemplate) return;
+    setUploadingHeader(true);
+    try {
+      const url = await uploadTemplateHeaderMedia(numberId, selectedTemplate, file);
+      setParameterValues(v => ({ ...v, header_media: url }));
+      setTemplates(list => list.map(t => t.id === selectedTemplate.id ? { ...t, defaultHeaderMediaUrl: url } : t));
+      toast.success(`${headerMediaLabel ?? "Archivo"} guardado para esta plantilla`);
+    } catch (e) {
+      toast.error("No se pudo subir el archivo", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setUploadingHeader(false);
+    }
+  };
 
   const handleFile = async (file?: File) => {
     if (!file) return;
@@ -138,8 +262,17 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
       } else {
         toast.success(`${result.sent} mensajes aceptados por Meta. Consulta abajo si fueron entregados o leídos.`);
       }
+      // Una URL pegada a mano que funcionó queda como predeterminada de la plantilla.
+      const headerUrl = parameterValues.header_media?.trim();
+      let updatedTemplate = selectedTemplate;
+      if (selectedTemplate && headerMediaLabel && headerUrl && headerUrl !== selectedTemplate.defaultHeaderMediaUrl && result.sent > 0) {
+        await saveTemplateDefaultHeader(numberId, selectedTemplate.id, headerUrl).catch(() => {});
+        updatedTemplate = { ...selectedTemplate, defaultHeaderMediaUrl: headerUrl };
+        setTemplates(list => list.map(t => t.id === selectedTemplate.id ? updatedTemplate! : t));
+      }
       setCampaigns(await getRecentCampaigns());
-      setCampaignName(""); setExternal([]); setConsentConfirmed(false); setParameterValues({});
+      setCampaignName(""); setExternal([]); setConsentConfirmed(false);
+      setParameterValues(initialParameterValues(updatedTemplate, variableModes));
     } catch (e: any) {
       toast.error("No se pudo crear la campaña", { description: e.message });
     } finally { setSending(false); }
@@ -183,7 +316,7 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
       <div className="max-w-5xl mx-auto space-y-5">
         <div>
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2"><Megaphone className="w-5 h-5 text-[#00a884]" /> Nueva campaña</h1>
-          <p className="text-sm text-gray-500 mt-1">Combina usuarios de Nelyoda y contactos externos en una sola lista sin duplicados.</p>
+          <p className="text-sm text-gray-500 mt-1">Combina usuarios de Inteegrados y contactos externos en una sola lista sin duplicados.</p>
         </div>
 
         <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
@@ -193,50 +326,99 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
               <input value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="Ej. Bienvenida julio"
                 className="mt-1 w-full h-10 rounded-md border border-gray-200 px-3 outline-none focus:border-[#00a884]" />
             </label>
-            <label className="text-sm text-gray-600">Plantilla aprobada
-              <select value={templateId} onChange={e => { setTemplateId(e.target.value); setParameterValues({}); }} className="mt-1 w-full h-10 rounded-md border border-gray-200 px-3 bg-white">
+            <label className="text-sm text-gray-600">
+              <span className="flex items-center justify-between">Plantilla aprobada
+                <button type="button" onClick={() => refreshTemplates(true)} disabled={syncingTemplates}
+                  className="inline-flex items-center gap-1 text-xs text-[#00a884] hover:underline disabled:opacity-50">
+                  <RefreshCw className={`w-3 h-3 ${syncingTemplates ? "animate-spin" : ""}`} />
+                  {syncingTemplates ? "Sincronizando..." : "Sincronizar con Meta"}
+                </button>
+              </span>
+              <select value={templateId} onChange={e => {
+                setTemplateId(e.target.value);
+                const template = templates.find(t => t.id === e.target.value);
+                const modes = defaultVariableModes(template);
+                setVariableModes(modes);
+                setParameterValues(initialParameterValues(template, modes));
+              }} className="mt-1 w-full h-10 rounded-md border border-gray-200 px-3 bg-white">
                 <option value="">Seleccionar plantilla</option>
                 {templates.map(t => <option key={t.id} value={t.id}>{t.displayName}</option>)}
               </select>
             </label>
           </div>
-          {templateId && variableNumbers.length > 0 && (
+          {templateId && (templateVariables.length > 0 || headerMediaLabel) && (
             <div className="rounded-lg border border-[#00a884]/20 bg-[#00a884]/5 p-4 space-y-3">
               <p className="text-sm font-medium text-gray-700">Variables de la plantilla</p>
-              {variableNumbers.map(variable => variable === 1 ? (
-                <label key={variable} className="block text-sm text-gray-600">{`{{1}}`} — nombre del destinatario
-                  <input disabled value="Se completa automáticamente para cada persona" className="mt-1 w-full h-9 rounded-md border border-gray-200 px-3 bg-gray-100 text-gray-500" />
-                </label>
-              ) : (
-                <label key={variable} className="block text-sm text-gray-600">{`{{${variable}}}`} {variable === 2 ? "— enlace del contenido" : ""}
-                  <input value={parameterValues[String(variable)] ?? ""}
-                    onChange={e => setParameterValues(v => ({ ...v, [String(variable)]: e.target.value }))}
-                    placeholder={variable === 2 ? "Selecciona un contenido o pega un enlace" : "Valor de la variable"}
-                    className="mt-1 w-full h-9 rounded-md border border-gray-200 px-3 bg-white" />
-                </label>
-              ))}
-              {variableNumbers.includes(2) && (
-                <label className="block text-sm text-gray-600">Tomar enlace de Nelyoda
-                  <select value={contents.find(c => c.url === parameterValues["2"])?.id ?? ""}
-                    onChange={e => {
-                      const content = contents.find(c => c.id === e.target.value);
-                      setParameterValues(v => ({ ...v, "2": content?.url ?? "" }));
-                    }} className="mt-1 w-full h-10 rounded-md border border-gray-200 px-3 bg-white">
-                    <option value="">Seleccionar boletín o cuestionario</option>
-                    <optgroup label="Boletines publicados">{contents.filter(c => c.type === "bulletin").map(c => <option key={`b-${c.id}`} value={c.id}>{c.title}</option>)}</optgroup>
-                    <optgroup label="Cuestionarios públicos">{contents.filter(c => c.type === "questionnaire").map(c => <option key={`q-${c.id}`} value={c.id}>{c.title}</option>)}</optgroup>
-                  </select>
-                </label>
+              {headerMediaLabel && (
+                <div className="text-sm text-gray-600 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Encabezado ({headerMediaLabel})</span>
+                    <button type="button" onClick={() => headerFileRef.current?.click()} disabled={uploadingHeader}
+                      className="inline-flex items-center gap-1 h-8 px-3 rounded-md border border-[#00a884]/40 bg-white text-xs text-[#00a884] hover:bg-[#00a884]/5 disabled:opacity-50">
+                      {uploadingHeader ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                      {uploadingHeader ? "Subiendo..." : parameterValues.header_media ? `Cambiar ${headerMediaLabel}` : `Subir ${headerMediaLabel}`}
+                    </button>
+                    <input ref={headerFileRef} type="file" hidden accept={headerMediaAccept(selectedTemplate?.headerFormat)}
+                      onChange={e => { handleHeaderFile(e.target.files?.[0]); e.target.value = ""; }} />
+                  </div>
+                  {parameterValues.header_media && selectedTemplate?.headerFormat === "IMAGE" && (
+                    <img src={parameterValues.header_media} alt="Encabezado" className="max-h-40 rounded-md border border-gray-200 bg-white" />
+                  )}
+                  <input value={parameterValues.header_media ?? ""}
+                    onChange={e => setParameterValues(v => ({ ...v, header_media: e.target.value }))}
+                    placeholder="O pega una URL pública https://..."
+                    className="w-full h-9 rounded-md border border-gray-200 px-3 bg-white" />
+                  <span className="block text-xs text-gray-400">
+                    Meta no reutiliza el archivo de ejemplo de la plantilla. El que subas queda guardado y se usará por defecto en las próximas campañas con esta plantilla.
+                  </span>
+                </div>
               )}
+              {templateVariables.map(({ key: variable, label, hint }) => {
+                const value = parameterValues[variable] ?? "";
+                const mode: VariableMode = variableModes[variable] ?? "text";
+                const setValue = (next: string) => setParameterValues(v => ({ ...v, [variable]: next }));
+                return (
+                  <div key={variable} className="text-sm text-gray-600">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono">{label}</span>
+                      <select value={mode} onChange={e => {
+                          const next = e.target.value as VariableMode;
+                          setVariableModes(m => ({ ...m, [variable]: next }));
+                          setValue(next === "name" ? RECIPIENT_NAME_VALUE : "");
+                        }}
+                        className="h-8 rounded-md border border-gray-200 px-2 bg-white text-xs">
+                        <option value="name">Nombre del destinatario</option>
+                        <option value="content">Enlace de Inteegrados</option>
+                        <option value="text">Texto o enlace libre</option>
+                      </select>
+                    </div>
+                    {mode === "name" ? (
+                      <input disabled value="Se completa automáticamente para cada persona" className="mt-1 w-full h-9 rounded-md border border-gray-200 px-3 bg-gray-100 text-gray-500" />
+                    ) : mode === "content" ? (
+                      <select value={contents.find(c => c.url === value)?.id ?? ""}
+                        onChange={e => setValue(contents.find(c => c.id === e.target.value)?.url ?? "")}
+                        className="mt-1 w-full h-9 rounded-md border border-gray-200 px-3 bg-white">
+                        <option value="">Seleccionar boletín o cuestionario</option>
+                        <optgroup label="Boletines publicados">{contents.filter(c => c.type === "bulletin").map(c => <option key={`b-${c.id}`} value={c.id}>{c.title}</option>)}</optgroup>
+                        <optgroup label="Cuestionarios públicos">{contents.filter(c => c.type === "questionnaire").map(c => <option key={`q-${c.id}`} value={c.id}>{c.title}</option>)}</optgroup>
+                      </select>
+                    ) : (
+                      <input value={value} onChange={e => setValue(e.target.value)} placeholder="Valor de la variable"
+                        className="mt-1 w-full h-9 rounded-md border border-gray-200 px-3 bg-white" />
+                    )}
+                    {hint && <span className="text-xs text-gray-400">{hint}</span>}
+                  </div>
+                );
+              })}
               {selectedTemplate?.bodyText && <p className="text-xs whitespace-pre-wrap text-gray-500 bg-white rounded-md p-3 border border-gray-100">{selectedTemplate.bodyText}</p>}
             </div>
           )}
-          {templates.length === 0 && <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-3">Primero registra una plantilla aprobada en <code>whatsapp/data/numbers/{numberId}/templates</code>.</p>}
+          {templates.length === 0 && <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-3">{syncingTemplates ? "Consultando plantillas en Meta..." : "No hay plantillas aprobadas en Meta para este número. Crea o espera la aprobación de una plantilla en WhatsApp Manager y pulsa \"Sincronizar con Meta\"."}</p>}
         </section>
 
         <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Users className="w-4 h-4" /> 2. Usuarios de Nelyoda</h2>
+            <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Users className="w-4 h-4" /> 2. Usuarios de Inteegrados</h2>
             <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={includeInternal} onChange={e => setIncludeInternal(e.target.checked)} /> Incluir</label>
           </div>
           <div className="grid md:grid-cols-2 gap-4 opacity-100">
@@ -366,11 +548,33 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
         <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2"><FileSpreadsheet className="w-4 h-4" /> 3. Contactos externos</h2>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-blue-100 text-blue-800 font-semibold text-sm">
+              <Info className="w-4 h-4" /> ¿Cómo preparar el archivo?
+            </div>
+            <div className="p-4 space-y-3 text-sm text-gray-700">
+              <ol className="space-y-1.5 list-decimal list-inside">
+                <li>Descarga la plantilla o crea un Excel con estos encabezados en la <b>primera fila</b>: <b>nombre</b>, <b>telefono</b> y <b>grupo</b>.</li>
+                <li>Escribe una persona por fila. Solo <b>telefono</b> es obligatorio; <b>nombre</b> se usa para saludar en la plantilla y <b>grupo</b> es opcional.</li>
+                <li>El teléfono puede ir con o sin +57, espacios o guiones: <span className="font-mono">3001234567</span>, <span className="font-mono">+57 300 123 4567</span>. Para otros países incluye el indicativo.</li>
+                <li>Solo se lee la primera hoja. Los números repetidos, los fijos (601…) y los inválidos se omiten.</li>
+              </ol>
+              <div className="overflow-x-auto rounded-lg border border-blue-100 bg-white">
+                <table className="w-full text-xs whitespace-nowrap">
+                  <thead className="bg-blue-100/70 text-blue-900"><tr><th className="px-3 py-2 text-left">nombre</th><th className="px-3 py-2 text-left">telefono</th><th className="px-3 py-2 text-left">grupo</th></tr></thead>
+                  <tbody>
+                    <tr className="border-t"><td className="px-3 py-2">Ana Pérez</td><td className="px-3 py-2 font-mono">3001234567</td><td className="px-3 py-2">Proveedores</td></tr>
+                    <tr className="border-t"><td className="px-3 py-2">Luis Gómez</td><td className="px-3 py-2 font-mono">+57 310 555 1234</td><td className="px-3 py-2">Clientes</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
           <div className="flex flex-wrap items-center gap-3">
-            <button onClick={() => fileRef.current?.click()} className="px-4 py-2 rounded-lg border border-gray-200 text-sm hover:border-[#00a884]">Importar Excel o CSV</button>
+            <button onClick={downloadExternalTemplate} className="px-4 py-2 rounded-lg border border-gray-200 text-sm hover:border-[#00a884] inline-flex items-center gap-2"><Download className="w-4 h-4" /> Descargar plantilla</button>
+            <button onClick={() => fileRef.current?.click()} className="px-4 py-2 rounded-lg border border-gray-200 text-sm hover:border-[#00a884] inline-flex items-center gap-2"><Upload className="w-4 h-4" /> Importar Excel o CSV</button>
             {external.length > 0 && <><span className="text-sm text-gray-500">{external.length} externos válidos</span><button onClick={() => setExternal([])} className="text-gray-400 hover:text-red-500"><X className="w-4 h-4" /></button></>}
           </div>
-          <p className="text-xs text-gray-400">Columnas reconocidas: nombre, telefono y grupo. Los números repetidos o inválidos se excluyen.</p>
         </section>
 
         <section className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">

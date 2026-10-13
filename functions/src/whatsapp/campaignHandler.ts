@@ -25,6 +25,7 @@ const FRIENDLY_WA_ERRORS: Record<number, string> = {
   131026: "El destinatario no tiene WhatsApp activo o el número no puede recibir mensajes.",
   131047: "No se puede reabrir la conversación: pasaron más de 24h desde el último mensaje del destinatario para esta plantilla.",
   132000: "La plantilla no está aprobada o sus parámetros no coinciden con lo que Meta tiene registrado.",
+  132012: "El formato de las variables no coincide con la plantilla en Meta. Pulsa \"Sincronizar con Meta\" en campañas y vuelve a elegir la plantilla.",
   132001: "La plantilla no existe en la cuenta de WhatsApp Business o fue eliminada.",
 };
 
@@ -37,6 +38,26 @@ function withRecipientToken(value: string, phone: string): string {
   const token = Buffer.from(phone, "utf-8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   const separator = value.includes("?") ? "&" : "?";
   return `${value}${separator}wr=${token}`;
+}
+
+const MEDIA_HEADER_TYPES: Record<string, "image" | "video" | "document"> = {
+  IMAGE: "image", VIDEO: "video", DOCUMENT: "document",
+};
+
+/** Valor especial de `parameterValues` que indica "usar el nombre de cada destinatario". */
+const RECIPIENT_NAME_VALUE = "__recipient_name__";
+
+function templateVariables(bodyText: string, isNamed: boolean): string[] {
+  const pattern = isNamed ? /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g : /\{\{\s*(\d+)\s*\}\}/g;
+  const found = [...new Set([...bodyText.matchAll(pattern)].map(match => match[1]))];
+  return isNamed ? found : found.sort((a, b) => Number(a) - Number(b));
+}
+
+// Solo se usa el nombre cuando la campaña lo pide explícitamente: no se asume
+// que {{1}} sea el nombre, porque hay plantillas donde {{1}} es el enlace y
+// rellenarlo en silencio enviaba el nombre en lugar del link.
+function usesRecipientName(variable: string, values?: Record<string, string>): boolean {
+  return values?.[variable] === RECIPIENT_NAME_VALUE;
 }
 
 function parseMetaError(rawBody: string): { metaError: MetaError | null; friendly: string } {
@@ -82,17 +103,42 @@ export const sendWaCampaign = onCall(
     if (!templateSnap.exists) throw new HttpsError("not-found", "Plantilla no encontrada.");
 
     const { phoneNumberId, metaToken } = numberSnap.data() as { phoneNumberId?: string; metaToken?: string };
-    const tpl = templateSnap.data() as { providerTemplateName?: string; displayName?: string; bodyText?: string; languageCode?: string };
+    const tpl = templateSnap.data() as {
+      providerTemplateName?: string; displayName?: string; bodyText?: string; languageCode?: string; parameterFormat?: string;
+      headerFormat?: string | null; headerText?: string | null; buttons?: Array<{ type: string; url?: string | null }>;
+    };
     if (!phoneNumberId || !metaToken || !tpl.providerTemplateName) {
       throw new HttpsError("failed-precondition", "El número o la plantilla no están completamente configurados.");
     }
-    const variableNumbers = [...new Set([...(tpl.bodyText ?? "").matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map(match => Number(match[1])))]
-      .sort((a, b) => a - b);
-    for (const variable of variableNumbers) {
-      if (variable !== 1 && !String(parameterValues?.[String(variable)] ?? "").trim()) {
-        throw new HttpsError("invalid-argument", `Falta el valor de la variable {{${variable}}}.`);
+    // Meta exige enviar las variables en el mismo formato con que se creó la
+    // plantilla: POSITIONAL ({{1}}, {{2}}) o NAMED ({{nombre}}, con parameter_name).
+    const isNamed = tpl.parameterFormat === "NAMED";
+    const variables = templateVariables(tpl.bodyText ?? "", isNamed);
+    // Encabezado y botones: las claves de parameterValues llevan prefijo para no
+    // chocar con las del cuerpo ("header:1", "button:0", "header_media").
+    const headerMediaType = MEDIA_HEADER_TYPES[tpl.headerFormat ?? ""];
+    const headerVariables = tpl.headerFormat === "TEXT" ? templateVariables(tpl.headerText ?? "", isNamed) : [];
+    const urlButtons = (tpl.buttons ?? [])
+      .map((button, index) => ({ button, index }))
+      .filter(({ button }) => button.type === "URL" && /\{\{.+?\}\}/.test(button.url ?? ""));
+    const requiredKeys = [
+      ...variables,
+      ...headerVariables.map(variable => `header:${variable}`),
+      ...urlButtons.map(({ index }) => `button:${index}`),
+    ];
+    for (const key of requiredKeys) {
+      if (!usesRecipientName(key, parameterValues) && !String(parameterValues?.[key] ?? "").trim()) {
+        throw new HttpsError("invalid-argument", `Falta el valor de la variable ${key.includes(":") ? key : `{{${key}}}`}.`);
       }
     }
+    const headerMediaUrl = String(parameterValues?.header_media ?? "").trim();
+    if (headerMediaType && !/^https:\/\//i.test(headerMediaUrl)) {
+      throw new HttpsError("invalid-argument", "La plantilla tiene un encabezado multimedia: indica la URL pública (https) del archivo.");
+    }
+    const valueFor = (variable: string, recipient: Recipient, phone: string) =>
+      usesRecipientName(variable, parameterValues)
+        ? String(recipient.name || phone)
+        : withRecipientToken(String(parameterValues?.[variable] ?? ""), phone);
 
     const campaignRef = db.collection(WHATSAPP_COLLECTIONS.campaigns).doc();
     await campaignRef.set({
@@ -117,12 +163,25 @@ export const sendWaCampaign = onCall(
       await recipientRef.set({ ...recipient, phone, status: "sending", createdAt: FieldValue.serverTimestamp() });
       let metaError: MetaError | null = null;
       try {
-        const bodyParameters = variableNumbers.map(variable => ({
-          type: "text", text: variable === 1
-            ? String(recipient.name || phone)
-            : withRecipientToken(String(parameterValues?.[String(variable)] ?? ""), phone),
+        const bodyParameters = variables.map(variable => ({
+          type: "text", text: valueFor(variable, recipient, phone),
+          ...(isNamed ? { parameter_name: variable } : {}),
         }));
-        const components = bodyParameters.length > 0 ? [{ type: "body", parameters: bodyParameters }] : [];
+        const components: Array<Record<string, unknown>> = [];
+        if (headerMediaType) {
+          components.push({ type: "header", parameters: [{ type: headerMediaType, [headerMediaType]: { link: headerMediaUrl } }] });
+        } else if (headerVariables.length > 0) {
+          components.push({ type: "header", parameters: headerVariables.map(variable => ({
+            type: "text", text: valueFor(`header:${variable}`, recipient, phone),
+            ...(isNamed ? { parameter_name: variable } : {}),
+          })) });
+        }
+        if (bodyParameters.length > 0) components.push({ type: "body", parameters: bodyParameters });
+        // En botones URL solo se envía la parte variable (lo que reemplaza a {{1}} en la URL de la plantilla).
+        urlButtons.forEach(({ index }) => components.push({
+          type: "button", sub_type: "url", index: String(index),
+          parameters: [{ type: "text", text: String(parameterValues?.[`button:${index}`] ?? "").trim() }],
+        }));
         const response = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${metaToken}` },
@@ -146,15 +205,16 @@ export const sendWaCampaign = onCall(
           userId: recipient.userId, userName: recipient.name,
         });
         let messageText = tpl.bodyText ?? `[Plantilla: ${tpl.displayName ?? tpl.providerTemplateName}]`;
-        for (const variable of variableNumbers) {
-          const value = variable === 1 ? String(recipient.name || phone) : withRecipientToken(String(parameterValues?.[String(variable)] ?? ""), phone);
-          messageText = messageText.replace(new RegExp(`\\{\\{\\s*${variable}\\s*\\}\\}`, "g"), value);
+        for (const variable of variables) {
+          messageText = messageText.replace(new RegExp(`\\{\\{\\s*${variable}\\s*\\}\\}`, "g"), valueFor(variable, recipient, phone));
         }
         await appendMessage({
           numberId, conversationId: conversation.id,
           message: {
             role: "assistant", text: messageText, source: "AGENT", timestampMs: Date.now(),
             providerMessageId: wamid || undefined, deliveryStatus: "pending",
+            // Se guarda el archivo del encabezado para que el chat muestre el mensaje como lo ve el destinatario.
+            ...(headerMediaType ? { mediaUrl: headerMediaUrl, mediaType: headerMediaType } : {}),
           },
         });
         sent++;

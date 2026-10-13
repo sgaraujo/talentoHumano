@@ -15,6 +15,15 @@ import { HrEmployeeDetailDialog } from '@/components/users/HrEmployeeDetailDialo
 import { HrPartialUpdateDialog } from '@/components/users/HrPartialUpdateDialog';
 import { HrCreateEmployeeDialog } from '@/components/users/HrCreateEmployeeDialog';
 
+// Timestamp/Date → dd/mm/aaaa. Antes el Timestamp se pasaba tal cual y la celda
+// salía vacía. Un texto (fecha histórica mal guardada) se exporta sin tocar para que se note.
+const exportDate = (value: unknown) => {
+  if (typeof value === 'string') return value;
+  const date = value instanceof Date ? value : (value as { toDate?: () => Date } | null)?.toDate?.();
+  return date instanceof Date && !Number.isNaN(date.getTime())
+    ? `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`
+    : '';
+};
 const dateLabel = (value: any) => value?.toDate?.().toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) ?? '—';
 
 export function HrControlPage() {
@@ -37,6 +46,7 @@ export function HrControlPage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [partialUpdateOpen, setPartialUpdateOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [retireStale, setRetireStale] = useState(false);
 
   const load = async () => {
     setLoading(true); setError('');
@@ -53,7 +63,7 @@ export function HrControlPage() {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    setImportFile(file); setPreviewOpen(true); setPreview(null); setPreviewError(''); setPreviewLoading(true);
+    setImportFile(file); setPreviewOpen(true); setPreview(null); setPreviewError(''); setPreviewLoading(true); setRetireStale(false);
     try { setPreview(await runHrExcelPreview(file, platformUsers, setPreviewLabel)); }
     catch (reason: any) { setPreviewError(reason?.message || 'No fue posible analizar el archivo.'); }
     finally { setPreviewLoading(false); }
@@ -61,12 +71,16 @@ export function HrControlPage() {
 
   const applyImport = async () => {
     if (!importFile || !preview || preview.conflicts || preview.rejected) return;
-    if (!window.confirm(`Se actualizarán ${preview.totalRows.toLocaleString('es-CO')} relaciones laborales. ¿Deseas continuar?`)) return;
+    const retireDocuments = retireStale ? staleActives.map(person => person.documentNumber) : [];
+    const retireNote = retireDocuments.length ? `\n\nAdemás se marcarán como RETIRADAS ${retireDocuments.length.toLocaleString('es-CO')} personas activas en la plataforma que no están activas en el Excel.` : '';
+    if (!window.confirm(`Se actualizarán ${preview.totalRows.toLocaleString('es-CO')} relaciones laborales.${retireNote}\n\n¿Deseas continuar?`)) return;
     setApplying(true); setApplyProgress(0); setPreviewError('');
     try {
       const plan = await runHrExcelImportPlan(importFile, platformUsers, setPreviewLabel);
-      const result = await applyHrImport(plan, auth.currentUser?.email || 'usuario-desconocido', (percent, label) => { setApplyProgress(percent); setPreviewLabel(label); });
-      toast.success('Base de Talento Humano actualizada', { description: `${result.employees} expedientes y ${result.relationships} relaciones procesadas.` });
+      const result = await applyHrImport(plan, auth.currentUser?.email || 'usuario-desconocido', (percent, label) => { setApplyProgress(percent); setPreviewLabel(label); }, { retireDocuments });
+      toast.success('Base de Talento Humano actualizada', {
+        description: `${result.employees} expedientes y ${result.relationships} relaciones procesadas.${result.retiredEmployees ? ` ${result.retiredEmployees} personas marcadas como retiradas.` : ''}`,
+      });
       setPreviewOpen(false); await load();
     } catch (reason: any) {
       setPreviewError(reason?.message || 'No fue posible aplicar la importación.');
@@ -85,15 +99,16 @@ export function HrControlPage() {
       'Teléfono corporativo': r.corporatePhone || '',
       'Teléfono personal': r.personalPhone || '',
       Empresa: r.companyName || '',
-      'Cuenta analítica': r.projectName || '',
+      Proyecto: r.projectName || '',
+      'Cuenta analítica': r.analyticalAccount || '',
       Cargo: r.position || '',
       'Tipo de contrato': r.contractType || '',
       Modalidad: r.modality || '',
       Regional: r.regional || '',
       Sede: r.baseLocation || '',
       Área: r.area || '',
-      'Fecha inicio': r.startDate || '',
-      'Fecha fin': r.endDate || '',
+      'Fecha inicio': exportDate(r.startDate),
+      'Fecha fin': exportDate(r.endDate),
       'Estado relación': r.relationshipStatus,
       'Motivo de retiro': r.terminationReason || '',
     }));
@@ -103,6 +118,13 @@ export function HrControlPage() {
     XLSX.utils.book_append_sheet(wb, ws, 'Talento Humano');
     XLSX.writeFile(wb, `BD_Talento_Humano_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
+
+  // Personas activas en la plataforma que el Excel cargado no trae como activas.
+  const activeInExcel = new Set(preview?.activeDocuments ?? []);
+  const staleActives = !preview ? [] : employees
+    .filter(item => (item.activeRelations > 0 || item.status === 'active') && !activeInExcel.has(item.documentNumber))
+    .map(item => ({ id: item.id, fullName: item.fullName, documentNumber: item.documentNumber, companies: item.companies }))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName, 'es'));
 
   const withoutAccess = employees.filter(item => !item.identityUserId).length;
   const activeRelationships = employees.reduce((total, item) => total + item.activeRelations, 0);
@@ -183,7 +205,7 @@ export function HrControlPage() {
           </div>
         )}
       </div>
-      <HrImportPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} preview={preview} loading={previewLoading} loadingLabel={previewLabel} error={previewError} applying={applying} applyProgress={applyProgress} onApply={applyImport} />
+      <HrImportPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} preview={preview} loading={previewLoading} loadingLabel={previewLabel} error={previewError} applying={applying} applyProgress={applyProgress} onApply={applyImport} staleActives={staleActives} retireStale={retireStale} onRetireStaleChange={setRetireStale} />
       <HrEmployeeDetailDialog employeeId={selectedEmployeeId} open={!!selectedEmployeeId} onOpenChange={open => { if (!open) setSelectedEmployeeId(null); }} onUpdated={load} />
       <HrPartialUpdateDialog open={partialUpdateOpen} onOpenChange={setPartialUpdateOpen} onCompleted={load} />
       <HrCreateEmployeeDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />

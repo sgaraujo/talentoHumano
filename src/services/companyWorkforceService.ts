@@ -68,7 +68,7 @@ const belongsToCompany = (relation: any, company: Company) => {
 // Ejecuta `fn` sobre `items` con un máximo de `limit` promesas en vuelo, para
 // no disparar miles de lecturas a la vez (Firestore responde "Too many
 // outstanding requests" en empresas grandes como INTEEGRA).
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
   const worker = async () => {

@@ -20,8 +20,10 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, Plus, Trash2, GripVertical, ArrowRight, Link2 } from 'lucide-react';
+import { Loader2, Plus, Trash2, GripVertical, ArrowRight, ArrowUp, ArrowDown, Copy, Link2, Sparkles } from 'lucide-react';
+import { generateQuestionnaireDraft } from '@/services/questionnaireAiService';
 import { toast } from 'sonner';
+import { useQuestionReorder, UNMAPPED_FIELD } from './useQuestionReorder';
 import type { Question, QuestionType } from '@/models/types/Questionnaire';
 
 const FIELD_GROUPS = [
@@ -149,7 +151,33 @@ export const CreateQuestionnaireDialog = ({
     });
     const [questions, setQuestions] = useState<Question[]>([]);
     const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
+    const { moveQuestion, duplicateQuestion, getCardProps, getHandleProps, cardClassName } = useQuestionReorder(setQuestions);
     const [currentStep, setCurrentStep] = useState<'info' | 'questions' | 'mappings'>('info');
+    const [aiPrompt, setAiPrompt] = useState('');
+    const [aiLoading, setAiLoading] = useState(false);
+
+    // Borrador con IA: llena título, descripción y preguntas; TH revisa y edita antes de guardar.
+    const generateWithAi = async () => {
+        if (aiPrompt.trim().length < 10) {
+            toast.error('Describe un poco más el cuestionario que necesitas.');
+            return;
+        }
+        setAiLoading(true);
+        try {
+            const draft = await generateQuestionnaireDraft(aiPrompt.trim(), formData.targetRole);
+            setFormData(prev => ({ ...prev, title: draft.title, description: draft.description }));
+            setQuestions(draft.questions);
+            setFieldMappings([]);
+            setCurrentStep('questions');
+            toast.success(`Borrador listo con ${draft.questions.length} preguntas`, {
+                description: 'Revísalas, ajusta lo que necesites y guarda el cuestionario.',
+            });
+        } catch (error: any) {
+            toast.error('No se pudo generar el cuestionario', { description: error?.message });
+        } finally {
+            setAiLoading(false);
+        }
+    };
 
     const addQuestion = () => {
         const newQuestion: Question = {
@@ -246,6 +274,7 @@ export const CreateQuestionnaireDialog = ({
             setQuestions([]);
             setFieldMappings([]);
             setCurrentStep('info');
+            setAiPrompt('');
             onQuestionnaireCreated();
             onOpenChange(false);
         } catch (error: any) {
@@ -278,6 +307,52 @@ export const CreateQuestionnaireDialog = ({
                 {/* ── STEP 1: INFO ── */}
                 {currentStep === 'info' && (
                     <div className="space-y-4 py-4">
+                        <div className="rounded-xl border border-[#008C3C]/25 bg-[#008C3C]/5 p-4 space-y-3">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-[#008C3C]" />
+                                <p className="text-sm font-semibold text-[#006C2F]">Generar con IA</p>
+                            </div>
+                            <p className="text-xs text-gray-600">
+                                Describe qué quieres medir, a quién va dirigido y cuántas preguntas necesitas. La IA arma un borrador
+                                con título, descripción y preguntas que puedes editar antes de guardar.
+                            </p>
+                            <Textarea
+                                id="ai-prompt"
+                                rows={3}
+                                value={aiPrompt}
+                                onChange={(e) => setAiPrompt(e.target.value)}
+                                placeholder="Ej: Encuesta de clima laboral para el equipo de campo de Bogotá, 10 preguntas, con énfasis en liderazgo y bienestar."
+                                disabled={aiLoading}
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                                <label htmlFor="ai-target" className="text-xs text-gray-600">Dirigido a</label>
+                                <select
+                                    id="ai-target"
+                                    value={formData.targetRole}
+                                    onChange={(e) => setFormData({ ...formData, targetRole: e.target.value as typeof formData.targetRole })}
+                                    className="px-2 py-1.5 rounded-md text-xs border border-gray-200 bg-white"
+                                    disabled={aiLoading}
+                                >
+                                    <option value="all">Todos</option>
+                                    <option value="colaborador">Colaboradores</option>
+                                    <option value="aspirante">Aspirantes</option>
+                                    <option value="excolaborador">Ex-colaboradores</option>
+                                </select>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={generateWithAi}
+                                    disabled={aiLoading || aiPrompt.trim().length < 10}
+                                    className="ml-auto bg-[#008C3C] hover:bg-[#006C2F] text-white"
+                                >
+                                    {aiLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                                    {aiLoading ? 'Generando… (puede tardar unos segundos)' : 'Generar borrador'}
+                                </Button>
+                            </div>
+                            {questions.length > 0 && (
+                                <p className="text-[11px] text-amber-700">Generar un borrador reemplaza las {questions.length} preguntas que ya tienes.</p>
+                            )}
+                        </div>
                         <div className="space-y-2">
                             <Label htmlFor="title">Título *</Label>
                             <Input
@@ -382,9 +457,24 @@ export const CreateQuestionnaireDialog = ({
                     <div className="space-y-4 py-4">
                         <div className="space-y-4">
                             {questions.map((question, index) => (
-                                <div key={question.id} className="border rounded-lg p-4 space-y-3">
+                                <div
+                                  key={question.id}
+                                  {...getCardProps(question.id, index)}
+                                  className={`border rounded-lg p-4 space-y-3 transition-colors ${cardClassName(index)}`}
+                                >
                                     <div className="flex items-start gap-2">
-                                        <GripVertical className="w-5 h-5 text-gray-400 mt-2 flex-shrink-0" />
+                                        <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+                                          <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={index === 0} onClick={() => moveQuestion(index, index - 1)} title="Subir">
+                                            <ArrowUp className="w-4 h-4 text-gray-500" />
+                                          </Button>
+                                          <span {...getHandleProps(question.id)} className="cursor-grab active:cursor-grabbing" title="Arrastra para mover">
+                                            <GripVertical className="w-5 h-5 text-gray-400" />
+                                          </span>
+                                          <span className="text-[10px] text-gray-400 leading-none">{index + 1}</span>
+                                          <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={index === questions.length - 1} onClick={() => moveQuestion(index, index + 1)} title="Bajar">
+                                            <ArrowDown className="w-4 h-4 text-gray-500" />
+                                          </Button>
+                                        </div>
                                         <div className="flex-1 space-y-3">
                                             <div className="flex gap-2">
                                                 <Input
@@ -440,9 +530,14 @@ export const CreateQuestionnaireDialog = ({
                                                 <Label className="text-sm">Obligatoria</Label>
                                             </div>
                                         </div>
-                                        <Button variant="ghost" size="sm" onClick={() => removeQuestion(question.id)}>
+                                        <div className="flex flex-col gap-1">
+                                          <Button type="button" variant="ghost" size="sm" onClick={() => duplicateQuestion(index)} title="Duplicar">
+                                            <Copy className="w-4 h-4 text-gray-500" />
+                                          </Button>
+                                          <Button type="button" variant="ghost" size="sm" onClick={() => removeQuestion(question.id)} title="Eliminar">
                                             <Trash2 className="w-4 h-4 text-red-500" />
-                                        </Button>
+                                          </Button>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -492,14 +587,14 @@ export const CreateQuestionnaireDialog = ({
                                         </p>
                                         <div className="flex gap-2 items-center">
                                             <Select
-                                                value={mapping.fieldPath}
-                                                onValueChange={(v) => updateMapping(question.id, 'fieldPath', v)}
+                                                value={mapping.fieldPath || UNMAPPED_FIELD}
+                                                onValueChange={(v) => updateMapping(question.id, 'fieldPath', v === UNMAPPED_FIELD ? '' : v)}
                                             >
                                                 <SelectTrigger className="flex-1 text-sm">
                                                     <SelectValue placeholder="Sin mapear" />
                                                 </SelectTrigger>
                                                 <SelectContent className="max-h-64">
-                                                    <SelectItem value="">Sin mapear</SelectItem>
+                                                    <SelectItem value={UNMAPPED_FIELD}>Sin mapear</SelectItem>
                                                     {FIELD_GROUPS.map(group => (
                                                         <SelectGroup key={group.label}>
                                                             <SelectLabel className="text-xs font-semibold text-gray-400 uppercase">{group.label}</SelectLabel>

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend, LabelList,
@@ -10,9 +10,11 @@ import {
   Filter, X, MapPin, VenusAndMars, UsersRound, BarChart3,
 } from 'lucide-react';
 import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
-import { analyticsService, isSenaApprentice, toDate as toDateEmployment } from '@/services/analyticsService';
+import { analyticsService, isApprenticeRelation, matchesCompany, toDate as toDateEmployment } from '@/services/analyticsService';
 import { companyService } from '@/services/companyService';
 import { projectService } from '@/services/projectService';
+import { SenaApprenticesPanel } from '@/components/analytics/SenaApprenticesPanel';
+import { AGE_ORDER, ageGroup, normalizeGender, normalizeWorkModality } from '@/domain/humanResources/demographics';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RotationPage } from '@/views/Analytics/RotationPage';
 import type { RotationFilters } from '@/views/Analytics/RotationPage';
@@ -28,63 +30,6 @@ function rotacionSemaforo(pct: number) {
   return           { color: '#A8552F', label: 'Crítica',  bg: '#FDF2EE', border: '#F0DCD2', needsAttention: true  };
 }
 
-function ageGroup(birthDate: any, storedAge?: number, storedRange?: string, referenceDate = new Date()): string {
-  // Las fechas de nacimiento históricas pueden venir como DD/MM/YYYY; el lector
-  // de emplements valida y desambigua esos formatos antes de calcular la edad.
-  const bd = toDateEmployment(birthDate);
-  const today = referenceDate;
-  let age: number | undefined;
-  if (bd) {
-    age = today.getFullYear() - bd.getFullYear();
-    const hasNotHadBirthday = today.getMonth() < bd.getMonth()
-      || (today.getMonth() === bd.getMonth() && today.getDate() < bd.getDate());
-    if (hasNotHadBirthday) age -= 1;
-  } else if (storedAge !== undefined && storedAge !== null && Number.isFinite(Number(storedAge))) {
-    age = Number(storedAge);
-  }
-  if (age === undefined) {
-    const knownRange = storedRange?.trim();
-    if (!knownRange) return 'Sin dato';
-    const normalized = knownRange.replace(/años?/gi, '').replace(/\s+/g, ' ').trim();
-    const numbers = normalized.match(/\d+/g)?.map(Number) ?? [];
-    if (numbers.length > 0) {
-      const referenceAge = numbers[0];
-      if (referenceAge >= 15 && referenceAge <= 100) age = referenceAge;
-    }
-    if (age === undefined) return 'Sin dato';
-  }
-  if (age < 15 || age > 100) return 'Sin dato';
-  if (age < 26)  return '18–25';
-  if (age < 31)  return '26–30';
-  if (age < 36)  return '31–35';
-  if (age < 41)  return '36–40';
-  if (age < 51)  return '41–50';
-  return '51+';
-}
-
-function normalizeGender(value?: string): string {
-  const raw = value?.trim();
-  if (!raw) return 'Sin dato';
-  const key = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es');
-  if (['m', 'masculino', 'hombre', 'male'].includes(key)) return 'Masculino';
-  if (['f', 'femenino', 'mujer', 'female'].includes(key)) return 'Femenino';
-  if (['no binario', 'no-binario', 'non binary', 'non-binary'].includes(key)) return 'No binario';
-  if (key === 'prefiero no decir') return 'Prefiero no decir';
-  return raw.charAt(0).toLocaleUpperCase('es') + raw.slice(1).toLocaleLowerCase('es');
-}
-
-function normalizeWorkModality(value?: string): string {
-  const raw = value?.trim();
-  if (!raw) return 'Sin dato';
-  const key = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es')
-    .replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
-  if (['no aplica', 'no aplica.', 'n/a', 'na'].includes(key)) return 'No aplica';
-  if (['presencial', 'presencialidad', 'en oficina'].includes(key)) return 'Presencial';
-  if (['remoto', 'remota', 'teletrabajo', 'trabajo remoto'].includes(key)) return 'Remoto';
-  if (['hibrido', 'hibrida', 'mixto', 'mixta'].includes(key)) return 'Híbrido';
-  return raw.charAt(0).toLocaleUpperCase('es') + raw.slice(1).toLocaleLowerCase('es');
-}
-
 const normalizeDashboardName = (value?: string): string => String(value ?? '')
   .trim()
   .normalize('NFD')
@@ -92,7 +37,6 @@ const normalizeDashboardName = (value?: string): string => String(value ?? '')
   .toLocaleLowerCase('es')
   .replace(/\s+/g, ' ');
 
-const AGE_ORDER = ['18–25','26–30','31–35','36–40','41–50','51+','Sin dato'];
 const MONTH_NAMES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const PIE_COLORS = ['#14171C','#565D6B','#A8552F','#8B93A1','#C98862','#2E333D','#B8BFCA','#D9AE94'];
 
@@ -253,7 +197,7 @@ export const DashboardPage = () => {
       if (u.role !== 'colaborador') return false;
       return assignmentsOf(u).some(a => {
         const company = a.company?.trim();
-        if (!company || !thNames.has(normalizeDashboardName(company)) || isSenaApprentice(a)) return false;
+        if (!company || !thNames.has(normalizeDashboardName(company)) || isApprenticeRelation(a)) return false;
         if (filterCompany !== 'all' && normalizeDashboardName(company) !== normalizeDashboardName(filterCompany)) return false;
         if (filterProject !== 'all' && normalizeDashboardName(a.project) !== normalizeDashboardName(filterProject)) return false;
         return true;
@@ -273,7 +217,7 @@ export const DashboardPage = () => {
   const demographicAssignmentsOf = (u: any): DashboardAssignment[] => {
     const relationships: DashboardAssignment[] = u._allAssignments?.length ? u._allAssignments : assignmentsOf(u);
     return relationships.filter(relationship => {
-      if (isSenaApprentice(relationship)) return false;
+      if (isApprenticeRelation(relationship)) return false;
       if (relationship.status !== 'active' && relationship.status !== 'retired') return false;
       if (demographicCutoff >= now) {
         if (relationship.status !== 'active') return false;
@@ -297,13 +241,20 @@ export const DashboardPage = () => {
       .some(assignment => assignment.company?.trim() && thNames.has(assignment.company.trim())));
   }, [allUsers, filterCompany, filterProject, filterYear, filterMonth, thCompanies]);
 
+  // Relación laboral de una empresa TH y de la empresa filtrada. Los nombres del
+  // Excel no siempre coinciden con el catálogo ("INTEEGRA S.A.S BIC" vs
+  // "INTEEGRA SAS BIC"), por eso se compara con matchesCompany y no por texto.
+  const belongsToFilter = useCallback((e: any) =>
+    thCompanies.some(c => matchesCompany(e, c.name, companies))
+    && (filterCompany === 'all' || matchesCompany(e, filterCompany, companies)),
+  [thCompanies, companies, filterCompany]);
+
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const colaboradores   = activeUsers.length;
     const excolaboradores = allUsers.filter(u => u.role === 'excolaborador').length;
 
-    const compFilter = (e: any) => filterCompany === 'all'
-      || normalizeDashboardName(e.companyName) === normalizeDashboardName(filterCompany);
+    const compFilter = belongsToFilter;
 
     // Un ingreso/retiro con fecha futura (ej. una terminación ya registrada con
     // preaviso) todavía no ocurrió — no debe sumar hasta que su fecha llegue.
@@ -321,16 +272,27 @@ export const DashboardPage = () => {
       const l = r.toLowerCase();
       return l.includes('renuncia') || l.includes('mutuo acuerdo') || l === 'voluntario';
     };
-    const retirosVol = employments.filter(e => {
+    const voluntaryRetirementsIn = (month: number, year: number) => employments.filter(e => {
       const d = toDateEmployment(e.endDate);
-      return e.status === 'retired' && d && d <= now && d.getMonth() === curMonth && d.getFullYear() === curYear
-        && compFilter(e) && !isSenaApprentice(e) && esVoluntario(e.terminationReason);
+      return e.status === 'retired' && d && d <= now && d.getMonth() === month && d.getFullYear() === year
+        && compFilter(e) && !isApprenticeRelation(e) && esVoluntario(e.terminationReason);
     }).length;
-    const rotacionPct = colaboradores > 0
-      ? Math.round((retirosVol / colaboradores) * 100 * 10) / 10 : 0;
+    const pctOf = (value: number) => colaboradores > 0
+      ? Math.round((value / colaboradores) * 100 * 10) / 10 : 0;
+    const retirosVol = voluntaryRetirementsIn(curMonth, curYear);
+    const rotacionPct = pctOf(retirosVol);
 
-    return { colaboradores, excolaboradores, ingresosMes, retirosMes, retirosVol, rotacionPct };
-  }, [activeUsers, allUsers, employments, curMonth, curYear, filterCompany]);
+    // Mes anterior (ya cerrado): al inicio de mes el mes en curso casi siempre
+    // está en 0 %, así que se muestra como referencia junto al indicador.
+    const prev = new Date(curYear, curMonth - 1, 1);
+    const retirosVolPrev = voluntaryRetirementsIn(prev.getMonth(), prev.getFullYear());
+    const prevLabel = prev.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+
+    return {
+      colaboradores, excolaboradores, ingresosMes, retirosMes, retirosVol, rotacionPct,
+      retirosVolPrev, rotacionPrevPct: pctOf(retirosVolPrev), prevLabel,
+    };
+  }, [activeUsers, allUsers, employments, curMonth, curYear, belongsToFilter]);
 
   const semaforo = rotacionSemaforo(stats.rotacionPct);
 
@@ -342,7 +304,7 @@ export const DashboardPage = () => {
 
   // ── Trend 6 months ─────────────────────────────────────────────────────────
   const trendData = useMemo(() => {
-    const compFilter = (e: any) => filterCompany === 'all' || e.companyName === filterCompany;
+    const compFilter = belongsToFilter;
     return Array.from({ length: 6 }, (_, i) => {
       const d = new Date(curYear, curMonth - 5 + i, 1);
       const mo = d.getMonth(); const yr = d.getFullYear();
@@ -350,7 +312,7 @@ export const DashboardPage = () => {
       const retiros  = employments.filter(e => { const dd = toDateEmployment(e.endDate); return e.status === 'retired' && dd && dd <= now && dd.getMonth() === mo && dd.getFullYear() === yr && compFilter(e); }).length;
       return { mes: MONTH_NAMES[mo], ingresos, retiros };
     });
-  }, [employments, curMonth, curYear, filterCompany]);
+  }, [employments, curMonth, curYear, belongsToFilter]);
 
   // ── Company headcount (for cards) ──────────────────────────────────────────
   // Se cuenta cada colaborador una sola vez por empresa (Set de ids), aunque
@@ -360,7 +322,7 @@ export const DashboardPage = () => {
     const map = new Map<string, Set<string>>();
     allUsers.filter(u => u.role === 'colaborador').forEach(u => {
       const companiesForUser = new Set(
-        assignmentsOf(u).filter(a => !isSenaApprentice(a)).map(a => a.company?.trim()).filter(Boolean) as string[]
+        assignmentsOf(u).filter(a => !isApprenticeRelation(a)).map(a => a.company?.trim()).filter(Boolean) as string[]
       );
       companiesForUser.forEach(c => {
         if (!map.has(c)) map.set(c, new Set());
@@ -369,35 +331,6 @@ export const DashboardPage = () => {
     });
     return new Map([...map.entries()].map(([c, ids]) => [c, ids.size]));
   }, [allUsers]);
-
-  // Personas activas de las cuentas analíticas SENA. En los datos históricos el
-  // tipo de contrato no siempre está diligenciado, por eso aquí la pertenencia
-  // se determina por el nombre de la cuenta analítica.
-  const projectHeadcount = useMemo(() => {
-    const thNames = new Set(thCompanies.flatMap(c => [c.name, ...(c.aliases ?? [])]).map(normalizeDashboardName));
-    const map = new Map<string, Set<string>>();
-    allUsers.filter(u => u.role === 'colaborador').forEach(u => {
-      const projectsForUser = new Set(
-        assignmentsOf(u)
-          .filter(a => {
-            const projectName = a.project?.trim();
-            return a.company?.trim()
-              && thNames.has(normalizeDashboardName(a.company))
-              && projectName
-              && projectName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes('sena');
-          })
-          .map(a => a.project?.trim())
-          .filter(Boolean) as string[]
-      );
-      projectsForUser.forEach(projectName => {
-        if (!map.has(projectName)) map.set(projectName, new Set());
-        map.get(projectName)!.add(u.id);
-      });
-    });
-    return [...map.entries()]
-      .map(([name, ids]) => ({ name, count: ids.size }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'es'));
-  }, [allUsers, thCompanies]);
 
   // ── Colaboradores con asignación activa en más de una empresa TH ────────────
   // Por esto la suma de las tarjetas por empresa puede superar a "Colaboradores
@@ -658,29 +591,7 @@ export const DashboardPage = () => {
             </div>
           )}
 
-          <SectionTitle icon={<FolderKanban className="w-3.5 h-3.5" />}>Aprendices SENA por cuenta analítica</SectionTitle>
-          {projectHeadcount.length === 0 ? (
-            <p className="text-xs text-gray-400 italic py-6 text-center bg-white rounded-xl border border-[#E7E9EE]">
-              Sin aprendices SENA asignados a cuentas analíticas
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {projectHeadcount.map(project => (
-                <div key={project.name} className="bg-white rounded-xl border border-[#E7E9EE] shadow-sm p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-semibold text-[#8B93A1] uppercase tracking-wide">Cuenta analítica</p>
-                      <p className="mt-1 text-sm font-semibold text-[#14171C] truncate" title={project.name}>{project.name}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-2xl font-bold text-[#14171C] leading-none">{project.count}</p>
-                      <p className="mt-1 text-[10px] text-[#8B93A1]">{project.count === 1 ? 'aprendiz' : 'aprendices'}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <SenaApprenticesPanel employments={employments} thCompanies={thCompanies} filterCompany={filterCompany} />
 
           {/* Rotación general */}
           <h2 className="mt-7 mb-4 text-lg font-bold text-[#14171C] tracking-tight">
@@ -714,7 +625,11 @@ export const DashboardPage = () => {
                 </svg>
                 <div className="-mt-3 text-center">
                   <p className="text-3xl font-bold tracking-tight" style={{ color: semaforo.color }}>{stats.rotacionPct}%</p>
-                  <p className="text-[11px] font-semibold text-[#8B93A1] uppercase tracking-wide mt-0.5">Rotación mensual</p>
+                  <p className="text-[11px] font-semibold text-[#8B93A1] uppercase tracking-wide mt-0.5">Rotación mensual · {monthLabel}</p>
+                  <p className="text-[11px] text-[#8B93A1] mt-1">
+                    Mes anterior ({stats.prevLabel}): <span className="font-semibold text-[#14171C]">{stats.rotacionPrevPct}%</span>
+                    {' '}· {stats.retirosVolPrev} renuncia(s) voluntaria(s)
+                  </p>
                 </div>
               </div>
               <div className="mt-4 rounded-lg px-4 py-3.5" style={{ background: semaforo.bg, border: `1px solid ${semaforo.border}` }}>
@@ -726,8 +641,8 @@ export const DashboardPage = () => {
                 </div>
                 <p className="text-xs leading-relaxed" style={{ color: semaforo.needsAttention ? '#8A4529' : '#565D6B' }}>
                   {semaforo.needsAttention
-                    ? `${stats.retirosVol} renuncia(s) voluntaria(s) este mes sobre un HT de ${stats.colaboradores}, sin aprendices SENA. Vale la pena revisar los motivos con Talento Humano.`
-                    : `${stats.retirosVol === 0 ? 'Sin renuncias voluntarias registradas' : `${stats.retirosVol} renuncia(s) voluntaria(s) registrada(s)`} este mes sobre un HT de ${stats.colaboradores}, sin aprendices SENA. La organización opera dentro del rango saludable.`}
+                    ? `${stats.retirosVol} renuncia(s) voluntaria(s) en lo que va de ${monthLabel.toLowerCase()} sobre un HT de ${stats.colaboradores}, sin aprendices SENA. Vale la pena revisar los motivos con Talento Humano.`
+                    : `${stats.retirosVol === 0 ? 'Sin renuncias voluntarias registradas' : `${stats.retirosVol} renuncia(s) voluntaria(s) registrada(s)`} en lo que va de ${monthLabel.toLowerCase()} sobre un HT de ${stats.colaboradores}, sin aprendices SENA. La organización opera dentro del rango saludable.`}
                 </p>
               </div>
             </div>

@@ -11,13 +11,12 @@ import { AnswerQuestionnairePage } from './views/Public/AnswerQuestionnairePage'
 import { MainLayout } from './components/layout/MainLayout';
 import { Toaster } from '@/components/ui/sonner';
 import { RotationPage } from './views/Analytics/RotationPage';
-import ChatWidget from './components/ia/ChatWidget';
-import UsersSearchPage from './views/Users/UsersSearchPage';
 import ExportQueueTable from './views/Exporter/ExporterPage';
 import { CompaniesPage } from './views/Companies/CompaniesPage';
 import { CompanyWorkforcePage } from './views/Companies/CompanyWorkforcePage';
 import { CompanySettingsPage } from './views/Companies/CompanySettingsPage';
 import { ProjectsPage } from './views/Projects/ProjectsPage';
+import { AnalyticalAccountStatsPage } from './views/Projects/AnalyticalAccountStatsPage';
 import { CommunicationsPage } from './views/Communications/CommunicationsPage';
 import { CommunicationsStatsPage } from './views/Communications/CommunicationsStatsPage';
 import { ReadCommunicationPage } from './views/Public/ReadCommunicationPage';
@@ -35,6 +34,9 @@ import { BulletinsPage } from './views/Bulletins/BulletinsPage';
 import { BulletinEditorPage } from './views/Bulletins/BulletinEditorPage';
 import { BulletinViewPage } from './views/Bulletins/BulletinViewPage';
 import { BulletinStatsPage } from './views/Bulletins/BulletinStatsPage';
+import { ManualPage } from './views/Manual/ManualPage';
+import { AssistantCompanion } from './components/ia/AssistantCompanion';
+import { OffboardingPage } from './views/Offboarding/OffboardingPage';
 
 
 /** Redirects authenticated users to their role's home page */
@@ -48,7 +50,7 @@ function HomeRedirect() {
 function RoleRoute({ children, path }: { children: React.ReactNode; path: string }) {
   const { role, loading: roleLoading } = useAppRole();
   if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
-  const contabilidadRoutes = ['/contabilidad', '/contabilidad/informe', '/contabilidad/mensajes'];
+  const contabilidadRoutes = ['/contabilidad', '/contabilidad/informe', '/contabilidad/mensajes', '/manual'];
   if ((role === 'contabilidad' || role === 'financiera') && !contabilidadRoutes.includes(path)) return <Navigate to="/contabilidad" replace />;
   return <>{children}</>;
 }
@@ -167,23 +169,6 @@ function App() {
           }
         />
 
-        <Route
-          path="/chatbot"
-          element={
-            loading ? null
-            : isAuthenticated ? <MainLayout><ChatWidget /></MainLayout>
-            : <Navigate to="/login" />
-          }
-        />
-
-        <Route
-          path="/busqueda"
-          element={
-            loading ? null
-            : isAuthenticated ? <MainLayout><UsersSearchPage /></MainLayout>
-            : <Navigate to="/login" />
-          }
-        />
 
         <Route
           path="/exportador"
@@ -199,6 +184,15 @@ function App() {
           element={
             loading ? null
             : isAuthenticated ? <MainLayout><ProjectsPage /></MainLayout>
+            : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/proyectos/:id/estadisticas"
+          element={
+            loading ? null
+            : isAuthenticated ? <MainLayout><AnalyticalAccountStatsPage /></MainLayout>
             : <Navigate to="/login" />
           }
         />
@@ -283,6 +277,24 @@ function App() {
         />
 
         <Route
+          path="/offboarding"
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <BulletinsRoute><MainLayout><OffboardingPage /></MainLayout></BulletinsRoute>
+          }
+        />
+
+        <Route
+          path="/manual"
+          element={
+            loading ? null
+            : isAuthenticated ? <MainLayout><RoleRoute path="/manual"><ManualPage /></RoleRoute></MainLayout>
+            : <Navigate to="/login" />
+          }
+        />
+
+        <Route
           path="/whatsapp"
           element={
             loading ? null
@@ -344,6 +356,7 @@ function App() {
 
         
       </Routes>
+      <AssistantCompanion />
       <Toaster />
     </BrowserRouter>
   );

@@ -13,8 +13,9 @@ import {
 import {
   Loader2, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
   Users, UserMinus, FolderKanban, Crown, X, Check, Search,
-  Building2, MapPin, Download, Power, Ban,
+  Building2, MapPin, Download, Power, Ban, BarChart3,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { projectService } from '@/services/projectService';
 import { membershipService } from '@/services/membershipService';
@@ -32,6 +33,7 @@ const PRIORITY_COLOR: Record<string, string> = {
 
 const EMPTY_FORM = {
   name: '', companyId: '', sede: '', priority: 'media' as Project['priority'],
+  aliases: [] as string[],
 };
 
 // Un colaborador puede tener varias asignaciones activas a la vez (multi-
@@ -45,8 +47,10 @@ const assignmentsOf = (u: any): Assignment[] =>
 // "CLARO OT DATAFILL" (o con tildes distintas) no cruzaban entre Expedientes
 // y el nombre registrado de la cuenta analítica, y la persona simplemente
 // desaparecía de la cuenta aunque sí estuviera asignada.
+// Clave de comparación: sin tildes, mayúsculas, puntos ni espacios, para que
+// "ADMINISTRACION" = "ADMINISTRACIÓN" e "INTEEGRA S.A.S BIC" = "INTEEGRA SAS BIC".
 const normalize = (value?: string) => String(value ?? '').trim().normalize('NFD')
-  .replace(/[̀-ͯ]/g, '').toLocaleLowerCase('es');
+  .replace(/[̀-ͯ]/g, '').toLocaleLowerCase('es').replace(/[^a-z0-9]/g, '');
 
 export const ProjectsPage = () => {
   const [projects, setProjects]     = useState<Project[]>([]);
@@ -61,6 +65,7 @@ export const ProjectsPage = () => {
 
   // Create / Edit
   const [formOpen, setFormOpen]         = useState(false);
+  const [aliasDraft, setAliasDraft]     = useState('');
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm]                 = useState(EMPTY_FORM);
   const [saving, setSaving]             = useState(false);
@@ -100,7 +105,7 @@ export const ProjectsPage = () => {
       // TODAS las asignaciones activas de cada persona, no solo la primera,
       // para no perderse cuentas analíticas de quien tiene varias a la vez.
       const knownKeys = new Set(
-        projs.map(p => `${normalize(p.companyName)}::${normalize(p.name)}`)
+        projs.flatMap(p => [p.name, ...(p.aliases ?? [])].map(name => `${normalize(p.companyName)}::${normalize(name)}`))
       );
 
       const toCreate: Array<{ name: string; companyId: string; companyName: string; sede: string }> = [];
@@ -216,7 +221,7 @@ export const ProjectsPage = () => {
     const fromProfiles = allUsers.filter(u =>
       u.projectIds?.includes(p.id) ||
       (p.name && assignmentsOf(u).some(a =>
-        normalize(a.project) === normalize(p.name) &&
+        [p.name, ...(p.aliases ?? [])].some(name => normalize(a.project) === normalize(name)) &&
         normalize(a.company) === normalize(p.companyName)
       ))
     ).map(u => ({ userId: u.id, projectId: p.id, role: 'miembro' }));
@@ -240,12 +245,23 @@ export const ProjectsPage = () => {
   const openCreate = () => {
     setEditingProject(null);
     setForm(EMPTY_FORM);
+    setAliasDraft('');
     setFormOpen(true);
+  };
+
+  const addAlias = () => {
+    const value = aliasDraft.trim();
+    if (!value) return;
+    setForm(f => [f.name, ...f.aliases].some(existing => normalize(existing) === normalize(value))
+      ? f
+      : { ...f, aliases: [...f.aliases, value] });
+    setAliasDraft('');
   };
 
   const openEdit = (p: Project) => {
     setEditingProject(p);
-    setForm({ name: p.name, companyId: p.companyId, sede: p.sede || '', priority: p.priority });
+    setForm({ name: p.name, companyId: p.companyId, sede: p.sede || '', priority: p.priority, aliases: p.aliases ?? [] });
+    setAliasDraft('');
     setFormOpen(true);
   };
 
@@ -254,12 +270,22 @@ export const ProjectsPage = () => {
       toast.error('Nombre y empresa son obligatorios');
       return;
     }
+    // Un nombre (o alias) solo puede pertenecer a una cuenta de la empresa;
+    // si no, las personas de Expedientes quedarían en dos cuentas a la vez.
+    const companyId = editingProject?.companyId ?? form.companyId;
+    const taken = projects.filter(p => p.companyId === companyId && p.id !== editingProject?.id);
+    const clash = [form.name, ...form.aliases].find(value =>
+      taken.some(p => [p.name, ...(p.aliases ?? [])].some(other => normalize(other) === normalize(value))));
+    if (clash) {
+      toast.error(`"${clash}" ya es el nombre o un alias de otra cuenta de esta empresa`);
+      return;
+    }
     setSaving(true);
     try {
       const selectedCompany = companies.find(c => c.id === form.companyId);
       if (editingProject) {
         await projectService.update(editingProject.id, {
-          name: form.name.trim(), sede: form.sede, priority: form.priority,
+          name: form.name.trim(), sede: form.sede, priority: form.priority, aliases: form.aliases,
         });
         toast.success('Cuenta analítica actualizada');
       } else {
@@ -270,6 +296,7 @@ export const ProjectsPage = () => {
           status: 'activo',
           priority: form.priority,
           sede: form.sede,
+          aliases: form.aliases,
         });
         toast.success('Cuenta analítica creada');
       }
@@ -381,7 +408,7 @@ export const ProjectsPage = () => {
       'Área':         p.area || '',
       'Estado':       p.status,
       'Prioridad':    p.priority,
-      'Headcount':    p.headcount ?? '',
+      'Personas activas': getMembersForProject(p).length,
       'Presupuesto':  p.budget ?? '',
       'Fecha inicio': fmtDate(p.startDate),
       'Fecha fin':    fmtDate(p.endDate),
@@ -598,6 +625,14 @@ export const ProjectsPage = () => {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    <Link
+                      to={`/proyectos/${p.id}/estadisticas`}
+                      title="Estadísticas de la cuenta"
+                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-[#008C3C] px-2 py-1.5 rounded-lg hover:bg-[#008C3C]/5 transition-colors"
+                    >
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Estadísticas</span>
+                    </Link>
                     <button
                       onClick={() => setExpandedId(isExpanded ? null : p.id)}
                       className="flex items-center gap-1 text-xs text-gray-500 hover:text-[#008C3C] px-2 py-1.5 rounded-lg hover:bg-[#008C3C]/5 transition-colors"
@@ -767,6 +802,42 @@ export const ProjectsPage = () => {
                   <SelectItem value="critica">Crítica</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500">Otros nombres en Expedientes (alias)</Label>
+              <p className="text-[11px] text-gray-400">Cómo aparece esta misma cuenta en contratos antiguos, ej. "ZTE - MPW". Sirven para las estadísticas históricas.</p>
+              {form.aliases.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {form.aliases.map(alias => (
+                    <span key={alias} className="flex items-center gap-1 text-[11px] bg-gray-100 text-gray-700 rounded-full pl-2 pr-1 py-0.5">
+                      {alias}
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, aliases: f.aliases.filter(a => a !== alias) }))}
+                        className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-gray-200"
+                        title="Quitar alias"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  value={aliasDraft}
+                  onChange={e => setAliasDraft(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    addAlias();
+                  }}
+                  placeholder="Escribe un alias y pulsa Enter"
+                />
+                <Button type="button" variant="outline" onClick={addAlias} disabled={!aliasDraft.trim()}>
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">

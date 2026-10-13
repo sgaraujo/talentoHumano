@@ -4,9 +4,9 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Users, FileText, Bell, Download, Send,
-  LogOut, Bot, Search, Menu, X, ChevronLeft, Building2,
+  LogOut, Bot, Menu, X, ChevronLeft, Building2,
   LayoutDashboard, FolderKanban, MessageSquare, Calculator, Shield, ClipboardCheck,
-  ChevronDown, BarChart2, MessageCircle, Newspaper, Settings2,
+  ChevronDown, BarChart2, MessageCircle, Newspaper, Settings2, BookOpen, DoorOpen,
 } from 'lucide-react';
 import { ROLE_LABELS } from '@/models/types/AppRole';
 import { Link, useLocation } from 'react-router-dom';
@@ -25,6 +25,7 @@ const GROUPS: MenuGroup[] = [
     items: [
       { icon: Shield,        label: 'Usuarios y accesos', path: '/usuarios' },
       { icon: ClipboardCheck,label: 'Expedientes y control', path: '/talento-humano/control' },
+      { icon: DoorOpen,      label: 'Offboarding',        path: '/offboarding' },
       { icon: Building2,     label: 'Empresas',           path: '/empresas' },
       { icon: FolderKanban,  label: 'Cuentas analíticas', path: '/proyectos' },
     ],
@@ -57,8 +58,7 @@ const GROUPS: MenuGroup[] = [
     label: 'Herramientas',
     icon: Bot,
     items: [
-      { icon: Search,        label: 'Búsqueda de personas', path: '/busqueda' },
-      { icon: Bot,           label: 'Asistente IA',        path: '/chatbot' },
+      { icon: BookOpen,      label: 'Manual de usuario',   path: '/manual' },
     ],
   },
   {

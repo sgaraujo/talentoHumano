@@ -47,4 +47,11 @@ export interface WaTemplate {
   displayName: string;
   providerTemplateName: string;
   bodyText: string;
+  /** Formato de variables en Meta: POSITIONAL ({{1}}) o NAMED ({{nombre}}). */
+  parameterFormat?: "POSITIONAL" | "NAMED";
+  headerFormat?: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT" | "LOCATION" | null;
+  headerText?: string | null;
+  buttons?: Array<{ type: string; text: string; url: string | null }>;
+  /** Archivo del encabezado (imagen/video/documento) que se usa por defecto al enviar. */
+  defaultHeaderMediaUrl?: string | null;
 }

@@ -47,9 +47,7 @@ export interface WaGlobalStats {
   deliveryRate: number; readRate: number; topFailReason: string;
 }
 
-export interface WaNumberSummary { numberId: string; displayName: string; conversations: number; unread: number; open: number }
 
-export interface WaConversationStats { total: number; open: number; closed: number; unread: number; byNumber: WaNumberSummary[] }
 
 const finalStatusOf = (r: { status: string; deliveryStatus?: string }): WaFinalStatus => {
   if (r.status === 'failed' || r.deliveryStatus === 'failed') return 'failed';
@@ -66,7 +64,6 @@ export function useWhatsAppStats() {
   const [recipients, setRecipients] = useState<WaRecipientRow[]>([]);
   const [failures, setFailures] = useState<WaFailureRow[]>([]);
   const [timeline, setTimeline] = useState<{ date: string; sent: number; failed: number }[]>([]);
-  const [conversationStats, setConversationStats] = useState<WaConversationStats>({ total: 0, open: 0, closed: 0, unread: 0, byNumber: [] });
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -153,28 +150,10 @@ export function useWhatsAppStats() {
         tl.push({ date: d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }), sent: bucket.sent, failed: bucket.failed });
       }
 
-      // Conversaciones — recorre cada número configurado.
-      const numbersSnap = await getDocs(collection(db, FIRESTORE_COLLECTIONS.whatsappNumbers));
-      const byNumber: WaNumberSummary[] = [];
-      let totalConv = 0, openConv = 0, closedConv = 0, totalUnread = 0;
-      for (const numDoc of numbersSnap.docs) {
-        const convSnap = await getDocs(collection(db, FIRESTORE_COLLECTIONS.whatsappNumbers, numDoc.id, 'conversations'));
-        let open = 0, unread = 0;
-        convSnap.docs.forEach(c => {
-          const data = c.data();
-          if ((data.status ?? 'OPEN') === 'OPEN') { open++; openConv++; } else closedConv++;
-          unread += data.unreadCount ?? 0;
-        });
-        totalConv += convSnap.size;
-        totalUnread += unread;
-        byNumber.push({ numberId: numDoc.id, displayName: numDoc.data().displayName ?? numDoc.id, conversations: convSnap.size, unread, open });
-      }
-
       setByCampaign(rows);
       setRecipients(recRows);
       setFailures(failRows.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)));
       setTimeline(tl);
-      setConversationStats({ total: totalConv, open: openConv, closed: closedConv, unread: totalUnread, byNumber });
     } catch (e: any) {
       setError(e.message || 'No fue posible cargar las estadísticas de WhatsApp.');
     } finally {
@@ -206,5 +185,5 @@ export function useWhatsAppStats() {
     topFailReason,
   };
 
-  return { loading, error, refresh: load, globalStats, byCampaign, recipients, failures, timeline, conversationStats };
+  return { loading, error, refresh: load, globalStats, byCampaign, recipients, failures, timeline };
 }

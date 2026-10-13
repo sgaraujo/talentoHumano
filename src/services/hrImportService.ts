@@ -2,6 +2,7 @@ import { collection, collectionGroup, doc, getDocs, serverTimestamp, setDoc, wri
 import { db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS, FIRESTORE_SUBCOLLECTIONS } from '@/config/firestoreCollections';
 import type { HrImportPlan } from '@/domain/humanResources/hrExcelPreview';
+import { SIN_CLASIFICAR } from '@/domain/humanResources/terminationReasons';
 
 const keyPart = (value: unknown) => String(value ?? '').normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'sin-dato';
@@ -56,11 +57,23 @@ export async function applyHrImport(
   plan: HrImportPlan,
   actor: string,
   onProgress?: (percent: number, label: string) => void,
+  options: {
+    /**
+     * Cédulas activas en la plataforma que no están activas en el Excel y que
+     * el usuario eligió explícitamente marcar como retiradas. Vacío = no se toca a nadie.
+     */
+    retireDocuments?: string[];
+  } = {},
 ) {
   const runRef = doc(collection(db, FIRESTORE_COLLECTIONS.humanResourceImportRuns));
   const uniqueEmployees = new Set(plan.rows.map(row => row.documentNumber));
+  // Nunca retirar a alguien que el mismo archivo trae como activo.
+  const activeInPlan = new Set(plan.rows.filter(row => row.status === 'active').map(row => row.documentNumber));
+  const retireDocuments = [...new Set(options.retireDocuments ?? [])].filter(document => !activeInPlan.has(document));
   await setDoc(runRef, {
     fileName: plan.fileName, sheetName: plan.sheetName, status: 'processing', mode: 'apply',
+    // Queda registrado si se eligió (o no) retirar a los activos ausentes del Excel.
+    retireMissingActives: { enabled: retireDocuments.length > 0, requested: retireDocuments.length, documents: retireDocuments },
     totals: { rows: plan.rows.length, valid: plan.rows.length, newRecords: 0, changed: 0, unchanged: 0, conflicts: 0, rejected: 0 },
     createdBy: actor, createdAt: serverTimestamp(), startedAt: serverTimestamp(), schemaVersion: 1,
   });
@@ -109,6 +122,30 @@ export async function applyHrImport(
       if (Object.keys(row.socialSecurity).length) operations.push(batch => batch.set(doc(employeeRef, FIRESTORE_SUBCOLLECTIONS.employeePrivateData, 'social_security'), { ...row.socialSecurity, updatedAt: serverTimestamp() }, { merge: true }));
     });
 
+    // Activos en la plataforma que el Excel ya no trae como activos: solo si el
+    // usuario lo pidió explícitamente. No se inventa fecha de retiro; el motivo
+    // queda "Sin clasificar" con la explicación en terminationReasonRaw.
+    let retiredRelationships = 0;
+    if (retireDocuments.length) {
+      const retireSet = new Set(retireDocuments);
+      existingRelationsSnap.docs.forEach(snapshot => {
+        const relation = snapshot.data() as { employeeId?: string; status?: string; terminationReason?: string | null; terminationReasonRaw?: string | null };
+        const employeeId = relation.employeeId || snapshot.ref.parent.parent?.id;
+        if (!employeeId || !retireSet.has(employeeId) || relation.status !== 'active') return;
+        retiredRelationships++;
+        operations.push(batch => batch.set(snapshot.ref, {
+          status: 'retired',
+          terminationReason: relation.terminationReason || SIN_CLASIFICAR,
+          terminationReasonRaw: relation.terminationReasonRaw || `No figura como activo en la carga ${plan.fileName}`,
+          retiredByImportRunId: runRef.id,
+          updatedAt: serverTimestamp(),
+        }, { merge: true }));
+      });
+      retireDocuments.forEach(document => operations.push(batch => batch.set(doc(db, FIRESTORE_COLLECTIONS.employees, document), {
+        status: 'retired', retiredByImportRunId: runRef.id, updatedAt: serverTimestamp(),
+      }, { merge: true })));
+    }
+
     const chunkSize = 400;
     for (let offset = 0; offset < operations.length; offset += chunkSize) {
       const batch = writeBatch(db);
@@ -117,8 +154,11 @@ export async function applyHrImport(
       const completed = Math.min(offset + chunkSize, operations.length);
       onProgress?.(Math.round(completed / operations.length * 100), `Guardando lote ${Math.ceil(completed / chunkSize)} de ${Math.ceil(operations.length / chunkSize)}`);
     }
-    await setDoc(runRef, { status: 'completed', completedAt: serverTimestamp(), employeeCount: uniqueEmployees.size, relationshipCount: plan.rows.length, writeCount: operations.length }, { merge: true });
-    return { runId: runRef.id, employees: uniqueEmployees.size, relationships: plan.rows.length, writes: operations.length };
+    await setDoc(runRef, {
+      status: 'completed', completedAt: serverTimestamp(), employeeCount: uniqueEmployees.size, relationshipCount: plan.rows.length, writeCount: operations.length,
+      retireMissingActives: { enabled: retireDocuments.length > 0, requested: retireDocuments.length, documents: retireDocuments, employees: retireDocuments.length, relationships: retiredRelationships },
+    }, { merge: true });
+    return { runId: runRef.id, employees: uniqueEmployees.size, relationships: plan.rows.length, writes: operations.length, retiredEmployees: retireDocuments.length, retiredRelationships };
   } catch (error: any) {
     await setDoc(runRef, { status: 'failed', failedAt: serverTimestamp(), error: String(error?.message || error).slice(0, 500) }, { merge: true });
     throw error;

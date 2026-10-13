@@ -13,7 +13,12 @@ interface RawAssignment {
   assignedAt: Date | null;
   completedAt: Date | null;
   responseId?: string;
+  offboardingSurveyId?: string;
 }
+
+// Las encuestas de salida se asignan con el ID del expediente (Expedientes y
+// control), no con un usuario de la plataforma: empresa y rol salen de la encuesta.
+const OFFBOARDING_SURVEYS_PATH = "human_resources/data/offboarding_surveys";
 
 interface RawQuestionnaire {
   id: string;
@@ -122,11 +127,15 @@ export function useQuestionnaireStats() {
     setLoading(true);
     setError("");
     try {
-      const [qSnap, aSnap, uSnap] = await Promise.all([
+      const [qSnap, aSnap, uSnap, offSnap] = await Promise.all([
         getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaires)),
         getDocs(collection(db, FIRESTORE_COLLECTIONS.questionnaireAssignments)),
         getDocs(collection(db, FIRESTORE_COLLECTIONS.users)),
+        getDocs(collection(db, OFFBOARDING_SURVEYS_PATH)).catch(() => null),
       ]);
+      const offboardingCompany = new Map<string, string | null>(
+        (offSnap?.docs ?? []).map(d => [d.id, (d.data() as any).companyName ?? null])
+      );
 
       const questionnaires: RawQuestionnaire[] = qSnap.docs.map(d => ({
         id: d.id,
@@ -145,6 +154,7 @@ export function useQuestionnaireStats() {
           assignedAt: toDate(x.assignedAt),
           completedAt: toDate(x.completedAt),
           responseId: x.responseId,
+          offboardingSurveyId: x.offboardingSurveyId,
         };
       });
 
@@ -154,6 +164,12 @@ export function useQuestionnaireStats() {
       }));
 
       const userMap = new Map(users.map(u => [u.id, u]));
+      const companyOf = (a: RawAssignment): string =>
+        (a.offboardingSurveyId
+          ? offboardingCompany.get(a.offboardingSurveyId)
+          : userMap.get(a.userId)?.contractInfo?.assignment?.company) || "Sin empresa";
+      const roleOf = (a: RawAssignment): string =>
+        a.offboardingSurveyId ? "excolaborador" : userMap.get(a.userId)?.role ?? "desconocido";
       const qMap = new Map(questionnaires.map(q => [q.id, q]));
 
       const now = new Date();
@@ -215,8 +231,7 @@ export function useQuestionnaireStats() {
         const recipients: QuestionnaireRecipientRow[] = [];
 
         for (const a of qa) {
-          const user = userMap.get(a.userId) as any;
-          const company: string = user?.contractInfo?.assignment?.company ?? "Sin empresa";
+          const company = companyOf(a);
           const done = realCompleted(a);
 
           // Por empresa
@@ -256,7 +271,7 @@ export function useQuestionnaireStats() {
       // ── Por rol ───────────────────────────────────────────────────────────
       const roleAcc = new Map<string, { assigned: number; completed: number }>();
       for (const a of assignments) {
-        const role = userMap.get(a.userId)?.role ?? "desconocido";
+        const role = roleOf(a);
         if (!roleAcc.has(role)) roleAcc.set(role, { assigned: 0, completed: 0 });
         const e = roleAcc.get(role)!;
         e.assigned++;

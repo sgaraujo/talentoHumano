@@ -58,6 +58,9 @@ function ChatBubble({ msg }: { msg: WaMessage }) {
             <span className="text-xs truncate">{msg.mediaFilename ?? "Documento"}</span>
           </a>
         )}
+        {msg.mediaType === "video" && msg.mediaUrl && (
+          <video controls src={msg.mediaUrl} className="rounded-lg mb-1 max-w-full max-h-48" />
+        )}
         {msg.mediaType === "audio" && msg.mediaUrl && (
           <audio controls src={msg.mediaUrl} className="max-w-[200px] mb-1" />
         )}

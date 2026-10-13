@@ -38,7 +38,8 @@ import type { Company } from '@/models/types/Company';
 const EMPTY: Omit<Company, 'id' | 'createdAt' | 'updatedAt'> = {
   name: '', nit: '', address: '', phone: '', email: '',
   logo: '', regional: '', baseDeOperacion: '', active: true,
-  activeTH: false, activeContabilidad: false,
+  activeTH: true, activeContabilidad: false,
+  modules: { humanResources: true, accounting: false, communications: true },
 };
 
 export const CompaniesPage = () => {

@@ -96,8 +96,35 @@ try {
   await assertSucceeds(setDoc(canonicalCompany, { name: 'Empresa', nit: '900123456' }));
   await assertSucceeds(getDoc(doc(hrDb, 'organization', 'data', 'companies', 'company-1')));
   await assertSucceeds(getDoc(doc(accountingDb, 'organization', 'data', 'companies', 'company-1')));
-  await assertSucceeds(updateDoc(doc(hrDb, 'organization', 'data', 'companies', 'company-1'), { activeTH: true }));
+  // Empresas: cada área crea y edita solo las de su módulo.
+  await assertFails(updateDoc(doc(hrDb, 'organization', 'data', 'companies', 'company-1'), { activeTH: true }));
   await assertFails(updateDoc(doc(accountingDb, 'organization', 'data', 'companies', 'company-1'), { name: 'No permitido' }));
+  const thModules = { humanResources: true, accounting: false, communications: true };
+  const accountingModules = { humanResources: false, accounting: true, communications: false };
+  const hrCompany = doc(hrDb, 'organization', 'data', 'companies', 'company-th');
+  await assertSucceeds(setDoc(hrCompany, { name: 'TH', nit: '1', activeTH: true, activeContabilidad: false, modules: thModules }));
+  await assertSucceeds(updateDoc(hrCompany, { name: 'TH editada', 'modules.communications': false }));
+  await assertFails(updateDoc(hrCompany, { activeContabilidad: true }));
+  await assertFails(updateDoc(hrCompany, { activeTH: false, 'modules.humanResources': false }));
+  await assertFails(updateDoc(doc(accountingDb, 'organization', 'data', 'companies', 'company-th'), { name: 'No permitido' }));
+  await assertFails(setDoc(doc(hrDb, 'organization', 'data', 'companies', 'company-th-acc'), {
+    name: 'Mixta', nit: '2', activeTH: true, activeContabilidad: true,
+  }));
+  await assertFails(setDoc(doc(hrDb, 'organization', 'data', 'companies', 'company-acc-by-hr'), {
+    name: 'Contable', nit: '3', activeContabilidad: true, modules: accountingModules,
+  }));
+  const accountingCompany = doc(accountingDb, 'organization', 'data', 'companies', 'company-acc');
+  await assertSucceeds(setDoc(accountingCompany, { name: 'Contable', nit: '4', activeTH: false, activeContabilidad: true, modules: accountingModules }));
+  await assertSucceeds(updateDoc(accountingCompany, { name: 'Contable editada' }));
+  await assertFails(updateDoc(accountingCompany, { activeTH: true }));
+  await assertFails(updateDoc(accountingCompany, { 'modules.communications': true }));
+  await assertFails(updateDoc(doc(hrDb, 'organization', 'data', 'companies', 'company-acc'), { name: 'No permitido' }));
+  await assertFails(setDoc(doc(accountingDb, 'organization', 'data', 'companies', 'company-th-by-acc'), {
+    name: 'TH', nit: '5', activeTH: true, modules: thModules,
+  }));
+  await assertFails(setDoc(doc(financeDb, 'organization', 'data', 'companies', 'company-fin'), {
+    name: 'Financiera', nit: '6', activeContabilidad: true, modules: accountingModules,
+  }));
   await assertFails(getDoc(doc(anonymousDb, 'organization', 'data', 'companies', 'company-1')));
 
   const canonicalMembership = doc(hrDb, 'organization', 'data', 'company_memberships', 'membership-1');

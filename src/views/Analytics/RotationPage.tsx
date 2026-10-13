@@ -15,11 +15,11 @@ import {
 } from '@/components/ui/select';
 import {
   Loader2, Users, UserPlus, UserMinus, Clock,
-  TrendingUp, TrendingDown, DollarSign, Filter, X, CircleHelp,
+  TrendingUp, TrendingDown, DollarSign, Filter, X, CircleHelp, ChevronDown, ChevronRight, GraduationCap,
 } from 'lucide-react';
 import {
   Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, ComposedChart, LabelList,
+  Tooltip, Legend, ResponsiveContainer, ComposedChart, LabelList, Cell,
 } from 'recharts';
 
 const MONTHS = [
@@ -67,6 +67,12 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
   const [appliedMonth,   setAppliedMonth]   = useState('all');
   const [appliedEmpresa, setAppliedEmpresa] = useState('all');
   const [appliedProyecto,setAppliedProyecto]= useState('all');
+  // Detalle de retiros: motivo seleccionado (clic en la barra) y empresas desplegadas.
+  const [selectedMotivo, setSelectedMotivo] = useState<string | null>(null);
+  const [motivoMonth, setMotivoMonth] = useState('all');
+  const [expandedEmpresas, setExpandedEmpresas] = useState<Set<string>>(new Set());
+  // Detalle de nuevos ingresos: cuentas analíticas desplegadas.
+  const [expandedProyectos, setExpandedProyectos] = useState<Set<string>>(new Set());
 
   // When controlled from parent, auto-apply whenever filters change
   useEffect(() => {
@@ -132,7 +138,18 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
     boxShadow: '0 8px 20px rgba(20,23,28,0.08)',
   };
 
-  const motivosData = Object.entries(metrics?.motivosRetiro ?? {})
+  // Mes del detalle de motivos (solo aplica cuando el período es el año completo).
+  const matchesMotivoMonth = (fechaRetiro: string) =>
+    motivoMonth === 'all' || Number(fechaRetiro.slice(5, 7)) - 1 === Number(motivoMonth);
+  const motivoMonthOptions = MONTHS.filter(m => m.value !== 'all'
+    && (metrics?.retirosPorEmpresa ?? []).some(e => (e.personas ?? []).some(p => Number(p.fechaRetiro.slice(5, 7)) - 1 === Number(m.value))));
+
+  const motivosCounts: Record<string, number> = motivoMonth === 'all'
+    ? (metrics?.motivosRetiro ?? {})
+    : (metrics?.retirosPorEmpresa ?? []).flatMap(e => e.personas ?? [])
+      .filter(p => matchesMotivoMonth(p.fechaRetiro))
+      .reduce<Record<string, number>>((acc, p) => { acc[p.motivo] = (acc[p.motivo] ?? 0) + 1; return acc; }, {});
+  const motivosData = Object.entries(motivosCounts)
     .filter(([, v]) => v > 0)
     .map(([name, value]) => ({
       name: name.length > 32 ? name.slice(0, 30) + '…' : name,
@@ -140,6 +157,46 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
       value,
     }))
     .sort((a, b) => b.value - a.value);
+  const totalRetirosMotivos = motivosData.reduce((sum, m) => sum + m.value, 0);
+  const motivoPeriodLabel = motivoMonth === 'all'
+    ? periodLabel
+    : `${MONTHS.find(m => m.value === motivoMonth)?.label} ${activeYear}`;
+
+  // Al cambiar los datos (nuevos filtros), se limpia la selección del detalle.
+  useEffect(() => {
+    setSelectedMotivo(null); setMotivoMonth('all'); setExpandedEmpresas(new Set()); setExpandedProyectos(new Set());
+  }, [metrics]);
+
+  const ingresosPorProyecto = (metrics?.headcountPorProyecto ?? [])
+    .filter(p => (p.personasIngreso ?? []).length > 0)
+    .sort((a, b) => b.ingresos - a.ingresos || a.proyecto.localeCompare(b.proyecto, 'es'));
+
+  const toggleProyecto = (proyecto: string) => setExpandedProyectos(prev => {
+    const next = new Set(prev);
+    if (next.has(proyecto)) next.delete(proyecto); else next.add(proyecto);
+    return next;
+  });
+
+  const retirosPorEmpresaFiltrados = (metrics?.retirosPorEmpresa ?? [])
+    .map(item => {
+      const personas = (item.personas ?? [])
+        .filter(p => (!selectedMotivo || p.motivo === selectedMotivo) && matchesMotivoMonth(p.fechaRetiro));
+      return { ...item, personas, count: personas.length };
+    })
+    .filter(item => item.count > 0)
+    .sort((a, b) => b.count - a.count || a.empresa.localeCompare(b.empresa, 'es'));
+
+  const toggleEmpresa = (empresa: string) => setExpandedEmpresas(prev => {
+    const next = new Set(prev);
+    if (next.has(empresa)) next.delete(empresa); else next.add(empresa);
+    return next;
+  });
+
+  const formatFecha = (iso: string) => {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  };
 
   return (
     <div className="p-4 sm:p-6 space-y-5 bg-gray-50 min-h-screen">
@@ -258,7 +315,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
       {!loading && metrics && (
         <>
           {/* ── KPIs principales ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
             <Card className="border-[#E7E9EE] shadow-sm rounded-xl">
               <CardHeader className="flex flex-row items-center justify-between pb-1 pt-4 px-4">
                 <CardTitle className="text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">Ingresos</CardTitle>
@@ -297,9 +354,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
               <CardContent className="px-4 pb-4">
                 <div className="text-2xl sm:text-3xl font-bold text-[#14171C] tracking-tight">{metrics.headcount}</div>
                 <p className="text-xs text-[#8B93A1] mt-1">
-                  {activeMonth === 'all'
-                    ? (activeEmpresa !== 'all' ? `${activeEmpresa} · promedio mensual ${periodLabel}` : `Promedio mensual · ${periodLabel}`)
-                    : (activeEmpresa !== 'all' ? `${activeEmpresa} · cierre de ${periodLabel}` : `Vigentes al cierre de ${periodLabel}`)}
+                  {activeEmpresa !== 'all' ? `${activeEmpresa} · contratos al cierre de ${periodLabel}` : `Contratos vigentes al cierre de ${periodLabel}`}
                 </p>
               </CardContent>
             </Card>
@@ -316,6 +371,24 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
                 <p className="text-xs text-[#8B93A1] mt-1">Meses en la empresa</p>
               </CardContent>
             </Card>
+
+            {/* Aprendices SENA: no se suman con los trabajadores en ninguna métrica. */}
+            <Card className="col-span-2 lg:col-span-1 border-[#E7E9EE] shadow-sm rounded-xl">
+              <CardHeader className="flex flex-row items-center justify-between pb-1 pt-4 px-4">
+                <CardTitle className="text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">Aprendices</CardTitle>
+                <div className="w-7 h-7 rounded-lg bg-[#F1F2F4] flex items-center justify-center flex-shrink-0">
+                  <GraduationCap className="w-3.5 h-3.5 text-[#14171C]" />
+                </div>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <div className="text-2xl sm:text-3xl font-bold text-[#14171C] tracking-tight">{metrics.aprendices.headcount}</div>
+                <p className="text-xs text-[#8B93A1] mt-1">Vigentes al cierre de {periodLabel}</p>
+                <div className="mt-2 flex gap-3 text-xs">
+                  <span className="text-[#565D6B]"><span className="font-bold text-[#14171C]">{metrics.aprendices.ingresos}</span> ingresos</span>
+                  <span className="text-[#565D6B]"><span className="font-bold text-[#A8552F]">{metrics.aprendices.retiros}</span> retiros</span>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           {/* ── Tasas de Rotación ── */}
@@ -323,7 +396,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
             <Card className="group relative border-[#E7E9EE] shadow-sm rounded-xl cursor-help" tabIndex={0}>
               <CardHeader className="pb-1 pt-4 px-4">
                 <CardTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">% Rot. General <CircleHelp className="h-3.5 w-3.5" /></CardTitle>
-                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros del período / Headcount</CardDescription>
+                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros del período / HC promedio</CardDescription>
               </CardHeader>
               <CardContent className="px-4 pb-4">
                 <div className="flex items-center gap-2">
@@ -337,9 +410,9 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
               </CardContent>
               <CalculationTooltip
                 title="Cálculo de rotación general"
-                formula="(Renuncias voluntarias ÷ HT del período, sin aprendices SENA) × 100"
+                formula="(Retiros del período ÷ HC promedio) × 100 — HC promedio = (HC inicial + HC final) ÷ 2"
                 operation={metrics.headcountBase > 0
-                  ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.headcountBase}) × 100 = ${metrics.rotacionGeneral}%`
+                  ? `(${metrics.totalRetiros} ÷ ${metrics.headcountBase}) × 100 = ${metrics.rotacionGeneral}%`
                   : 'Sin headcount disponible = 0%'}
                 note={metrics.headcountBaseLabel}
               />
@@ -348,7 +421,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
             <Card className="group relative border-[#E7E9EE] shadow-sm rounded-xl cursor-help" tabIndex={0}>
               <CardHeader className="pb-1 pt-4 px-4">
                 <CardTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-[#8B93A1] uppercase tracking-wide">% Rot. Voluntaria <CircleHelp className="h-3.5 w-3.5" /></CardTitle>
-                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros voluntarios del período / Headcount</CardDescription>
+                <CardDescription className="text-[10px] text-[#8B93A1]">Retiros voluntarios del período / HC promedio</CardDescription>
               </CardHeader>
               <CardContent className="px-4 pb-4">
                 <div className="text-xl sm:text-2xl font-bold text-[#14171C] tracking-tight">{metrics.rotacionVoluntaria}%</div>
@@ -356,7 +429,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
               </CardContent>
               <CalculationTooltip
                 title="Cálculo de rotación voluntaria"
-                formula="(Retiros voluntarios ÷ Headcount) × 100"
+                formula="(Retiros voluntarios ÷ HC promedio) × 100"
                 operation={metrics.headcountBase > 0
                   ? `(${metrics.voluntarioVsInvoluntario.voluntario} ÷ ${metrics.headcountBase}) × 100 = ${metrics.rotacionVoluntaria}%`
                   : 'Sin headcount disponible = 0%'}
@@ -389,8 +462,65 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
                   <Bar yAxisId="left" dataKey="retiros"  fill="#C98862" name="Retiros"  radius={[4, 4, 0, 0]} />
                   <Line yAxisId="right" type="monotone" dataKey="rotacion" stroke="#8B93A1"
                     name="% Rotación" strokeWidth={2} dot={{ fill: '#8B93A1', r: 3 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="rotacionVoluntaria" stroke="#C98862"
+                    name="% Rotación voluntaria" strokeWidth={2} strokeDasharray="4 3" dot={{ fill: '#C98862', r: 2 }} />
                 </ComposedChart>
               </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* ── Detalle mensual (mismas columnas que la tabla oficial de TH) ── */}
+          <Card className="border-[#E7E9EE] shadow-sm rounded-xl">
+            <CardHeader className="px-4 pt-4 pb-2">
+              <CardTitle className="text-sm sm:text-base text-[#14171C] font-bold">Retiros y rotación mensual {activeYear}</CardTitle>
+              <CardDescription className="text-xs text-[#8B93A1]">
+                Contratos vigentes; el retiro descuenta el mismo día. HC promedio = (HC inicial + HC final) ÷ 2.
+                {' '}No incluye aprendices SENA (se muestran aparte en la tarjeta Aprendices).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-2 sm:px-4 pb-4 overflow-x-auto">
+              <table className="w-full text-xs whitespace-nowrap">
+                <thead>
+                  <tr className="text-[#8B93A1] text-right border-b border-[#EEF0F3]">
+                    {['Mes', 'HC inicial', 'Ingresos', 'Retiros', 'HC final', 'HC promedio', 'Rotación %', 'Voluntarios', 'Rot. voluntaria %', 'Involuntarios', 'Rot. involuntaria %', 'Sustitución patronal']
+                      .map((header, index) => <th key={header} className={`px-2 py-2 font-medium ${index === 0 ? 'text-left' : ''}`}>{header}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrics.detalleMensual.map(row => (
+                    <tr key={`${row.year}-${row.month}`} className="text-right border-b border-[#F4F5F7] text-[#14171C]">
+                      <td className="px-2 py-1.5 text-left capitalize">{row.month}</td>
+                      <td className="px-2 py-1.5">{row.hcInicial}</td>
+                      <td className="px-2 py-1.5">{row.ingresos}</td>
+                      <td className="px-2 py-1.5">{row.retiros}</td>
+                      <td className="px-2 py-1.5">{row.hcFinal}</td>
+                      <td className="px-2 py-1.5">{Math.round(row.hcPromedio)}</td>
+                      <td className="px-2 py-1.5 font-semibold">{row.rotacion.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5">{row.retirosVoluntarios}</td>
+                      <td className="px-2 py-1.5">{row.rotacionVoluntaria.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5">{row.retirosInvoluntarios}</td>
+                      <td className="px-2 py-1.5">{row.rotacionInvoluntaria.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5">{row.sustitucionPatronal || '-'}</td>
+                    </tr>
+                  ))}
+                  {metrics.detalleMensual.length > 1 && (
+                    <tr className="text-right font-semibold text-[#14171C] bg-[#F7F8FA]">
+                      <td className="px-2 py-1.5 text-left">Acumulado {activeYear}</td>
+                      <td className="px-2 py-1.5">{metrics.detalleMensual[0].hcInicial}</td>
+                      <td className="px-2 py-1.5">{metrics.totalIngresos}</td>
+                      <td className="px-2 py-1.5">{metrics.totalRetiros}</td>
+                      <td className="px-2 py-1.5">{metrics.headcount}</td>
+                      <td className="px-2 py-1.5">{Math.round(metrics.hcPromedio)}</td>
+                      <td className="px-2 py-1.5">{metrics.rotacionGeneral.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5">{metrics.voluntarioVsInvoluntario.voluntario}</td>
+                      <td className="px-2 py-1.5">{metrics.rotacionVoluntaria.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5">{metrics.voluntarioVsInvoluntario.involuntario}</td>
+                      <td className="px-2 py-1.5">{metrics.rotacionInvoluntaria.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5">{metrics.sustitucionPatronal || '-'}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </CardContent>
           </Card>
 
@@ -398,12 +528,30 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
             <Card className="border-[#E7E9EE] shadow-sm rounded-xl">
               <CardHeader className="px-4 pt-4 pb-2">
-                <CardTitle className="text-sm sm:text-base text-[#14171C] font-bold">Motivos de Retiro</CardTitle>
-                <CardDescription className="text-xs text-[#8B93A1]">
-                  {metrics.totalRetiros > 0
-                    ? `${metrics.totalRetiros} retiro${metrics.totalRetiros !== 1 ? 's' : ''} en ${periodLabel}`
-                    : `Sin retiros en ${periodLabel}`}
-                </CardDescription>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-sm sm:text-base text-[#14171C] font-bold">Motivos de Retiro</CardTitle>
+                    <CardDescription className="text-xs text-[#8B93A1]">
+                      {totalRetirosMotivos > 0
+                        ? `${totalRetirosMotivos} retiro${totalRetirosMotivos !== 1 ? 's' : ''} en ${motivoPeriodLabel}`
+                        : `Sin retiros en ${motivoPeriodLabel}`}
+                    </CardDescription>
+                  </div>
+                  {/* Con un mes ya elegido en los filtros generales, el detalle ya viene filtrado. */}
+                  {activeMonth === 'all' && motivoMonthOptions.length > 0 && (
+                    <Select value={motivoMonth} onValueChange={value => { setMotivoMonth(value); setSelectedMotivo(null); setExpandedEmpresas(new Set()); }}>
+                      <SelectTrigger className="h-8 w-[150px] text-xs">
+                        <SelectValue placeholder="Mes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" className="text-xs">Todos los meses</SelectItem>
+                        {motivoMonthOptions.map(m => (
+                          <SelectItem key={m.value} value={m.value} className="text-xs">{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="px-2 sm:px-4 pb-4">
                 {motivosData.length === 0 ? (
@@ -425,23 +573,88 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
                           contentStyle={tooltipStyle}
                           formatter={(val, _, props: any) => [val, props.payload.fullName]}
                         />
-                        <Bar dataKey="value" fill="#C98862" radius={[0, 4, 4, 0]}>
+                        <Bar
+                          dataKey="value"
+                          radius={[0, 4, 4, 0]}
+                          cursor="pointer"
+                          onClick={(entry: any) => {
+                            const motivo = entry?.fullName ?? entry?.payload?.fullName;
+                            if (motivo) setSelectedMotivo(prev => prev === motivo ? null : motivo);
+                          }}
+                        >
+                          {motivosData.map(entry => (
+                            <Cell
+                              key={entry.fullName}
+                              fill={!selectedMotivo || selectedMotivo === entry.fullName ? '#C98862' : '#E8D3C6'}
+                            />
+                          ))}
                           <LabelList dataKey="value" position="right" fill="#14171C" fontSize={11} fontWeight={700} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
 
                     <div className="mt-4 pt-4 border-t border-[#E7E9EE]">
-                      <p className="text-[11px] font-bold text-[#8B93A1] uppercase tracking-wide mb-2">
-                        Empresas de las cuales se retiraron
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <p className="text-[11px] font-bold text-[#8B93A1] uppercase tracking-wide">
+                          Empresas de las cuales se retiraron
+                        </p>
+                        {selectedMotivo && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMotivo(null)}
+                            className="flex items-center gap-1 rounded-full bg-[#F4E9E2] px-2 py-0.5 text-[10px] font-semibold text-[#A8552F] hover:bg-[#EEDBCF]"
+                            title="Quitar filtro de motivo"
+                          >
+                            <span className="max-w-[160px] truncate">{selectedMotivo}</span>
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-[#8B93A1] mb-2">
+                        Haz clic en una barra para ver solo ese motivo y en una empresa para ver las personas.
                       </p>
                       <div className="space-y-1.5">
-                        {(metrics.retirosPorEmpresa ?? []).map(item => (
-                          <div key={item.empresa} className="flex items-center justify-between gap-3 rounded-lg bg-[#F7F8F9] px-3 py-2">
-                            <span className="text-xs text-[#565D6B] truncate" title={item.empresa}>{item.empresa}</span>
-                            <span className="text-xs font-bold text-[#14171C] flex-shrink-0">{item.count}</span>
-                          </div>
-                        ))}
+                        {retirosPorEmpresaFiltrados.map(item => {
+                          const open = expandedEmpresas.has(item.empresa);
+                          return (
+                            <div key={item.empresa} className="rounded-lg bg-[#F7F8F9]">
+                              <button
+                                type="button"
+                                onClick={() => toggleEmpresa(item.empresa)}
+                                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+                                aria-expanded={open}
+                              >
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  {open
+                                    ? <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#8B93A1]" />
+                                    : <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-[#8B93A1]" />}
+                                  <span className="text-xs text-[#565D6B] truncate" title={item.empresa}>{item.empresa}</span>
+                                </span>
+                                <span className="text-xs font-bold text-[#14171C] flex-shrink-0">{item.count}</span>
+                              </button>
+                              {open && (
+                                <ul className="divide-y divide-[#E7E9EE] border-t border-[#E7E9EE] px-3">
+                                  {item.personas.map((persona, idx) => (
+                                    <li key={`${persona.employeeId}-${persona.fechaRetiro}-${idx}`} className="py-2">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                          <p className="text-xs font-semibold text-[#14171C] truncate" title={persona.nombre}>{persona.nombre}</p>
+                                          <p className="text-[10px] text-[#8B93A1] truncate">
+                                            CC {persona.documento}{persona.cargo ? ` · ${persona.cargo}` : ''}
+                                          </p>
+                                        </div>
+                                        <span className="text-[10px] text-[#565D6B] flex-shrink-0">{formatFecha(persona.fechaRetiro)}</span>
+                                      </div>
+                                      {!selectedMotivo && (
+                                        <p className="mt-0.5 text-[10px] font-medium text-[#A8552F]">{persona.motivo}</p>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </>
@@ -454,7 +667,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
               <CardHeader className="px-4 pt-4 pb-2">
                 <CardTitle className="text-sm sm:text-base text-[#14171C] font-bold">Headcount por Cuenta Analítica</CardTitle>
                 <CardDescription className="text-xs text-[#8B93A1]">
-                  Colaboradores activos por cuenta analítica
+                  Colaboradores activos y nuevos ingresos por cuenta analítica · {periodLabel}
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-2 sm:px-4 pb-4">
@@ -463,7 +676,7 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
                     Sin datos de cuentas analíticas
                   </div>
                 ) : (
-                  <ResponsiveContainer width="100%" height={Math.max(200, metrics.headcountPorProyecto.length * 38)}>
+                  <ResponsiveContainer width="100%" height={Math.max(220, metrics.headcountPorProyecto.length * 56 + 40)}>
                     <BarChart
                       layout="vertical"
                       data={metrics.headcountPorProyecto.map(p => ({
@@ -471,34 +684,100 @@ export const RotationPage = ({ controlled }: { controlled?: RotationFilters }) =
                         fullName: p.proyecto,
                         empresa: p.empresa,
                         count: p.count,
+                        ingresos: p.ingresos ?? 0,
                       }))}
                       margin={{ left: 4, right: 40, top: 4, bottom: 4 }}
+                      barGap={2}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#EEF0F3" horizontal={false} />
                       <XAxis type="number" stroke="#8B93A1" tick={{ fontSize: 10 }} allowDecimals={false} />
                       <YAxis type="category" dataKey="name" stroke="#8B93A1" tick={{ fontSize: 10 }} width={148} />
                       <Tooltip
                         contentStyle={tooltipStyle}
-                        formatter={(val, _, props: any) => [val, props.payload.fullName]}
-                        labelFormatter={() => ''}
+                        labelFormatter={(_, payload: any) => payload?.[0]?.payload?.fullName ?? ''}
                       />
-                      <Bar dataKey="count" fill="#14171C" radius={[0, 4, 4, 0]} name="Colaboradores">
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="count" fill="#14171C" radius={[0, 4, 4, 0]} name="Activos al cierre">
                         <LabelList dataKey="count" position="right" style={{ fontSize: 11, fontWeight: 600, fill: '#14171C' }} />
+                      </Bar>
+                      <Bar dataKey="ingresos" fill="#7FA7C9" radius={[0, 4, 4, 0]} name="Nuevos ingresos">
+                        <LabelList dataKey="ingresos" position="right" style={{ fontSize: 11, fontWeight: 600, fill: '#14171C' }} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 )}
                 {metrics?.headcountPorProyecto && metrics.headcountPorProyecto.length > 0 && (() => {
                   const totalAsignaciones = metrics.headcountPorProyecto.reduce((sum, p) => sum + p.count, 0);
+                  const totalIngresos = metrics.headcountPorProyecto.reduce((sum, p) => sum + (p.ingresos ?? 0), 0);
                   return (
                     <p className="text-[10px] text-[#8B93A1] mt-2 text-right">
                       Total: <span className="font-semibold text-[#14171C]">{totalAsignaciones}</span> asignaciones
                       {totalAsignaciones !== metrics.headcountSnapshot && (
                         <> ({metrics.headcountSnapshot} personas — {totalAsignaciones - metrics.headcountSnapshot} con más de una cuenta analítica activa)</>
                       )}
+                      {' '}· <span className="font-semibold text-[#14171C]">{totalIngresos}</span> nuevos ingresos en {periodLabel}
                     </p>
                   );
                 })()}
+
+                {ingresosPorProyecto.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-[#E7E9EE]">
+                    <p className="text-[11px] font-bold text-[#8B93A1] uppercase tracking-wide mb-1">
+                      Nuevos ingresos por cuenta analítica
+                    </p>
+                    <p className="text-[10px] text-[#8B93A1] mb-2">
+                      Haz clic en una cuenta analítica para ver las personas que ingresaron en {periodLabel}.
+                    </p>
+                    <div className="space-y-1.5">
+                      {ingresosPorProyecto.map(item => {
+                        const open = expandedProyectos.has(item.proyecto);
+                        return (
+                          <div key={item.proyecto} className="rounded-lg bg-[#F7F8F9]">
+                            <button
+                              type="button"
+                              onClick={() => toggleProyecto(item.proyecto)}
+                              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+                              aria-expanded={open}
+                            >
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                {open
+                                  ? <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#8B93A1]" />
+                                  : <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-[#8B93A1]" />}
+                                <span className="text-xs text-[#565D6B] truncate" title={item.proyecto}>{item.proyecto}</span>
+                              </span>
+                              <span className="text-xs font-bold text-[#14171C] flex-shrink-0">{item.ingresos}</span>
+                            </button>
+                            {open && (
+                              <ul className="divide-y divide-[#E7E9EE] border-t border-[#E7E9EE] px-3">
+                                {item.personasIngreso.map((persona, idx) => (
+                                  <li key={`${persona.employeeId}-${persona.fechaIngreso}-${idx}`} className="py-2">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-semibold text-[#14171C] truncate" title={persona.nombre}>{persona.nombre}</p>
+                                        <p className="text-[10px] text-[#8B93A1] truncate">
+                                          CC {persona.documento}{persona.cargo ? ` · ${persona.cargo}` : ''}
+                                        </p>
+                                        {activeEmpresa === 'all' && (
+                                          <p className="text-[10px] text-[#565D6B] truncate">{persona.empresa}</p>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-col items-end flex-shrink-0">
+                                        <span className="text-[10px] text-[#565D6B]">{formatFecha(persona.fechaIngreso)}</span>
+                                        {persona.retirado && (
+                                          <span className="mt-0.5 text-[10px] font-medium text-[#A8552F]">Ya se retiró</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

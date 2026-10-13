@@ -41,14 +41,15 @@ export interface HrRelationshipRow {
   personalPhone?: string;
   companyName?: string;
   projectName?: string;
+  analyticalAccount?: string;
   position?: string;
   contractType?: string;
   modality?: string;
   regional?: string;
   baseLocation?: string;
   area?: string;
-  startDate?: string;
-  endDate?: string;
+  startDate?: unknown;
+  endDate?: unknown;
   relationshipStatus: string;
   terminationReason?: string;
 }
@@ -84,7 +85,7 @@ export async function getHrControlData() {
       activeRelations: employeeRelations.filter(item => item.status === 'active').length,
       retiredRelations: employeeRelations.filter(item => item.status === 'retired').length,
       companies: unique('companyName'),
-      projects: unique('projectName'),
+      projects: [...new Set(employeeRelations.map(item => item.projectName || item.analyticalAccount).filter(Boolean) as string[])],
     };
   });
 
@@ -103,6 +104,7 @@ export async function getHrControlData() {
       personalPhone: employee.personalPhone,
       companyName: relationship.companyName,
       projectName: relationship.projectName,
+      analyticalAccount: relationship.analyticalAccount,
       position: relationship.position,
       contractType: relationship.contractType,
       modality: relationship.modality,

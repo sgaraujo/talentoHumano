@@ -102,6 +102,10 @@ async function requirePlatformRole(
 export { waWebhook } from "./whatsapp/webhookHandler";
 export { sendWhatsAppMessage, sendWaTemplate } from "./whatsapp/sendMessageHandler";
 export { sendWaCampaign } from "./whatsapp/campaignHandler";
+export { syncWaTemplates } from "./whatsapp/templateSync";
+export { manualAssistant } from "./ai/manualAssistant";
+export { generateQuestionnaire } from "./ai/questionnaireGenerator";
+export { onEmployeeOffboarded, resendOffboardingSurvey, sendOffboardingSurveys } from "./offboarding/offboarding";
 
 
 const TENANT_ID      = defineSecret("TENANT_ID");
@@ -573,8 +577,9 @@ export const submitPublicResponse = onCall(
       throw new HttpsError("failed-precondition", "Asignación sin cuestionario");
     }
 
-    // Verificar por email: bloquear si el mismo correo ya completó antes (IDs cambiaron por recarga de BD)
-    if (assignment.userEmail) {
+    // Verificar por email: bloquear si el mismo correo ya completó antes (IDs cambiaron por recarga de BD).
+    // No aplica a offboarding: cada retiro tiene su propia encuesta.
+    if (assignment.userEmail && !assignment.offboardingSurveyId) {
       const prevSnap = await firestore
         .collection(QUESTIONNAIRE_COLLECTIONS.assignments)
         .where("userEmail", "==", assignment.userEmail)
@@ -629,6 +634,26 @@ export const submitPublicResponse = onCall(
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
       responseId: responseRef.id,
     });
+
+    // 4b) Encuesta de offboarding: guardar respuestas junto con el texto de las
+    // preguntas, para que el reporte no cambie si luego se edita el cuestionario.
+    if (assignment.offboardingSurveyId) {
+      try {
+        await firestore.collection("human_resources/data/offboarding_surveys").doc(assignment.offboardingSurveyId).update({
+          status: "responded",
+          respondedAt: admin.firestore.FieldValue.serverTimestamp(),
+          responseId: responseRef.id,
+          answers,
+          questions: (questionnaire.questions || []).map((q: any) => ({
+            id: q.id, text: q.text, type: q.type, order: q.order ?? 0,
+            options: (q.options || []).map((o: any) => ({ label: o.label, value: o.value })),
+          })),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        console.error("OFFBOARDING_RESPONSE_LINK_ERROR", err);
+      }
+    }
 
     // 5) Si vino de un comunicado, marcar quizSubmittedAt en el recipient doc
     if (assignment.communicationId && assignment.recipientId) {
@@ -1149,8 +1174,9 @@ export const getPublicAssignment = onCall(
     }
 
     // Verificar por email: si el mismo correo ya completó este cuestionario en una asignación anterior
-    // (ocurre cuando se recarga la base y cambian los IDs pero el correo es el mismo)
-    if (assignment.userEmail) {
+    // (ocurre cuando se recarga la base y cambian los IDs pero el correo es el mismo).
+    // No aplica a offboarding: cada retiro tiene su propia encuesta.
+    if (assignment.userEmail && !assignment.offboardingSurveyId) {
       const prevSnap = await admin
         .firestore()
         .collection(QUESTIONNAIRE_COLLECTIONS.assignments)
@@ -2190,24 +2216,16 @@ export const getPublicQuestionnaire = onCall(
 export const submitPublicFormResponse = onCall(
   { region: "us-central1", cors: true },
   async (request) => {
-    const { questionnaireId, name, email, answers } = request.data ?? {};
+    const { questionnaireId, answers } = request.data ?? {};
 
     if (!questionnaireId || typeof questionnaireId !== "string") {
       throw new HttpsError("invalid-argument", "questionnaireId requerido");
-    }
-    if (!name || typeof name !== "string" || name.trim() === "") {
-      throw new HttpsError("invalid-argument", "nombre requerido");
-    }
-    if (!email || typeof email !== "string" || !email.includes("@")) {
-      throw new HttpsError("invalid-argument", "correo inválido");
     }
     if (!answers || typeof answers !== "object") {
       throw new HttpsError("invalid-argument", "respuestas requeridas");
     }
 
     const firestore = admin.firestore();
-    const cleanEmail = email.toLowerCase().trim();
-    const cleanName  = name.trim();
 
     // 1) Verificar que el cuestionario existe, está activo y es público
     const qDoc = await firestore.collection(QUESTIONNAIRE_COLLECTIONS.definitions).doc(questionnaireId).get();
@@ -2222,27 +2240,12 @@ export const submitPublicFormResponse = onCall(
       throw new HttpsError("permission-denied", "Este formulario no es público");
     }
 
-    // 2) Verificar que el correo no haya respondido antes (por cualquier canal)
-    const prev = await firestore
-      .collection(QUESTIONNAIRE_COLLECTIONS.responses)
-      .where("questionnaireId", "==", questionnaireId)
-      .where("userEmail", "==", cleanEmail)
-      .limit(1)
-      .get();
-
-    if (!prev.empty) {
-      throw new HttpsError(
-        "already-exists",
-        "Este correo ya respondió este formulario"
-      );
-    }
-
-    // 3) Guardar respuesta
+    // 2) Guardar respuesta anónima
     await firestore.collection(QUESTIONNAIRE_COLLECTIONS.responses).add({
       questionnaireId,
-      userId:    cleanEmail,
-      userName:  cleanName,
-      userEmail: cleanEmail,
+      userId:    null,
+      userName:  "Anónimo",
+      userEmail: null,
       answers,
       status:      "completed",
       source:      "public",

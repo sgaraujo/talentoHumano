@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, CheckCircle, Clock, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Questionnaire } from '@/models/types/Questionnaire';
+import { answerLabels } from '@/domain/questionnaires/answerLabels';
 
 interface ViewResponsesDialogProps {
     open: boolean;
@@ -63,14 +64,8 @@ export const ViewResponsesDialog = ({
     };
 
     const getAnswerDisplay = (question: any, answer: any) => {
-        if (Array.isArray(answer)) {
-            return answer.join(', ');
-        }
-        if (question.type === 'select' || question.type === 'multiple') {
-            const option = question.options?.find((opt: any) => opt.value === answer);
-            return option?.label || answer;
-        }
-        return answer?.toString() || 'Sin respuesta';
+        const labels = answerLabels(question, answer);
+        return labels.length ? labels.join(', ') : 'Sin respuesta';
     };
 
     const exportToCSV = () => {

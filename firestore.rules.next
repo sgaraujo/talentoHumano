@@ -70,9 +70,44 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Módulos de una empresa: se aceptan los flags legacy (activeTH /
+    // activeContabilidad) y el mapa modules, porque conviven en los documentos.
+    function companyHasTH(company) {
+      return company.get('activeTH', false) == true
+        || company.get('modules', {}).get('humanResources', false) == true;
+    }
+
+    function companyHasAccounting(company) {
+      return company.get('activeContabilidad', false) == true
+        || company.get('modules', {}).get('accounting', false) == true;
+    }
+
+    function companyHasCommunications(company) {
+      return company.get('modules', {}).get('communications', false) == true;
+    }
+
     match /organization/data/companies/{companyId} {
       allow read: if signedIn();
-      allow create, update: if hasRole(['admin', 'talento_humano']);
+      // TH crea empresas solo de TH y Contabilidad solo de Contabilidad.
+      allow create: if isAdmin()
+        || (hasRole(['talento_humano'])
+            && companyHasTH(request.resource.data)
+            && !companyHasAccounting(request.resource.data))
+        || (hasRole(['contabilidad'])
+            && companyHasAccounting(request.resource.data)
+            && !companyHasTH(request.resource.data)
+            && !companyHasCommunications(request.resource.data));
+      // Cada área edita solo las empresas con su módulo y no toca el módulo de la otra.
+      allow update: if isAdmin()
+        || (hasRole(['talento_humano'])
+            && companyHasTH(resource.data)
+            && companyHasTH(request.resource.data)
+            && companyHasAccounting(request.resource.data) == companyHasAccounting(resource.data))
+        || (hasRole(['contabilidad'])
+            && companyHasAccounting(resource.data)
+            && companyHasAccounting(request.resource.data)
+            && companyHasTH(request.resource.data) == companyHasTH(resource.data)
+            && companyHasCommunications(request.resource.data) == companyHasCommunications(resource.data));
       allow delete: if isAdmin();
     }
     match /organization/data/projects/{projectId} {
@@ -100,6 +135,15 @@ service cloud.firestore {
     match /questionnaires/{documentId} {
       allow read: if signedIn();
       allow write: if false;
+    }
+    // Offboarding: las encuestas las crea y actualiza solo el servidor
+    // (Cloud Functions); TH las consulta. La configuración la edita TH.
+    match /human_resources/data/offboarding_surveys/{surveyId} {
+      allow read: if hasRole(['admin', 'talento_humano']);
+      allow write: if false;
+    }
+    match /human_resources/data/settings/offboarding {
+      allow read, write: if hasRole(['admin', 'talento_humano']);
     }
     match /human_resources/data/movements/{movementId} {
       allow read, write: if hasRole(['admin', 'talento_humano']);
@@ -222,6 +266,18 @@ service cloud.firestore {
     }
     match /identity/{documentId} {
       allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Preguntas hechas al asistente del manual. Las escribe solo la Cloud
+    // Function manualAssistant (Admin SDK); los administradores pueden leerlas.
+    match /assistant/data/questions/{questionId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    // Registro de cuestionarios generados con IA (solo lo escribe la función).
+    match /assistant/data/questionnaire_generations/{generationId} {
+      allow read: if isAdmin();
       allow write: if false;
     }
 

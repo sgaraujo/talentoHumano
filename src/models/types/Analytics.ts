@@ -16,6 +16,7 @@ export interface RotationMetrics {
   // Tasas
   rotacionGeneral: number; // porcentaje
   rotacionVoluntaria: number;
+  rotacionInvoluntaria: number;
   rotacionEvitable: number;
   cubrimiento: number;
 
@@ -30,6 +31,15 @@ export interface RotationMetrics {
     involuntario: number;
   };
 
+  // Retiros por sustitución patronal: no cuentan como voluntarios ni involuntarios.
+  sustitucionPatronal: number;
+  // Base de las tasas: HC promedio del mes, o promedio de los HC promedio mensuales.
+  hcPromedio: number;
+  // Una fila por mes del período, con las columnas de la tabla oficial de TH.
+  detalleMensual: MonthlyData[];
+  // Aprendices SENA (excluidos de los totales de trabajadores, informados aparte).
+  aprendices: { headcount: number; ingresos: number; retiros: number };
+
   externoVsInterno: {
     externo: number;
     interno: number;
@@ -37,10 +47,11 @@ export interface RotationMetrics {
 
   // Desglose por motivo de retiro
   motivosRetiro: Record<string, number>;
-  retirosPorEmpresa: { empresa: string; count: number }[];
+  retirosPorEmpresa: { empresa: string; count: number; personas: RetiredPerson[] }[];
 
   // Headcount por proyecto
-  headcountPorProyecto: { proyecto: string; empresa: string; count: number }[];
+  // count = vigentes al cierre; ingresos = nuevos ingresos del período filtrado.
+  headcountPorProyecto: { proyecto: string; empresa: string; count: number; ingresos: number; personasIngreso: NewHirePerson[] }[];
   
   // Tendencias mensuales
   ingresosPorMes: MonthlyData[];
@@ -55,13 +66,40 @@ export interface RotationMetrics {
   retirosTempranos: number;
 }
 
+export interface RetiredPerson {
+  employeeId: string;
+  nombre: string;
+  documento: string;
+  motivo: string;      // clave usada en motivosRetiro
+  fechaRetiro: string; // YYYY-MM-DD
+  cargo?: string;
+}
+
+export interface NewHirePerson {
+  employeeId: string;
+  nombre: string;
+  documento: string;
+  empresa: string;
+  fechaIngreso: string; // YYYY-MM-DD
+  cargo?: string;
+  retirado: boolean;    // ya se retiró de ese contrato
+}
+
 export interface MonthlyData {
   month: string;
   year: number;
   ingresos: number;
   retiros: number;
-  rotacion: number;
-  rotacionEvitable: number;
+  rotacion: number;          // retiros / HC promedio
+  rotacionEvitable: number;  // = rotación voluntaria
+  hcInicial: number;
+  hcFinal: number;
+  hcPromedio: number;
+  retirosVoluntarios: number;
+  retirosInvoluntarios: number;
+  sustitucionPatronal: number;
+  rotacionVoluntaria: number;
+  rotacionInvoluntaria: number;
 }
 
 export interface FilterOptions {

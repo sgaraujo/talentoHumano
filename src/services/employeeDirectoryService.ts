@@ -45,9 +45,17 @@ export async function getEmployeeDirectoryUsers(): Promise<User[]> {
     [company.name, ...(company.aliases ?? [])].forEach(name => companyIdByName.set(normalize(name), company.id));
   });
   const companyNameById = new Map(companies.map(company => [company.id, company.name]));
-  const projectIdByCompanyAndName = new Map(projects.map(project => [
-    `${project.companyId}|${normalize(project.name)}`, project.id,
-  ]));
+  // Incluye los alias: "ZTE - MPW" en un contrato apunta a la cuenta ZTE MPW.
+  // Si dos cuentas de la misma empresa normalizan igual ("ADMINISTRACIÓN"
+  // activa y "ADMINISTRACION" inactiva), gana la activa: si no, el contrato
+  // quedaba enlazado a la inactiva y la persona salía de WhatsApp/correos.
+  const projectIdByCompanyAndName = new Map<string, string>();
+  projects.forEach(project => {
+    [project.name, ...(project.aliases ?? [])].forEach(name => {
+      const key = `${project.companyId}|${normalize(name)}`;
+      if (!projectIdByCompanyAndName.has(key) || project.status === 'activo') projectIdByCompanyAndName.set(key, project.id);
+    });
+  });
   const employmentsByEmployee = new Map<string, any[]>();
   employmentsSnap.docs.forEach(snapshot => {
     const relationship = snapshot.data() as any;
@@ -78,12 +86,15 @@ export async function getEmployeeDirectoryUsers(): Promise<User[]> {
     const activeRelationships = allRelationships.filter(isActiveToday);
     const toAssignment = (relationship: any) => {
       const companyId = companyIdByName.get(normalize(relationship.companyName));
-      const projectId = companyId
-        ? projectIdByCompanyAndName.get(`${companyId}|${normalize(relationship.projectName)}`)
+      // La cuenta analítica real viene en `analyticalAccount` (columna CUENTA
+      // ANALITICA); `projectName` (columna PROYECTO) llega vacío en las cargas.
+      const account = relationship.projectName || relationship.analyticalAccount;
+      const projectId = companyId && account
+        ? projectIdByCompanyAndName.get(`${companyId}|${normalize(account)}`)
         : undefined;
       const company = companyId ? companyNameById.get(companyId)! : relationship.companyName;
       return {
-        companyId, projectId, company, project: relationship.projectName,
+        companyId, projectId, company, project: account,
         contractType: relationship.contractType, modality: relationship.modality,
         startDate: relationship.startDate, endDate: relationship.endDate, status: relationship.status,
       };
