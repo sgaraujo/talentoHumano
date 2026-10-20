@@ -40,6 +40,8 @@ const IDENTITY_COLLECTIONS = {
 } as const;
 
 type PlatformRole = "admin" | "talento_humano" | "contabilidad" | "financiera" | "revisor_fiscal";
+/** Personas externas que solo consultan. Mantener sincronizado con src/models/types/AppRole.ts. */
+const EXTERNAL_ROLES: PlatformRole[] = ["revisor_fiscal"];
 
 /** Verifica autenticación y rol en callables administrativas. */
 async function requirePlatformRole(
@@ -340,10 +342,19 @@ export const verifyEmailCodeAndLogin = onCall(
     // opcional: claims (rol)
     // await admin.auth().setCustomUserClaims(userRecord.uid, { role: "colaborador" });
 
+    // Las cuentas externas (revisor fiscal) no son colaboradores: no se les crea
+    // registro en identity/data/users, de donde salen cuestionarios, notificaciones
+    // y listados de personas.
+    const platformRole = (await admin.firestore()
+      .collection(IDENTITY_COLLECTIONS.platformRoles).doc(email).get()).data()?.role as PlatformRole | undefined;
+    const isExternal = !!platformRole && EXTERNAL_ROLES.includes(platformRole);
+
     const customToken = await admin.auth().createCustomToken(userRecord.uid, {
       email,
-      role: "colaborador",
+      role: isExternal ? "externo" : "colaborador",
     });
+
+    if (isExternal) return { ok: true, customToken };
 
     const usersRef = admin.firestore().collection(IDENTITY_COLLECTIONS.users).doc(userRecord.uid);
     const userSnap = await usersRef.get();
@@ -2918,7 +2929,8 @@ export const triggerWeeklyTaxDigest = onCall(
 
 /**
  * Envía correo de bienvenida/actualización de acceso a un usuario de la plataforma.
- * Payload: { recipientEmail, recipientName, role, roleLabel, modules, isNewAccess }
+ * Payload: { recipientEmail, recipientName, role, roleLabel, modules, isNewAccess, companies? }
+ * `companies` (roles externos): empresas que puede consultar; se agrega el aviso de solo lectura.
  */
 export const sendPlatformAccessEmail = onCall(
   { region: "us-central1", cors: true, secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2] },
@@ -2930,7 +2942,9 @@ export const sendPlatformAccessEmail = onCall(
       roleLabel,
       modules = [],
       isNewAccess = true,
+      companies = [],
     } = request.data || {};
+    const isExternal = EXTERNAL_ROLES.includes(role as PlatformRole);
 
     console.log("sendPlatformAccessEmail START — recipientEmail:", recipientEmail, "role:", role);
 
@@ -2947,16 +2961,24 @@ export const sendPlatformAccessEmail = onCall(
       talento_humano: { bg: "#f0fdf4", text: "#15803d", border: "#86efac" },
       contabilidad:   { bg: "#eff6ff", text: "#1d4ed8", border: "#93c5fd" },
       financiera:     { bg: "#ecfdf5", text: "#065f46", border: "#6ee7b7" },
+      revisor_fiscal: { bg: "#fffbeb", text: "#b45309", border: "#fcd34d" },
     };
     const roleColor = ROLE_COLORS[role] ?? { bg: "#f9fafb", text: "#374151", border: "#e5e7eb" };
+    const escapeHtml = (s: string) => String(s).replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] as string));
+    const companyItems = (companies as string[]).map(c =>
+      `<li style="padding:3px 0;color:#374151;font-size:13px">🏢 ${escapeHtml(c)}</li>`
+    ).join("");
 
     const moduleItems = (modules as string[]).map(m =>
       `<li style="padding:3px 0;color:#374151;font-size:13px">✓ ${m}</li>`
     ).join("");
 
-    const subject = isNewAccess
-      ? `¡Bienvenido/a a la plataforma Inteegrados!`
-      : `Tu acceso a Inteegrados ha sido actualizado`;
+    const subject = isExternal
+      ? (isNewAccess ? `Tu acceso de consulta a Inteegrados (${roleLabel || role})` : `Tu acceso de consulta a Inteegrados ha sido actualizado`)
+      : isNewAccess
+        ? `¡Bienvenido/a a la plataforma Inteegrados!`
+        : `Tu acceso a Inteegrados ha sido actualizado`;
 
     const headline = isNewAccess
       ? `¡Hola <b>${recipientName || recipientEmail}</b>, te damos la bienvenida!`
@@ -3010,6 +3032,31 @@ export const sendPlatformAccessEmail = onCall(
             <ul style="margin:0;padding-left:4px;list-style:none">
               ${moduleItems}
             </ul>
+          </div>
+          ` : ""}
+
+          ${isExternal ? `
+          <!-- Acceso externo: empresas y solo lectura -->
+          ${companyItems ? `
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;margin-bottom:16px">
+            <p style="margin:0 0 10px;font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700;letter-spacing:1px">
+              Empresas que puedes consultar
+            </p>
+            <ul style="margin:0;padding-left:4px;list-style:none">${companyItems}</ul>
+          </div>` : ""}
+          <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:14px 18px;margin-bottom:24px">
+            <p style="margin:0;font-size:13px;color:#92400e">
+              <b>Acceso de solo lectura.</b> Puedes consultar el calendario y el informe tributario, ver el historial
+              y descargar los soportes. No puedes crear ni modificar información.
+            </p>
+          </div>
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px 18px;margin-bottom:24px">
+            <p style="margin:0 0 6px;font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700;letter-spacing:1px">Cómo ingresar</p>
+            <ol style="margin:0;padding-left:18px;font-size:13px;color:#374151">
+              <li>Abre la plataforma con el botón de abajo.</li>
+              <li>Escribe este correo y pulsa <b>Enviar código de verificación</b>.</li>
+              <li>Ingresa el código de 6 dígitos que te llegará (vence en 10 minutos).</li>
+            </ol>
           </div>
           ` : ""}
 

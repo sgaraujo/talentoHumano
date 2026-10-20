@@ -1,10 +1,11 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc,
-  deleteDoc, serverTimestamp, query, orderBy,
+  deleteDoc, serverTimestamp, query, orderBy, where,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
 import type { PlatformUser, AppRole } from '../models/types/AppRole';
+import { EXTERNAL_ROLES } from '../models/types/AppRole';
 
 function normalize(email: string) {
   return email.trim().toLowerCase();
@@ -43,6 +44,12 @@ class RolesService {
   }
 
   /** companyIds solo aplica a roles acotados por empresa; para el resto se limpia. */
+  /** Correos de cuentas externas (EXTERNAL_ROLES), para excluirlas de listados de personas y envíos. */
+  async getExternalEmails(): Promise<Set<string>> {
+    const snap = await getDocs(query(collection(db, this.col), where('role', 'in', EXTERNAL_ROLES)));
+    return new Set(snap.docs.map(d => normalize(d.data().email || d.id)));
+  }
+
   async upsert(email: string, name: string, role: AppRole, companyIds: string[] = []): Promise<void> {
     const id = normalize(email);
     const existing = await getDoc(doc(db, this.col, id));

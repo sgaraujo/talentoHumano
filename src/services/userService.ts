@@ -14,6 +14,7 @@ import {
 import { db } from "../config/firebase";
 import { FIRESTORE_COLLECTIONS } from "../config/firestoreCollections";
 import type { User } from "../models/types/User";
+import { rolesService } from "./rolesService";
 
 function normalizeEmail(email: any): string {
   return String(email || "").trim().toLowerCase();
@@ -93,9 +94,16 @@ class UserService {
 
   async getAll(): Promise<User[]> {
     try {
-      const querySnapshot = await getDocs(collection(db, this.collectionName));
+      const [querySnapshot, externalEmails] = await Promise.all([
+        getDocs(collection(db, this.collectionName)),
+        rolesService.getExternalEmails(),
+      ]);
 
-      return querySnapshot.docs.map((d) => {
+      // Las cuentas externas (p. ej. revisor fiscal) no son colaboradores: no se
+      // listan para asignar cuestionarios, líderes, movimientos ni proyectos.
+      return querySnapshot.docs
+        .filter((d) => !externalEmails.has(normalizeEmail(d.data().email)))
+        .map((d) => {
         const data = d.data();
         return {
           id: d.id,

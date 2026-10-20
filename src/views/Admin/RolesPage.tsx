@@ -47,13 +47,15 @@ function getModuleLabels(role: AppRole): string[] {
     '/configuraciones/empresas': 'Configuración de empresas',
     '/manual':           'Manual',
   };
+  if (role === 'revisor_fiscal') return ['Calendario tributario', 'Informe tributario', 'Manual de usuario'];
   const modules = ROLE_MODULES[role];
   if (modules[0] === '*') return Object.values(map);
   return modules.map(m => map[m] ?? m);
 }
 
+/** companyNames: empresas visibles de una cuenta externa; el correo las lista con el aviso de solo lectura. */
 async function sendAccessEmail(
-  email: string, name: string, role: AppRole, isNewAccess: boolean
+  email: string, name: string, role: AppRole, isNewAccess: boolean, companyNames: string[] = []
 ): Promise<void> {
   const fn = httpsCallable(functions, 'sendPlatformAccessEmail');
   await fn({
@@ -63,6 +65,7 @@ async function sendAccessEmail(
     roleLabel:  ROLE_LABELS[role],
     modules:    getModuleLabels(role),
     isNewAccess,
+    companies:  companyNames,
   });
 }
 
@@ -171,6 +174,11 @@ export const RolesPage = () => {
   const [selCompanies, setSelCompanies] = useState<string[]>([]);
   const [saving,       setSaving]       = useState(false);
   const [companies,    setCompanies]    = useState<Company[]>([]);
+
+  // Alta de persona externa
+  const [extOpen,  setExtOpen]  = useState(false);
+  const [extName,  setExtName]  = useState('');
+  const [extEmail, setExtEmail] = useState('');
 
   // Bulk email dialog
   const [emailDialogOpen,  setEmailDialogOpen]  = useState(false);
@@ -306,6 +314,27 @@ export const RolesPage = () => {
 
   const needsCompanies = !noPlatform && selPlatform === 'revisor_fiscal';
 
+  // Nombres sin repetir (los duplicados por NIT comparten nombre) para el correo de acceso.
+  const companyNamesOf = (ids: string[] = []) =>
+    [...new Set(companies.filter(c => ids.includes(c.id)).map(c => c.name))];
+
+  // Persona externa (no está en Expedientes): se crea la fila a mano y se abre
+  // el mismo diálogo, ya con el rol Revisor Fiscal.
+  const openExternal = () => {
+    const email = extEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error('Escribe un correo válido'); return; }
+    if (!extName.trim()) { toast.error('Escribe el nombre completo'); return; }
+    const existing = rows.find(r => r.email.toLowerCase() === email);
+    if (existing?.platformUser) {
+      toast.info('Este correo ya tiene acceso; se abre para editarlo');
+    } else if (existing) {
+      toast.warning('Este correo está en Expedientes como colaborador. Un revisor externo no debería estar ahí.');
+    }
+    setExtOpen(false);
+    openAssign(existing ?? { userId: '', email, fullName: extName.trim(), userRole: 'colaborador' });
+    if (!existing?.platformUser) { setSelPlatform('revisor_fiscal'); setNoPlatform(false); }
+  };
+
   // Las reglas filtran por companyId: se agregan los registros duplicados de una
   // misma empresa (mismo NIT) para que sus obligaciones también sean visibles.
   const withSameNitCompanies = (ids: string[]) => {
@@ -337,15 +366,16 @@ export const RolesPage = () => {
         );
       }
 
-      // 2. Team/HR role — solo si tiene entrada en `users`
-      if (target.userId) {
+      // 2. Team/HR role — solo si tiene entrada en `users` y no es una cuenta externa
+      if (target.userId && !needsCompanies) {
         await userService.update(target.userId, { role: selTeamRole });
       }
 
       // 3. Enviar correo de bienvenida/actualización si se otorgó o cambió acceso
       if (!noPlatform) {
         const isNew = !hadAccess || prevRole !== selPlatform;
-        sendAccessEmail(target.email, target.fullName, selPlatform, !hadAccess)
+        sendAccessEmail(target.email, target.fullName, selPlatform, !hadAccess,
+          needsCompanies ? companyNamesOf(selCompanies) : [])
           .catch(err => toast.error('Correo no enviado', { description: err?.message ?? String(err) }));
         toast.success(`Actualizado: ${target.fullName || target.email}`, {
           description: isNew
@@ -368,7 +398,8 @@ export const RolesPage = () => {
   const handleResendEmail = async (row: UserRow) => {
     if (!row.platformUser) return;
     try {
-      await sendAccessEmail(row.email, row.fullName, row.platformUser.role, false);
+      await sendAccessEmail(row.email, row.fullName, row.platformUser.role, false,
+        companyNamesOf(row.platformUser.companyIds));
       toast.success('Correo enviado', { description: `Bienvenida reenviada a ${row.email}` });
     } catch (e: any) {
       toast.error('Error al enviar correo', { description: e.message });
@@ -387,7 +418,8 @@ export const RolesPage = () => {
     let failed = 0;
     await Promise.all(
       emailTargets.map(row =>
-        sendAccessEmail(row.email, row.fullName, row.platformUser!.role, false)
+        sendAccessEmail(row.email, row.fullName, row.platformUser!.role, false,
+          companyNamesOf(row.platformUser!.companyIds))
           .then(() => { sent++; })
           .catch(() => { failed++; })
       )
@@ -424,14 +456,54 @@ export const RolesPage = () => {
             Asigna rol de plataforma y cargo de equipo · {rows.length} usuarios
           </p>
         </div>
-        <Button
-          onClick={() => { setEmailTargetRole('all'); setEmailDialogOpen(true); }}
-          className="bg-[#008C3C] hover:bg-[#006C2F] text-white flex items-center gap-2"
-        >
-          <Mail className="w-4 h-4" />
-          Enviar correo
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            onClick={() => { setExtName(''); setExtEmail(''); setExtOpen(true); }}
+            className="flex items-center gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+          >
+            <Eye className="w-4 h-4" />
+            Agregar persona externa
+          </Button>
+          <Button
+            onClick={() => { setEmailTargetRole('all'); setEmailDialogOpen(true); }}
+            className="bg-[#008C3C] hover:bg-[#006C2F] text-white flex items-center gap-2"
+          >
+            <Mail className="w-4 h-4" />
+            Enviar correo
+          </Button>
+        </div>
       </div>
+
+      {/* ── Alta de persona externa (revisor fiscal) ── */}
+      <Dialog open={extOpen} onOpenChange={setExtOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="w-4 h-4 text-amber-600" />
+              Agregar persona externa
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <p className="text-xs text-gray-500">
+              Para quien no es colaborador (p. ej. revisor fiscal). No se registra en Expedientes ni cuenta en ninguna empresa.
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500">Nombre completo</Label>
+              <Input value={extName} onChange={e => setExtName(e.target.value)} placeholder="Nombre y apellido" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500">Correo</Label>
+              <Input type="email" value={extEmail} onChange={e => setExtEmail(e.target.value)} placeholder="correo@firma.com"
+                onKeyDown={e => { if (e.key === 'Enter') openExternal(); }} />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setExtOpen(false)}>Cancelar</Button>
+              <Button className="flex-1 bg-[#008C3C] hover:bg-[#006C2F] text-white" onClick={openExternal}>Continuar</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Stat cards — platform roles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
@@ -630,7 +702,8 @@ export const RolesPage = () => {
 
       {/* ── Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-sm">
+        {/* min-w-0 en los hijos: DialogContent es grid y, sin él, los nombres largos de empresa lo ensanchaban. */}
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md max-h-[90dvh] overflow-y-auto overflow-x-hidden [&>*]:min-w-0">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCheck className="w-4 h-4 text-[#008C3C]" />
@@ -639,7 +712,7 @@ export const RolesPage = () => {
           </DialogHeader>
 
           {target && (
-            <div className="space-y-4 py-1">
+            <div className="space-y-4 py-1 min-w-0">
               {/* User info */}
               <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
                 <div className="w-10 h-10 rounded-full bg-[#008C3C]/10 flex items-center justify-center text-sm font-bold text-[#008C3C] flex-shrink-0">
@@ -651,7 +724,12 @@ export const RolesPage = () => {
                 </div>
               </div>
 
-              {/* ── Cargo de equipo ── */}
+              {/* ── Cargo de equipo (no aplica a cuentas externas) ── */}
+              {needsCompanies ? (
+                <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Cuenta externa: solo consulta. No cuenta como colaborador de ninguna empresa ni recibe correos, WhatsApp, boletines ni cuestionarios.
+                </div>
+              ) : (
               <div className="space-y-1.5">
                 <Label className="text-xs text-gray-500 flex items-center gap-1">
                   <Crown className="w-3 h-3 text-amber-500" /> Cargo en el equipo
@@ -675,6 +753,7 @@ export const RolesPage = () => {
                   ))}
                 </div>
               </div>
+              )}
 
               <div className="border-t border-gray-100 pt-3" />
 
@@ -726,7 +805,9 @@ export const RolesPage = () => {
                         Verá en la app:
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {(ROLE_MODULES[selPlatform][0] === '*'
+                        {(selPlatform === 'revisor_fiscal'
+                          ? getModuleLabels(selPlatform)
+                          : ROLE_MODULES[selPlatform][0] === '*'
                           ? Object.values(MODULE_LABELS)
                           : ROLE_MODULES[selPlatform].map(m => MODULE_LABELS[m] ?? m)
                         ).map(m => (
@@ -743,21 +824,26 @@ export const RolesPage = () => {
                         <Label className="text-xs text-gray-500 flex items-center gap-1">
                           <Building2 className="w-3 h-3 text-amber-500" /> Empresas que puede ver (solo lectura)
                         </Label>
-                        <div className="border border-gray-200 rounded-lg p-2 max-h-40 overflow-y-auto space-y-1">
+                        <div className="border border-gray-200 rounded-lg p-1.5 max-h-44 overflow-y-auto overflow-x-hidden">
+                          {selCompanies.length > 0 && (
+                            <p className="px-2 pb-1 text-[10px] font-semibold text-amber-700">
+                              {companyNamesOf(selCompanies).length} seleccionada{companyNamesOf(selCompanies).length !== 1 ? 's' : ''}
+                            </p>
+                          )}
                           {companies
                             .filter(c => c.active && c.activeContabilidad)
                             .sort((a, b) => a.name.localeCompare(b.name, 'es'))
                             .map(c => (
-                              <label key={c.id} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer">
+                              <label key={c.id} title={c.name} className="flex items-center gap-2 min-w-0 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
                                 <input
                                   type="checkbox"
-                                  className="accent-amber-600"
+                                  className="accent-amber-600 flex-shrink-0"
                                   checked={selCompanies.includes(c.id)}
                                   onChange={e => setSelCompanies(prev =>
                                     e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id)
                                   )}
                                 />
-                                <span className="text-xs text-gray-700 flex-1 truncate">{c.name}</span>
+                                <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{c.name}</span>
                               </label>
                             ))}
                         </div>

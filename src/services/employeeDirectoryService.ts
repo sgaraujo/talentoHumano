@@ -5,6 +5,7 @@ import type { Company } from '@/models/types/Company';
 import type { Project } from '@/models/types/Project';
 import type { User } from '@/models/types/User';
 import { toDate } from './analyticsService';
+import { rolesService } from './rolesService';
 
 /**
  * Un retiro (status 'retired') deja de contar como activo de inmediato, sin
@@ -49,12 +50,17 @@ export async function loadEmployeeDirectory(): Promise<{
   // rango de edad, y la fecha de nacimiento del expediente (que tiene prioridad
   // en ageGroup) da el mismo resultado en todos los casos — verificado con
   // scripts/measure-legacy-age-impact.mjs.
-  const [companiesSnap, projectsSnap, employeesSnap, employmentsSnap] = await Promise.all([
+  const [companiesSnap, projectsSnap, employeesSnap, employmentsSnap, externalEmails] = await Promise.all([
     getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.projects)),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.employees)),
     getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments)),
+    rolesService.getExternalEmails(),
   ]);
+  // Una cuenta externa (p. ej. revisor fiscal) registrada por error como empleada
+  // no debe recibir correos, WhatsApp ni boletines.
+  const isExternal = (employee: any) => [employee.corporateEmail, employee.personalEmail]
+    .some(email => email && externalEmails.has(String(email).trim().toLowerCase()));
   const companies = companiesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company));
   const projects = projectsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
   const companyIdByName = new Map<string, string>();
@@ -81,7 +87,7 @@ export async function loadEmployeeDirectory(): Promise<{
     if (!employmentsByEmployee.has(employeeId)) employmentsByEmployee.set(employeeId, []);
     employmentsByEmployee.get(employeeId)!.push(relationship);
   });
-  const users = employeesSnap.docs.map(snapshot => {
+  const users = employeesSnap.docs.filter(snapshot => !isExternal(snapshot.data())).map(snapshot => {
     const employee = snapshot.data() as any;
     const allRelationships = employmentsByEmployee.get(snapshot.id) ?? [];
     const activeRelationships = allRelationships.filter(isActiveToday);

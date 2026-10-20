@@ -63,6 +63,13 @@ export const ROLE_EXCLUDED_MODULES: Partial<Record<AppRole, string[]>> = {
 /** Roles cuyo home es el calendario tributario en lugar del dashboard. */
 export const ACCOUNTING_HOME_ROLES: AppRole[] = ['contabilidad', 'financiera', 'revisor_fiscal'];
 
+/**
+ * Roles de personas externas (no colaboradores): solo consultan. No cuentan como
+ * personal de ninguna empresa ni aparecen como destinatarios de envíos.
+ * Mantener sincronizado con EXTERNAL_ROLES de functions/src/index.ts.
+ */
+export const EXTERNAL_ROLES: AppRole[] = ['revisor_fiscal'];
+
 /** Panel de inicio de cada rol. */
 export const getRoleHome = (role: AppRole | null): string =>
   role && ACCOUNTING_HOME_ROLES.includes(role) ? '/contabilidad' : '/dashboard';
