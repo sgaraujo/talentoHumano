@@ -107,7 +107,10 @@ export { sendWaCampaign } from "./whatsapp/campaignHandler";
 export { syncWaTemplates } from "./whatsapp/templateSync";
 export { manualAssistant } from "./ai/manualAssistant";
 export { generateQuestionnaire } from "./ai/questionnaireGenerator";
-export { onEmployeeOffboarded, resendOffboardingSurvey, sendOffboardingSurveys } from "./offboarding/offboarding";
+export {
+  onEmployeeOffboarded, resendOffboardingSurvey, sendOffboardingSurveys,
+  sendOffboardingReminders, scheduledOffboardingReminders,
+} from "./offboarding/offboarding";
 
 
 // Único remitente de correo: inteegrados@inteegra.net.co (tenant de inteegra.net.co).

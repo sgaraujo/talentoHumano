@@ -38,6 +38,9 @@ export interface OffboardingSurvey {
   sentAt: Date | null;
   lastSentAt: Date | null;
   respondedAt: Date | null;
+  reminderCount: number;
+  lastReminderAt: Date | null;
+  lastReminderError?: string | null;
   answers?: Record<string, unknown>;
   questions?: OffboardingQuestionSnapshot[];
 }
@@ -47,6 +50,10 @@ export interface OffboardingSettings {
   questionnaireId: string;
   maxRetirementAgeDays: number;
   excludedReasons: string[];
+  /** Recordatorio automático diario (10 a. m.) a quien no ha respondido. */
+  remindersEnabled: boolean;
+  reminderIntervalDays: number;
+  maxReminders: number;
 }
 
 export const DEFAULT_SETTINGS: OffboardingSettings = {
@@ -54,6 +61,9 @@ export const DEFAULT_SETTINGS: OffboardingSettings = {
   questionnaireId: '',
   maxRetirementAgeDays: 30,
   excludedReasons: ['Fallecimiento', 'Anulado'],
+  remindersEnabled: false,
+  reminderIntervalDays: 5,
+  maxReminders: 2,
 };
 
 const toDate = (value: any): Date | null => value?.toDate?.() ?? (value instanceof Date ? value : null);
@@ -66,9 +76,11 @@ export async function listOffboardingSurveys(): Promise<OffboardingSurvey[]> {
       ...data,
       id: item.id,
       sendCount: data.sendCount ?? 0,
+      reminderCount: data.reminderCount ?? 0,
       createdAt: toDate(data.createdAt),
       sentAt: toDate(data.sentAt),
       lastSentAt: toDate(data.lastSentAt),
+      lastReminderAt: toDate(data.lastReminderAt),
       respondedAt: toDate(data.respondedAt),
     } as OffboardingSurvey;
   }).sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''));
@@ -87,6 +99,19 @@ export async function resendOffboardingSurvey(surveyId: string): Promise<string>
   const call = httpsCallable<{ surveyId: string }, { ok: boolean; sentTo: string }>(functions, 'resendOffboardingSurvey');
   const result = await call({ surveyId });
   return result.data.sentTo;
+}
+
+// Espejo de ReminderOutcome en functions/src/offboarding/offboarding.ts.
+export type ReminderOutcome =
+  | 'sent' | 'responded' | 'not_pending' | 'recent' | 'max_reached' | 'rehired' | 'no_email' | 'error' | 'not_found';
+
+/** Recordatorio con el mismo enlace a encuestas pendientes de respuesta (máximo 100 por llamada). */
+export async function sendOffboardingReminders(surveyIds: string[]): Promise<Array<{ surveyId: string; outcome: ReminderOutcome }>> {
+  const call = httpsCallable<{ surveyIds: string[] }, { results: Array<{ surveyId: string; outcome: ReminderOutcome }> }>(
+    functions, 'sendOffboardingReminders', { timeout: 300_000 },
+  );
+  const result = await call({ surveyIds });
+  return result.data.results;
 }
 
 // ── Encuesta sugerida ────────────────────────────────────────────────────────

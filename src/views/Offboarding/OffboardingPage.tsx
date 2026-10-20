@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import {
-  DoorOpen, Loader2, RefreshCw, Search, Download, Send, Eye, Settings2, CheckCircle2, Clock, MailX, Star, Sparkles,
+  DoorOpen, Loader2, RefreshCw, Search, Download, Send, Eye, Settings2, CheckCircle2, Clock, MailX, Star, Sparkles, BellRing,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,8 +16,28 @@ import { projectService } from '@/services/projectService';
 import {
   listOffboardingSurveys, getOffboardingSettings, saveOffboardingSettings, resendOffboardingSurvey,
   createSuggestedOffboardingQuestionnaire, DEFAULT_SETTINGS, listRetiredEmployees, sendOffboardingSurveysTo,
+  sendOffboardingReminders,
   type OffboardingSurvey, type OffboardingSettings, type OffboardingStatus, type RetiredEmployee, type ManualSendOutcome,
+  type ReminderOutcome,
 } from '@/services/offboardingService';
+
+// Mismo margen que MIN_HOURS_BETWEEN_EMAILS del backend: no se recuerda a quien recibió correo hace menos de 24 h.
+const REMINDER_MIN_GAP_MS = 24 * 3_600_000;
+const MAX_REMINDERS_PER_CALL = 100;
+const canRemindNow = (s: OffboardingSurvey) =>
+  s.status === 'sent' && (!s.lastSentAt || Date.now() - s.lastSentAt.getTime() >= REMINDER_MIN_GAP_MS);
+
+const REMINDER_OUTCOME_LABEL: Record<ReminderOutcome, string> = {
+  sent: 'enviados',
+  responded: 'ya habían respondido',
+  not_pending: 'no estaban pendientes',
+  recent: 'recibieron un correo hace menos de 24 h',
+  max_reached: 'ya tenían el máximo de recordatorios',
+  rehired: 'fueron recontratados',
+  no_email: 'sin correo personal',
+  error: 'con error de envío',
+  not_found: 'no encontrados',
+};
 
 type Tab = 'surveys' | 'indicators' | 'settings';
 type StatusFilter = 'all' | 'responded' | 'sent' | 'not_sent';
@@ -87,6 +107,8 @@ export function OffboardingPage() {
   const [detail, setDetail] = useState<OffboardingSurvey | null>(null);
   const [resending, setResending] = useState<string | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [reminding, setReminding] = useState(false);
   const surveyIds = useMemo(() => new Set(surveys.map(s => s.id)), [surveys]);
 
   const load = async () => {
@@ -130,6 +152,30 @@ export function OffboardingPage() {
     satisfaction: average(filtered.map(satisfaction).filter((v): v is number => v !== null)),
   }), [filtered]);
 
+  // Pendientes de respuesta con los filtros actuales (proyecto, año, búsqueda).
+  const pendingFiltered = useMemo(() => filtered.filter(s => s.status === 'sent'), [filtered]);
+  const remindable = useMemo(() => pendingFiltered.filter(canRemindNow), [pendingFiltered]);
+
+  const handleRemind = async () => {
+    const batch = remindable.slice(0, MAX_REMINDERS_PER_CALL);
+    setReminding(true);
+    try {
+      const results = await sendOffboardingReminders(batch.map(s => s.id));
+      const tally = results.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.outcome]: (acc[r.outcome] ?? 0) + 1 }), {});
+      const sent = tally.sent ?? 0;
+      const others = Object.entries(tally).filter(([k]) => k !== 'sent')
+        .map(([k, n]) => `${n} ${REMINDER_OUTCOME_LABEL[k as ReminderOutcome]}`).join(' · ');
+      (sent ? toast.success : toast.warning)(`${sent} recordatorio${sent !== 1 ? 's' : ''} enviado${sent !== 1 ? 's' : ''}`,
+        others ? { description: `No enviados: ${others}` } : undefined);
+      setRemindOpen(false);
+      await load();
+    } catch (error: any) {
+      toast.error('No se pudieron enviar los recordatorios', { description: error?.message });
+    } finally {
+      setReminding(false);
+    }
+  };
+
   const handleResend = async (survey: OffboardingSurvey) => {
     setResending(survey.id);
     try {
@@ -161,6 +207,8 @@ export function OffboardingPage() {
         'Fecha de retiro': s.endDate ?? '',
         'Motivo de retiro (TH)': s.terminationReason ?? '',
         'Fecha de envío': s.sentAt ? s.sentAt.toISOString().slice(0, 10) : '',
+        'Recordatorios': s.reminderCount,
+        'Último recordatorio': s.lastReminderAt ? s.lastReminderAt.toISOString().slice(0, 10) : '',
         'Fecha de respuesta': s.respondedAt ? s.respondedAt.toISOString().slice(0, 10) : '',
         'Estado': STATUS_META[s.status].label,
         'Satisfacción promedio (1-5)': fmtScore(satisfaction(s)),
@@ -189,6 +237,10 @@ export function OffboardingPage() {
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${configured ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>
             {configured ? 'Envío automático activo' : 'Envío automático inactivo'}
           </span>
+          <Button variant="outline" onClick={() => setRemindOpen(true)} disabled={loading || !pendingFiltered.length}
+            className="border-amber-300 text-amber-700 hover:bg-amber-50">
+            <BellRing className="w-4 h-4 mr-2" />Recordar a pendientes{pendingFiltered.length ? ` (${pendingFiltered.length})` : ''}
+          </Button>
           <Button onClick={() => setSendOpen(true)} className="bg-[#008C3C] hover:bg-[#006C2F] text-white"><Send className="w-4 h-4 mr-2" />Enviar a excolaboradores</Button>
           <Button variant="outline" onClick={load} disabled={loading}><RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Actualizar</Button>
         </div>
@@ -246,6 +298,41 @@ export function OffboardingPage() {
       </div>
 
       <SurveyDetailDialog survey={detail} onClose={() => setDetail(null)} />
+      <Dialog open={remindOpen} onOpenChange={open => { if (!reminding) setRemindOpen(open); }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><BellRing className="w-4 h-4 text-amber-600" />Recordar a pendientes</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-gray-600">
+            <p>
+              Se enviará un recordatorio con el <b>mismo enlace</b> de la encuesta a{' '}
+              <b>{Math.min(remindable.length, MAX_REMINDERS_PER_CALL)}</b> excolaborador{remindable.length !== 1 ? 'es' : ''} que aún no ha{remindable.length !== 1 ? 'n' : ''} respondido
+              {(projectFilter !== 'all' || yearFilter !== 'all' || search.trim()) && <> (según los filtros aplicados)</>}.
+            </p>
+            {pendingFiltered.length > remindable.length && (
+              <p className="text-xs text-gray-500">
+                {pendingFiltered.length - remindable.length} se omiten porque recibieron un correo hace menos de 24 horas.
+              </p>
+            )}
+            {remindable.length > MAX_REMINDERS_PER_CALL && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Se envían máximo {MAX_REMINDERS_PER_CALL} por vez. Vuelve a pulsar el botón para enviar el resto.
+              </p>
+            )}
+            <div className="rounded-lg bg-gray-50 border px-3 py-2 text-xs">
+              <p className="font-semibold text-gray-700 mb-0.5">Asunto</p>
+              <p>Recordatorio: tu encuesta de salida de INTEEGRADOS</p>
+            </div>
+            <p className="text-xs text-gray-500">Se usa el correo personal actual del expediente. No se envía a quien ya respondió ni a quien fue recontratado.</p>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Button variant="outline" className="flex-1" onClick={() => setRemindOpen(false)} disabled={reminding}>Cancelar</Button>
+            <Button className="flex-1 bg-[#008C3C] hover:bg-[#006C2F] text-white" onClick={handleRemind} disabled={reminding || !remindable.length}>
+              {reminding ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BellRing className="w-4 h-4 mr-2" />}Enviar recordatorio
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <SendToRetiredDialog open={sendOpen} onClose={() => setSendOpen(false)} existingSurveyIds={surveyIds} settings={settings} onDone={load} />
     </div>
   );
@@ -292,7 +379,15 @@ function SurveysTable({ rows, onOpen, onResend, resending, configured }: {
               <td className="px-4 py-3 text-gray-600">{s.projectName ?? '—'}<p className="text-xs text-gray-400">{s.companyName ?? ''}</p></td>
               <td className="px-4 py-3 text-gray-600">{s.position ?? '—'}</td>
               <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(s.endDate)}</td>
-              <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(s.sentAt)}{s.sendCount > 1 && <p className="text-[11px] text-gray-400">{s.sendCount} envíos</p>}</td>
+              <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                {fmtDate(s.sentAt)}
+                {s.reminderCount > 0 && (
+                  <p className="text-[11px] text-amber-600 flex items-center gap-1">
+                    <BellRing className="w-3 h-3" />{s.reminderCount} recordatorio{s.reminderCount !== 1 ? 's' : ''} · {fmtDate(s.lastReminderAt)}
+                  </p>
+                )}
+                {s.sendCount - s.reminderCount > 1 && <p className="text-[11px] text-gray-400">{s.sendCount - s.reminderCount} envíos</p>}
+              </td>
               <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(s.respondedAt)}</td>
               <td className="px-4 py-3">
                 <span className={`text-[11px] font-semibold px-2 py-1 rounded-full whitespace-nowrap ${STATUS_META[s.status].className}`}>{STATUS_META[s.status].label}</span>
@@ -543,6 +638,29 @@ function SettingsPanel({ settings, questionnaires, onSaved }: { settings: Offboa
           <p className="text-xs text-gray-500">Protege contra envíos masivos: si se carga un Excel con retiros antiguos, a esas personas no se les envía la encuesta.</p>
         </div>
 
+        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+          <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 cursor-pointer">
+            <input type="checkbox" className="accent-[#008C3C] w-4 h-4" checked={form.remindersEnabled}
+              onChange={e => setForm({ ...form, remindersEnabled: e.target.checked })} />
+            <BellRing className="w-4 h-4 text-amber-600" />Recordatorio automático a quien no ha respondido
+          </label>
+          <div className={`flex flex-wrap items-center gap-2 text-sm text-gray-600 ${form.remindersEnabled ? '' : 'opacity-50'}`}>
+            <span>Recordar cada</span>
+            <Input id="offboarding-reminder-interval" type="number" min={1} max={60} className="w-20" disabled={!form.remindersEnabled}
+              value={form.reminderIntervalDays}
+              onChange={e => setForm({ ...form, reminderIntervalDays: Math.min(60, Math.max(1, Number(e.target.value) || 5)) })} />
+            <span>días desde el último correo, máximo</span>
+            <Input id="offboarding-max-reminders" type="number" min={1} max={5} className="w-16" disabled={!form.remindersEnabled}
+              value={form.maxReminders}
+              onChange={e => setForm({ ...form, maxReminders: Math.min(5, Math.max(1, Number(e.target.value) || 2)) })} />
+            <span>veces.</span>
+          </div>
+          <p className="text-xs text-gray-500">
+            Se revisa todos los días a las 10:00 a. m. Usa el mismo enlace de la encuesta, no escribe a quien ya respondió ni a quien
+            fue recontratado. Pulsa <b>Guardar</b> para aplicar el cambio.
+          </p>
+        </div>
+
         <div className="space-y-1">
           <p className="text-sm font-semibold text-gray-700">Motivos de retiro excluidos</p>
           <p className="text-sm text-gray-600">{form.excludedReasons.join(', ')}</p>
@@ -566,6 +684,7 @@ function SettingsPanel({ settings, questionnaires, onSaved }: { settings: Offboa
           <li>Las respuestas quedan aquí y el estado pasa a <b>Respondida</b>.</li>
         </ol>
         <p className="text-xs text-gray-500">Cada retiro genera una sola encuesta. Reenviar usa el mismo enlace, sin crear duplicados.</p>
+        <p className="text-xs text-gray-500">Si no responde, puedes enviar un recordatorio con <b>Recordar a pendientes</b> o dejar activo el recordatorio automático.</p>
       </aside>
     </div>
   );

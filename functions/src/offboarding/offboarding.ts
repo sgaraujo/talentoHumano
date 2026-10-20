@@ -1,5 +1,6 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret, defineString } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -35,10 +36,20 @@ export interface OffboardingSettings {
   maxRetirementAgeDays?: number;
   // Motivos para los que no tiene sentido una encuesta de despedida.
   excludedReasons?: string[];
+  // Recordatorio automático a quien no ha respondido: cada cuántos días desde
+  // el último envío y cuántas veces como máximo.
+  remindersEnabled?: boolean;
+  reminderIntervalDays?: number;
+  maxReminders?: number;
 }
 
 const DEFAULT_MAX_AGE_DAYS = 30;
 const DEFAULT_EXCLUDED_REASONS = ["Fallecimiento", "Anulado"];
+const DEFAULT_REMINDER_INTERVAL_DAYS = 5;
+const DEFAULT_MAX_REMINDERS = 2;
+// Evita dos correos seguidos por doble clic o porque coinciden el envío manual y el automático.
+const MIN_HOURS_BETWEEN_EMAILS = 24;
+const MAX_REMINDERS_PER_RUN = 100;
 
 const normalizeEmail = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -99,8 +110,13 @@ async function getGraphToken(): Promise<string> {
   return data.access_token;
 }
 
-function buildEmailHtml(firstName: string, link: string) {
+function buildEmailHtml(firstName: string, link: string, reminder = false) {
   const year = new Date().getFullYear();
+  const body = reminder ?
+    `<p>Hace unos días te enviamos la <b>encuesta de salida</b> de <b>INTEEGRADOS</b> y aún no hemos recibido tu respuesta.</p>
+      <p>Tu opinión sobre tu experiencia es muy importante para nosotros y nos ayuda a mejorar como lugar para trabajar. Solo toma unos minutos y tus respuestas se tratan con confidencialidad.</p>` :
+    `<p>Queremos agradecerte por el tiempo, el esfuerzo y todo lo que aportaste durante tu paso por <b>INTEEGRADOS</b>. Te deseamos muchos éxitos en esta nueva etapa.</p>
+      <p>Tu opinión es muy valiosa para nosotros. Te invitamos a responder una breve <b>encuesta de salida</b>: nos ayudará a entender tu experiencia y a mejorar como lugar para trabajar. Toma pocos minutos y tus respuestas se tratan con confidencialidad.</p>`;
   return `
   <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6;color:#374151">
     <div style="background:linear-gradient(135deg,#005528,#008C3C);padding:32px 24px;border-radius:12px 12px 0 0;text-align:center">
@@ -109,8 +125,7 @@ function buildEmailHtml(firstName: string, link: string) {
     </div>
     <div style="background:#ffffff;padding:32px 24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
       <p style="font-size:16px;margin-top:0">Hola <b>${escapeHtml(firstName)}</b>,</p>
-      <p>Queremos agradecerte por el tiempo, el esfuerzo y todo lo que aportaste durante tu paso por <b>INTEEGRADOS</b>. Te deseamos muchos éxitos en esta nueva etapa.</p>
-      <p>Tu opinión es muy valiosa para nosotros. Te invitamos a responder una breve <b>encuesta de salida</b>: nos ayudará a entender tu experiencia y a mejorar como lugar para trabajar. Toma pocos minutos y tus respuestas se tratan con confidencialidad.</p>
+      ${body}
       <div style="text-align:center;margin:28px 0">
         <a href="${link}" style="background:#008C3C;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;display:inline-block">Responder encuesta de salida</a>
       </div>
@@ -121,18 +136,20 @@ function buildEmailHtml(firstName: string, link: string) {
   </div>`;
 }
 
-async function sendSurveyEmail(to: string, fullName: string, token: string) {
+async function sendSurveyEmail(to: string, fullName: string, token: string, reminder = false, graphToken?: string) {
   const link = `${APP_URL.value().replace(/\/$/, "")}/responder/${token}`;
   const firstName = fullName.trim().split(/\s+/)[0] || fullName;
-  const graphToken = await getGraphToken();
+  const accessToken = graphToken ?? await getGraphToken();
   const sender = SENDER_EMAIL_2.value().trim();
   const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${graphToken}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       message: {
-        subject: "Gracias por tu paso por INTEEGRADOS – Encuesta de salida",
-        body: { contentType: "HTML", content: buildEmailHtml(firstName, link) },
+        subject: reminder ?
+          "Recordatorio: tu encuesta de salida de INTEEGRADOS" :
+          "Gracias por tu paso por INTEEGRADOS – Encuesta de salida",
+        body: { contentType: "HTML", content: buildEmailHtml(firstName, link, reminder) },
         toRecipients: [{ emailAddress: { address: to } }],
       },
       saveToSentItems: true,
@@ -374,5 +391,133 @@ export const resendOffboardingSurvey = onCall(
       throw new HttpsError("failed-precondition", to ? "No se pudo enviar el correo. Intenta más tarde." : "La persona no tiene correo personal registrado en su expediente.");
     }
     return { ok: true, sentTo: to };
+  },
+);
+
+// ── Recordatorios a quien no ha respondido ──────────────────────────────────
+
+export type ReminderOutcome =
+  | "sent" | "responded" | "not_pending" | "recent" | "max_reached" | "rehired" | "no_email" | "error" | "not_found";
+
+const millis = (value: unknown) => toDate(value)?.getTime() ?? 0;
+
+/**
+ * Envía un recordatorio con el mismo enlace de la encuesta. A diferencia de
+ * deliver(), si el correo falla la encuesta sigue "Enviada" (ya le llegó el
+ * primer correo); solo se registra el error. No recuerda a quien ya respondió,
+ * a quien recibió un correo hace menos de 24 h ni a quien fue recontratado.
+ */
+async function remindSurvey(
+  surveyId: string,
+  options: { maxReminders?: number; graphToken?: string } = {},
+): Promise<ReminderOutcome> {
+  const db = getFirestore();
+  const surveyRef = db.collection(OFFBOARDING_PATHS.surveys).doc(surveyId);
+  const survey = (await surveyRef.get()).data();
+  if (!survey) return "not_found";
+  if (survey.status === "responded") return "responded";
+  if (survey.status !== "sent") return "not_pending";
+  if (Date.now() - millis(survey.lastSentAt) < MIN_HOURS_BETWEEN_EMAILS * 3_600_000) return "recent";
+  if (options.maxReminders !== undefined && Number(survey.reminderCount ?? 0) >= options.maxReminders) return "max_reached";
+
+  const employeeRef = db.collection(OFFBOARDING_PATHS.employees).doc(survey.employeeId);
+  const [employeeSnap, employments] = await Promise.all([employeeRef.get(), employeeRef.collection("employments").get()]);
+  if (employments.docs.some((doc) => doc.data().status === "active")) return "rehired";
+  // Correo actual del expediente, por si TH lo corrigió después del primer envío.
+  const to = normalizeEmail(employeeSnap.data()?.personalEmail) || normalizeEmail(survey.personalEmail);
+  if (!to || !isEmail(to)) return "no_email";
+
+  try {
+    await sendSurveyEmail(to, String(survey.fullName || ""), survey.token, true, options.graphToken);
+  } catch (err) {
+    logger.error("OFFBOARDING_REMINDER_ERROR", { survey: surveyId, err: String(err) });
+    await surveyRef.update({ lastReminderError: String(err).slice(0, 300), updatedAt: FieldValue.serverTimestamp() });
+    return "error";
+  }
+  if (survey.assignmentId && to !== survey.personalEmail) {
+    await db.collection(OFFBOARDING_PATHS.assignments).doc(survey.assignmentId).update({ userEmail: to });
+  }
+  await surveyRef.update({
+    personalEmail: to,
+    lastSentAt: FieldValue.serverTimestamp(),
+    lastReminderAt: FieldValue.serverTimestamp(),
+    reminderCount: FieldValue.increment(1),
+    sendCount: FieldValue.increment(1),
+    lastReminderError: null,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  return "sent";
+}
+
+/** Recordatorio manual desde Offboarding a las encuestas pendientes que elija TH. */
+export const sendOffboardingReminders = onCall(
+  { region: "us-central1", timeoutSeconds: 300, secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2] },
+  async (request) => {
+    await assertHumanResources(normalizeEmail(request.auth?.token.email));
+    const ids = Array.isArray(request.data?.surveyIds) ?
+      [...new Set((request.data.surveyIds as unknown[]).map(String))] : [];
+    if (!ids.length) throw new HttpsError("invalid-argument", "No hay encuestas pendientes para recordar.");
+    if (ids.length > MAX_REMINDERS_PER_RUN) {
+      throw new HttpsError("invalid-argument", `Máximo ${MAX_REMINDERS_PER_RUN} recordatorios por envío. Usa los filtros para dividirlos.`);
+    }
+    const graphToken = await getGraphToken();
+    const results: Array<{ surveyId: string; outcome: ReminderOutcome }> = [];
+    for (const surveyId of ids) {
+      try {
+        results.push({ surveyId, outcome: await remindSurvey(surveyId, { graphToken }) });
+      } catch (err) {
+        logger.error("OFFBOARDING_REMINDER_MANUAL_ERROR", { surveyId, err: String(err) });
+        results.push({ surveyId, outcome: "error" });
+      }
+    }
+    logger.info("OFFBOARDING_REMINDERS_MANUAL", {
+      requested: ids.length, sent: results.filter((r) => r.outcome === "sent").length,
+    });
+    return { results };
+  },
+);
+
+/**
+ * Recordatorio automático diario: a quien sigue sin responder X días después
+ * del último correo, hasta el máximo de recordatorios configurado. Solo corre
+ * si TH lo activó en Offboarding → Configuración.
+ */
+export const scheduledOffboardingReminders = onSchedule(
+  {
+    schedule: "0 10 * * *",
+    timeZone: "America/Bogota",
+    region: "us-central1",
+    timeoutSeconds: 540,
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
+  },
+  async () => {
+    const settings = await getSettings();
+    if (!settings.remindersEnabled) return;
+    const intervalMs = Math.max(1, settings.reminderIntervalDays ?? DEFAULT_REMINDER_INTERVAL_DAYS) * 86_400_000;
+    const maxReminders = Math.max(0, settings.maxReminders ?? DEFAULT_MAX_REMINDERS);
+    if (maxReminders === 0) return;
+
+    const pending = await getFirestore().collection(OFFBOARDING_PATHS.surveys).where("status", "==", "sent").get();
+    const due = pending.docs
+      .filter((doc) => {
+        const data = doc.data();
+        return Number(data.reminderCount ?? 0) < maxReminders && Date.now() - millis(data.lastSentAt) >= intervalMs;
+      })
+      .slice(0, MAX_REMINDERS_PER_RUN);
+    if (!due.length) return;
+
+    const graphToken = await getGraphToken();
+    const tally: Record<string, number> = {};
+    for (const doc of due) {
+      let outcome: ReminderOutcome;
+      try {
+        outcome = await remindSurvey(doc.id, { maxReminders, graphToken });
+      } catch (err) {
+        logger.error("OFFBOARDING_REMINDER_JOB_ERROR", { surveyId: doc.id, err: String(err) });
+        outcome = "error";
+      }
+      tally[outcome] = (tally[outcome] ?? 0) + 1;
+    }
+    logger.info("OFFBOARDING_REMINDERS_JOB", { due: due.length, ...tally });
   },
 );
