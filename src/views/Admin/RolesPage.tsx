@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Shield, Search, Loader2, Users,
-  Calculator, UserCog, Edit2, Check, X, UserCheck, UserX, Banknote, Crown, Mail,
+  Calculator, UserCog, Edit2, Check, X, UserCheck, UserX, Banknote, Crown, Mail, Eye, Building2,
 } from 'lucide-react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/config/firebase';
@@ -18,7 +18,9 @@ import { toast } from 'sonner';
 import { rolesService } from '@/services/rolesService';
 import { userService } from '@/services/userService';
 import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
+import { companyService } from '@/services/companyService';
 import type { PlatformUser, AppRole } from '@/models/types/AppRole';
+import type { Company } from '@/models/types/Company';
 import type { User, UserRole } from '@/models/types/User';
 import { ROLE_LABELS, ROLE_COLORS, ROLE_MODULES } from '@/models/types/AppRole';
 
@@ -39,6 +41,7 @@ function getModuleLabels(role: AppRole): string[] {
     '/exportador':       'Exportador',
     '/questionarios':    'Cuestionarios',
     '/contabilidad':     'Contabilidad',
+    '/contabilidad/informe': 'Informe tributario',
     '/archivo':          'Archivo',
     '/configuraciones':  'Configuraciones',
     '/configuraciones/empresas': 'Configuración de empresas',
@@ -77,6 +80,7 @@ const MODULE_LABELS: Record<string, string> = {
   '/exportador':       'Exportador',
   '/questionarios':    'Cuestionarios',
   '/contabilidad':     'Contabilidad',
+  '/contabilidad/informe': 'Informe tributario',
   '/archivo':          'Archivo',
   '/configuraciones':  'Configuraciones',
   '/configuraciones/empresas': 'Configuración de empresas',
@@ -88,6 +92,7 @@ const ROLE_ICON: Record<AppRole, React.ElementType> = {
   talento_humano: Users,
   contabilidad:   Calculator,
   financiera:     Banknote,
+  revisor_fiscal: Eye,
 };
 
 // color set per platform role (bg avatar, text avatar)
@@ -96,6 +101,7 @@ const AVATAR_COLORS: Record<AppRole, string> = {
   talento_humano: 'bg-green-100 text-green-600',
   contabilidad:   'bg-blue-100 text-blue-600',
   financiera:     'bg-emerald-100 text-emerald-600',
+  revisor_fiscal: 'bg-amber-100 text-amber-600',
 };
 
 const CARD_ACTIVE: Record<AppRole, string> = {
@@ -103,6 +109,7 @@ const CARD_ACTIVE: Record<AppRole, string> = {
   talento_humano: 'bg-green-50 border-green-300 ring-1 ring-green-300',
   contabilidad:   'bg-blue-50 border-blue-300 ring-1 ring-blue-300',
   financiera:     'bg-emerald-50 border-emerald-300 ring-1 ring-emerald-300',
+  revisor_fiscal: 'bg-amber-50 border-amber-300 ring-1 ring-amber-300',
 };
 
 const ICON_BG: Record<AppRole, string> = {
@@ -110,6 +117,7 @@ const ICON_BG: Record<AppRole, string> = {
   talento_humano: 'bg-green-100',
   contabilidad:   'bg-blue-100',
   financiera:     'bg-emerald-100',
+  revisor_fiscal: 'bg-amber-100',
 };
 
 const ICON_COLOR: Record<AppRole, string> = {
@@ -117,6 +125,7 @@ const ICON_COLOR: Record<AppRole, string> = {
   talento_humano: 'text-green-600',
   contabilidad:   'text-blue-600',
   financiera:     'text-emerald-600',
+  revisor_fiscal: 'text-amber-600',
 };
 
 const STAT_NUMBER: Record<AppRole, string> = {
@@ -124,6 +133,7 @@ const STAT_NUMBER: Record<AppRole, string> = {
   talento_humano: 'text-green-600',
   contabilidad:   'text-blue-600',
   financiera:     'text-emerald-600',
+  revisor_fiscal: 'text-amber-600',
 };
 
 // ── row type ─────────────────────────────────────────────────────────────────
@@ -158,7 +168,9 @@ export const RolesPage = () => {
   const [selPlatform,  setSelPlatform]  = useState<AppRole>('talento_humano');
   const [selTeamRole,  setSelTeamRole]  = useState<UserRole>('colaborador');
   const [noPlatform,   setNoPlatform]   = useState(false);
+  const [selCompanies, setSelCompanies] = useState<string[]>([]);
   const [saving,       setSaving]       = useState(false);
+  const [companies,    setCompanies]    = useState<Company[]>([]);
 
   // Bulk email dialog
   const [emailDialogOpen,  setEmailDialogOpen]  = useState(false);
@@ -168,14 +180,16 @@ export const RolesPage = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [employees, sys, roles] = await Promise.all([
+      const [employees, sys, roles, allCompanies] = await Promise.all([
         getEmployeeDirectoryUsers(),
         userService.getAll(),
         rolesService.getAll(),
+        companyService.getAll(),
       ]);
       setEmployeeUsers(employees);
       setSysUsers(sys);
       setRoleUsers(roles);
+      setCompanies(allCompanies);
     } catch (e: any) {
       toast.error('Error al cargar', { description: e.message });
     } finally {
@@ -262,7 +276,7 @@ export const RolesPage = () => {
   }, [employeeUsers, sysUsers, roleUsers]);
 
   const stats = useMemo(() => {
-    const counts: Record<AppRole, number> = { admin: 0, talento_humano: 0, contabilidad: 0, financiera: 0 };
+    const counts: Record<AppRole, number> = { admin: 0, talento_humano: 0, contabilidad: 0, financiera: 0, revisor_fiscal: 0 };
     roleUsers.forEach(u => { if (counts[u.role] !== undefined) counts[u.role]++; });
     const leaders  = sysUsers.filter(u => u.role === 'lider').length;
     const noRole   = rows.filter(r => !r.platformUser).length;
@@ -286,11 +300,26 @@ export const RolesPage = () => {
     setSelPlatform(row.platformUser?.role ?? 'talento_humano');
     setSelTeamRole(row.userRole ?? 'colaborador');
     setNoPlatform(!row.platformUser);
+    setSelCompanies(row.platformUser?.companyIds ?? []);
     setDialogOpen(true);
+  };
+
+  const needsCompanies = !noPlatform && selPlatform === 'revisor_fiscal';
+
+  // Las reglas filtran por companyId: se agregan los registros duplicados de una
+  // misma empresa (mismo NIT) para que sus obligaciones también sean visibles.
+  const withSameNitCompanies = (ids: string[]) => {
+    const nitOf = (nit?: string) => (nit ?? '').replace(/[^0-9]/g, '');
+    const nits = new Set(companies.filter(c => ids.includes(c.id)).map(c => nitOf(c.nit)).filter(Boolean));
+    return companies.filter(c => ids.includes(c.id) || nits.has(nitOf(c.nit))).map(c => c.id);
   };
 
   const handleSave = async () => {
     if (!target) return;
+    if (needsCompanies && selCompanies.length === 0) {
+      toast.error('Selecciona al menos una empresa para el revisor fiscal');
+      return;
+    }
     setSaving(true);
     try {
       const hadAccess     = !!target.platformUser;
@@ -304,6 +333,7 @@ export const RolesPage = () => {
           target.email.toLowerCase().trim(),
           target.fullName,
           selPlatform,
+          needsCompanies ? withSameNitCompanies(selCompanies) : [],
         );
       }
 
@@ -404,7 +434,7 @@ export const RolesPage = () => {
       </div>
 
       {/* Stat cards — platform roles */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
         {(Object.entries(ROLE_LABELS) as [AppRole, string][]).map(([role, label]) => {
           const Icon = ROLE_ICON[role];
           return (
@@ -706,6 +736,33 @@ export const RolesPage = () => {
                         ))}
                       </div>
                     </div>
+
+                    {/* Empresas visibles — solo revisor fiscal */}
+                    {needsCompanies && (
+                      <div className="space-y-1.5 mt-2">
+                        <Label className="text-xs text-gray-500 flex items-center gap-1">
+                          <Building2 className="w-3 h-3 text-amber-500" /> Empresas que puede ver (solo lectura)
+                        </Label>
+                        <div className="border border-gray-200 rounded-lg p-2 max-h-40 overflow-y-auto space-y-1">
+                          {companies
+                            .filter(c => c.active && c.activeContabilidad)
+                            .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+                            .map(c => (
+                              <label key={c.id} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  className="accent-amber-600"
+                                  checked={selCompanies.includes(c.id)}
+                                  onChange={e => setSelCompanies(prev =>
+                                    e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id)
+                                  )}
+                                />
+                                <span className="text-xs text-gray-700 flex-1 truncate">{c.name}</span>
+                              </label>
+                            ))}
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

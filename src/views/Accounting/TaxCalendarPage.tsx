@@ -347,14 +347,22 @@ export const TaxCalendarPage = () => {
   const load = async () => {
     setLoading(true);
     try {
+      const me = user?.email ? await rolesService.getByEmail(user.email) : null;
+      // Revisor fiscal: las reglas solo le dejan leer sus empresas asignadas, así
+      // que las consultas deben pedir únicamente esas.
+      const scopeIds = me?.role === 'revisor_fiscal' ? me.companyIds ?? [] : null;
       const [data, allRoleUsers, allCompanies, companyTaxSettings] = await Promise.all([
-        taxCalendarService.getAll(),
-        rolesService.getAll(),
+        scopeIds ? taxCalendarService.getByCompanyIds(scopeIds) : taxCalendarService.getAll(),
+        scopeIds ? Promise.resolve([]) : rolesService.getAll(),
         companyService.getAll(),
-        taxCalendarService.getCompanyTaxSettings(),
+        taxCalendarService.getCompanyTaxSettings(scopeIds ?? undefined),
       ]);
+      const visibleCompanies = scopeIds
+        ? allCompanies.filter(c => scopeIds.includes(c.id))
+        : allCompanies;
+      if (me) { setCurrentRole(me.role); setCurrentUserName(me.name || user?.email || ''); }
       setObligations(data);
-      setFirestoreCompanies(allCompanies.map(company => ({
+      setFirestoreCompanies(visibleCompanies.map(company => ({
         ...company,
         excludedTaxTypes: companyTaxSettings[company.id] ?? [],
       })));
@@ -377,7 +385,8 @@ export const TaxCalendarPage = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  // Espera el email: sin él no se sabe si el usuario está acotado a ciertas empresas.
+  useEffect(() => { if (user?.email) load(); }, [user?.email]);
 
   useEffect(() => {
     if (!user?.email) return;
@@ -399,10 +408,12 @@ export const TaxCalendarPage = () => {
 
   const isFinanciera = currentRole === 'financiera';
   const isAdmin      = currentRole === 'admin';
+  // Revisor fiscal: consulta sin modificar nada (estado, valores, fechas ni adjuntos).
+  const isReadOnly   = currentRole === 'revisor_fiscal';
   const canMarkPaid  = isFinanciera || isAdmin;
-  const canMarkPresented = !isFinanciera;
+  const canMarkPresented = !isFinanciera && !isReadOnly;
   // null = rol aún no cargado → mostrar stepper por defecto
-  const canStepper   = currentRole === null || currentRole !== 'financiera';
+  const canStepper   = currentRole === null || (currentRole !== 'financiera' && !isReadOnly);
 
   // ── Edit dialog helpers ──────────────────────────────────────────────────────
 
@@ -1200,15 +1211,15 @@ export const TaxCalendarPage = () => {
           >
             <Download className="w-3.5 h-3.5" /> Exportar Excel
           </button>
-          <button
+          {!isReadOnly && <button
             onClick={handleExportAudit}
             disabled={calendarCompanies.filter(c => c.active && c.activeContabilidad).length === 0}
             title="Todos los vencimientos de todas las empresas, sin filtros — para auditar periodicidad"
             className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Download className="w-3.5 h-3.5" /> Auditoría (todas las empresas)
-          </button>
-          {!isFinanciera && (
+          </button>}
+          {!isFinanciera && !isReadOnly && (
             <div className="flex items-center gap-1">
               <label className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer">
                 <Upload className="w-3.5 h-3.5" /> Actualizar desde Excel
@@ -1217,7 +1228,7 @@ export const TaxCalendarPage = () => {
               <TaxImportInstructions />
             </div>
           )}
-          {!isFinanciera && (
+          {!isFinanciera && !isReadOnly && (
             <Button onClick={openNew} className="bg-[#008C3C] hover:bg-[#006C2F] text-white">
               <Plus className="w-4 h-4 mr-2" /> Nuevo vencimiento
             </Button>
@@ -1359,13 +1370,15 @@ export const TaxCalendarPage = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => setManagingTaxTypes(company)}
-                      title="Gestionar tipos de obligación"
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10 transition-colors"
-                    >
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                    </button>
+                    {!isReadOnly && (
+                      <button
+                        onClick={() => setManagingTaxTypes(company)}
+                        title="Gestionar tipos de obligación"
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-[#008C3C] hover:bg-[#008C3C]/10 transition-colors"
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   {viewMode === 'paid' ? (
                     (() => {
                       const doneCount = obligations.filter(o =>
@@ -1418,6 +1431,8 @@ export const TaxCalendarPage = () => {
                       const handleDianClick = () => {
                         if (matched) {
                           openEdit(matched, true);
+                        } else if (isReadOnly) {
+                          toast.info('Este vencimiento aún no tiene registro de contabilidad');
                         } else {
                           setIsNew(true);
                           setQuickEditMode(true);
@@ -1469,6 +1484,7 @@ export const TaxCalendarPage = () => {
                         return (
                           <button
                             type="button"
+                            disabled={isReadOnly}
                             onClick={e => {
                               e.stopPropagation();
                               if (!matched) { toast.error('Registra primero el estado del vencimiento'); return; }
@@ -1560,7 +1576,7 @@ export const TaxCalendarPage = () => {
           <DialogHeader className="px-5 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
             <DialogTitle className="text-base flex items-center gap-2">
               {isNew ? <Plus className="w-4 h-4 text-[#008C3C]" /> : <Edit2 className="w-4 h-4 text-[#008C3C]" />}
-              {isNew ? 'Nuevo vencimiento' : quickEditMode ? 'Actualizar estado' : 'Editar obligación'}
+              {isReadOnly ? 'Detalle de la obligación' : isNew ? 'Nuevo vencimiento' : quickEditMode ? 'Actualizar estado' : 'Editar obligación'}
             </DialogTitle>
             {quickEditMode && editObl && editObl.id !== '__new__' && (
               <p className="text-xs text-gray-400 mt-0.5 truncate">
@@ -1668,7 +1684,7 @@ export const TaxCalendarPage = () => {
               </div>
 
               {/* Fecha editable en quickEdit — solo contabilidad/admin */}
-              {quickEditMode && !isFinanciera && (
+              {quickEditMode && !isFinanciera && !isReadOnly && (
                 <div className="space-y-1">
                   <Label className="text-xs text-gray-500">Fecha de vencimiento</Label>
                   <Input
@@ -1977,6 +1993,7 @@ export const TaxCalendarPage = () => {
                       onChange={e => setFormProjected(e.target.value)}
                       placeholder="Opcional"
                       className="text-sm"
+                      disabled={isReadOnly}
                     />
                   </div>
                   <div className="space-y-1">
@@ -1998,6 +2015,7 @@ export const TaxCalendarPage = () => {
                       onChange={e => setFormPaid(e.target.value)}
                       placeholder="0"
                       className="text-sm"
+                      disabled={isReadOnly}
                     />
                   </div>
                 </div>
@@ -2009,6 +2027,7 @@ export const TaxCalendarPage = () => {
                     placeholder="Notas, número de pago, referencias..."
                     rows={2}
                     className="resize-none text-sm"
+                    disabled={isReadOnly}
                   />
                 </div>
               </div>
@@ -2058,7 +2077,7 @@ export const TaxCalendarPage = () => {
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
                     <Paperclip className="w-3 h-3" /> Documentos adjuntos ({attachments.length}/5)
                   </p>
-                  <label className={`flex items-center gap-1 text-xs cursor-pointer px-2.5 py-1 rounded-lg border transition-colors
+                  {!isReadOnly && <label className={`flex items-center gap-1 text-xs cursor-pointer px-2.5 py-1 rounded-lg border transition-colors
                     ${uploading || attachments.length >= 5
                       ? 'opacity-40 pointer-events-none border-gray-200 text-gray-400'
                       : 'border-[#008C3C] text-[#008C3C] hover:bg-[#008C3C]/5'}`}>
@@ -2067,11 +2086,11 @@ export const TaxCalendarPage = () => {
                     <input ref={attachFileRef} type="file" multiple className="hidden"
                       accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
                       onChange={handleAttachFile} disabled={uploading || attachments.length >= 5} />
-                  </label>
+                  </label>}
                 </div>
 
                 {/* Zona de arrastre */}
-                <label
+                {!isReadOnly && <label
                   onDragEnter={e => { e.preventDefault(); if (!uploading && attachments.length < 5) setIsDragging(true); }}
                   onDragOver={e => { e.preventDefault(); }}
                   onDragLeave={e => { e.preventDefault(); setIsDragging(false); }}
@@ -2104,7 +2123,7 @@ export const TaxCalendarPage = () => {
                     {isDragging ? 'Suelta el archivo aquí' : 'Arrastra un archivo o haz clic para subir'}
                   </p>
                   <p className="text-[10px] text-gray-300">PDF, Word, Excel, imágenes · máx 20 MB</p>
-                </label>
+                </label>}
 
                 {uploading && (
                   <div className="mb-2 space-y-1">
@@ -2129,10 +2148,12 @@ export const TaxCalendarPage = () => {
                           className="w-6 h-6 flex items-center justify-center rounded text-gray-300 hover:text-blue-500 transition-colors">
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
-                        <button onClick={() => handleDeleteAttachment(att)}
-                          className="w-6 h-6 flex items-center justify-center rounded text-gray-200 hover:text-red-500 transition-colors">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!isReadOnly && (
+                          <button onClick={() => handleDeleteAttachment(att)}
+                            className="w-6 h-6 flex items-center justify-center rounded text-gray-200 hover:text-red-500 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2147,7 +2168,11 @@ export const TaxCalendarPage = () => {
 
           {editObl && (
             <div className="flex gap-2 px-5 py-4 border-t border-gray-100 flex-shrink-0 bg-white">
-              {!isNew && quickEditMode ? (
+              {isReadOnly ? (
+                <Button variant="outline" className="flex-1" onClick={closeDialog}>
+                  Cerrar
+                </Button>
+              ) : !isNew && quickEditMode ? (
                 // Obligación existente abierta desde calendario DIAN
                 <>
                   <Button variant="outline" className="flex-1" onClick={closeDialog} disabled={saving}>

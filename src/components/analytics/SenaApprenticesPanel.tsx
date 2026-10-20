@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import * as XLSX from 'xlsx';
 import { Download, GraduationCap, Search } from 'lucide-react';
 import { db } from '@/config/firebase';
 import { FIRESTORE_COLLECTIONS } from '@/config/firestoreCollections';
@@ -61,12 +60,16 @@ const countBy = (rows: ApprenticeRow[], key: (row: ApprenticeRow) => string) => 
   return [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'));
 };
 
-export function SenaApprenticesPanel({ employments, thCompanies, filterCompany }: {
+type EmployeeName = { fullName: string; documentNumber: string };
+
+export function SenaApprenticesPanel({ employments, thCompanies, filterCompany, knownNames }: {
   employments: EmploymentRelationship[];
   thCompanies: Company[];
   filterCompany: string;
+  /** Nombres ya descargados por la pantalla (por id de expediente); evita una consulta por aprendiz. */
+  knownNames?: Map<string, EmployeeName>;
 }) {
-  const [names, setNames] = useState<Map<string, { fullName: string; documentNumber: string }>>(new Map());
+  const [names, setNames] = useState<Map<string, EmployeeName>>(new Map());
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState<Stage | 'all'>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
@@ -85,7 +88,8 @@ export function SenaApprenticesPanel({ employments, thCompanies, filterCompany }
   // Las relaciones no traen el nombre: se lee solo el expediente de cada aprendiz.
   useEffect(() => {
     const requested = requestedIds.current;
-    const missing = [...new Set(relations.map(r => r.employeeId))].filter(id => id && !requested.has(id));
+    const missing = [...new Set(relations.map(r => r.employeeId))]
+      .filter(id => id && !requested.has(id) && !knownNames?.has(id));
     if (!missing.length) return;
     missing.forEach(id => requested.add(id));
     Promise.all(missing.map(async id => {
@@ -99,20 +103,21 @@ export function SenaApprenticesPanel({ employments, thCompanies, filterCompany }
         missing.forEach(id => requested.delete(id));
         console.error('Error cargando aprendices:', error);
       });
-  }, [relations]);
+  }, [relations, knownNames]);
 
+  const nameOf = (id: string) => knownNames?.get(id) ?? names.get(id);
   const rows: ApprenticeRow[] = useMemo(() => relations.map(r => ({
     employmentId: r.id,
     employeeId: r.employeeId,
-    fullName: names.get(r.employeeId)?.fullName ?? 'Cargando…',
-    documentNumber: names.get(r.employeeId)?.documentNumber ?? '',
+    fullName: nameOf(r.employeeId)?.fullName ?? 'Cargando…',
+    documentNumber: nameOf(r.employeeId)?.documentNumber ?? '',
     company: thCompanies.find(c => (r.companyId && r.companyId === c.id)
       || [c.name, ...(c.aliases ?? [])].map(normalize).includes(normalize(r.companyName)))?.name ?? r.companyName ?? '—',
     account: analyticalAccountOf(r) || 'Sin cuenta analítica',
     stage: stageOf(r.contractType),
     position: r.position || '',
     startDate: toDate(r.startDate),
-  })).sort((a, b) => a.fullName.localeCompare(b.fullName, 'es')), [relations, names, thCompanies]);
+  })).sort((a, b) => a.fullName.localeCompare(b.fullName, 'es')), [relations, names, knownNames, thCompanies]);
 
   const byStage = countBy(rows, row => row.stage);
   const stageCount = (stage: Stage) => byStage.find(([name]) => name === stage)?.[1] ?? 0;
@@ -128,7 +133,9 @@ export function SenaApprenticesPanel({ employments, thCompanies, filterCompany }
     return !term || [row.fullName, row.documentNumber, row.company, row.account].some(value => normalize(value).includes(term));
   });
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    // Carga diferida: xlsx pesa ~430 KB y este panel está en la pantalla de inicio.
+    const XLSX = await import('xlsx');
     const sheet = XLSX.utils.json_to_sheet(visibleRows.map(row => ({
       Nombre: row.fullName,
       Documento: row.documentNumber,

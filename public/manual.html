@@ -70,6 +70,7 @@ code,.path{font:500 .82em var(--mono);background:var(--accent-soft);color:var(--
 .r-th{background:var(--accent-soft);color:var(--accent-ink)}
 .r-cont{background:var(--blue-soft);color:var(--blue)}
 .r-fin{background:var(--amber-soft);color:var(--amber)}
+.r-rf{background:var(--amber-soft);color:var(--amber);border-color:var(--amber)}
 p{margin:0 0 12px;max-width:68ch}
 h5{font:600 .95rem var(--body);margin:18px 0 6px}
 ul,ol.steps{margin:0 0 12px;padding-left:1.3em;max-width:68ch}
@@ -141,6 +142,7 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
   <p class="eyebrow">Inteegrados · Gestión de Talento Humano</p>
   <h1>Manual de usuario</h1>
   <p class="lede">Cómo usar cada módulo de la plataforma: desde consultar la dotación de una empresa hasta enviar un comunicado o llevar un vencimiento tributario hasta el pago. La Parte 1 cubre el trabajo del día a día; la Parte 2, las tareas que solo hace un administrador.</p>
+  <p class="note tip" id="role-line" hidden></p>
 </header>
 
 <div class="part" id="p0">
@@ -161,23 +163,24 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
     <div class="note">Si ingresas y no ves ningún módulo, tu usuario no tiene un rol asignado. Pide a un administrador que te lo asigne en <a href="#rolesacc">Roles y Accesos</a>.</div>
   </section>
 
-  <section class="mod" id="roles" data-k="roles permisos administrador talento humano contabilidad financiera">
+  <section class="mod" id="roles" data-roles="admin" data-k="roles permisos administrador talento humano contabilidad financiera revisor fiscal">
     <h3>Qué ve cada rol</h3>
     <p>Cada persona tiene un único rol de plataforma. El menú lateral solo muestra los módulos que ese rol puede abrir.</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>Módulo</th><th>Administrador</th><th>Talento Humano</th><th>Contabilidad</th><th>Financiera</th></tr></thead>
+      <thead><tr><th>Módulo</th><th>Administrador</th><th>Talento Humano</th><th>Contabilidad</th><th>Financiera</th><th>Revisor Fiscal</th></tr></thead>
       <tbody>
-        <tr><td>Analítica de TH, Expedientes, Offboarding, Empresas, Cuentas analíticas</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
-        <tr><td>Correos, Boletines, WhatsApp, Notificaciones</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
-        <tr><td>Estadísticas de campañas y de WhatsApp</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
-        <tr><td>Cuestionarios, Exportador</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
-        <tr><td>Estadísticas de envíos de cuestionarios</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
-        <tr><td>Calendario e Informe Tributario, Mensajes</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c yes">Sí</td><td class="c yes">Sí¹</td></tr>
-        <tr><td>Configuración de empresas</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
-        <tr><td>Usuarios y accesos, Roles y Accesos</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Analítica de TH, Expedientes, Offboarding, Empresas, Cuentas analíticas</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Correos, Boletines, WhatsApp, Notificaciones</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Estadísticas de campañas y de WhatsApp</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Cuestionarios, Exportador</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Estadísticas de envíos de cuestionarios</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Calendario e Informe Tributario</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c yes">Sí</td><td class="c yes">Sí¹</td><td class="c yes">Sí²</td></tr>
+        <tr><td>Mensajes de Contabilidad</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td></tr>
+        <tr><td>Configuración de empresas</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td></tr>
+        <tr><td>Usuarios y accesos, Roles y Accesos</td><td class="c yes">Sí</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td><td class="c no">—</td></tr>
       </tbody>
     </table></div>
-    <p style="font-size:.88rem;color:var(--muted)">¹ Financiera ve el proceso tributario pero no lo avanza: su paso es registrar el pago.</p>
+    <p style="font-size:.88rem;color:var(--muted)">¹ Financiera ve el proceso tributario pero no lo avanza: su paso es registrar el pago.<br>² Revisor Fiscal solo consulta, y solo las empresas que le asigna un administrador.</p>
     <p>La información sensible del expediente (salario, datos bancarios, seguridad social) solo la ven Administrador y Talento Humano.</p>
   </section>
 
@@ -454,7 +457,7 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
 
   <section class="mod" id="asistente" data-k="asistente ia chatbot acompañante ayuda preguntas redactar encuesta cuestionario talento humano buenas practicas">
     <h3>Asistente del manual</h3>
-    <div class="meta"><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span></div>
+    <div class="meta"><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span><span class="role r-rf">Revisor Fiscal</span></div>
     <p>El botón verde de la esquina inferior derecha abre un asistente que te ayuda con tres tipos de preguntas: cómo usar la plataforma, cómo redactar preguntas para tus cuestionarios y encuestas, y dudas generales de Talento Humano. Está disponible en todas las pantallas y conserva la conversación mientras cambias de módulo.</p>
     <ul>
       <li>Sabe en qué módulo estás y te sugiere preguntas frecuentes de ese módulo; haz clic en una o escribe la tuya.</li>
@@ -468,8 +471,20 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
 
   <section class="mod" id="calendario" data-k="calendario tributario vencimientos impuestos dian iva obligación presentado pagado financiera">
     <h3>Calendario Tributario</h3>
-    <div class="meta"><span class="path">/contabilidad</span><span class="role r-admin">Administrador</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span></div>
+    <div class="meta"><span class="path">/contabilidad</span><span class="role r-admin">Administrador</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span><span class="role r-rf">Revisor Fiscal</span></div>
     <p>Lleva cada obligación tributaria de cada empresa desde que se inicia hasta que se paga. Las vistas <span class="ui">Próximos</span>, <span class="ui">Vencidos</span> y <span class="ui">Al día</span> muestran lo urgente primero.</p>
+    <div data-roles="revisor_fiscal">
+      <h5>Consulta como Revisor Fiscal</h5>
+      <ul>
+        <li>Solo ves las empresas que te asignó un administrador.</li>
+        <li>Abre un vencimiento para ver su estado, los pasos del proceso con su responsable, las fechas de presentación y pago, los valores y el <span class="ui">Historial de cambios</span>.</li>
+        <li>En <span class="ui">Documentos adjuntos</span> puedes abrir y descargar las declaraciones y soportes.</li>
+        <li><span class="ui">Exportar Excel</span> descarga la vista actual de tus empresas.</li>
+        <li>El acceso es de solo lectura: no puedes crear vencimientos, cambiar estados, valores o fechas, ni subir o borrar archivos. Si encuentras algo por corregir, avísale a Contabilidad.</li>
+      </ul>
+      <p>Un vencimiento que Contabilidad aún no ha registrado se ve en la lista, pero no se puede abrir.</p>
+    </div>
+    <div data-roles="admin contabilidad financiera">
     <h5>Crear un vencimiento</h5>
     <ol class="steps">
       <li>Pulsa <span class="ui">Nuevo vencimiento</span>.</li>
@@ -486,11 +501,12 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
       <li><span class="ui">Historial de cambios</span> muestra quién hizo cada paso y cuándo.</li>
     </ul>
     <p><span class="ui">Auditoría (todas las empresas)</span> lista todos los vencimientos sin filtros para revisar la periodicidad. <span class="ui">Exportar Excel</span> descarga la vista actual.</p>
+    </div>
   </section>
 
   <section class="mod" id="informe" data-k="informe tributario completitud presentadas pagadas">
     <h3>Informe Tributario</h3>
-    <div class="meta"><span class="path">/contabilidad/informe</span><span class="role r-admin">Administrador</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span></div>
+    <div class="meta"><span class="path">/contabilidad/informe</span><span class="role r-admin">Administrador</span><span class="role r-cont">Contabilidad</span><span class="role r-fin">Financiera</span><span class="role r-rf">Revisor Fiscal</span></div>
     <p>Resumen del cumplimiento por empresa y mes: obligaciones presentadas, pagadas, en proceso, sin iniciar y que no aplican, con su porcentaje de completitud. Filtra por mes, empresa, responsabilidades y estado, y exporta a Excel.</p>
   </section>
 
@@ -530,7 +546,8 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
     <div class="meta"><span class="path">/roles</span><span class="role r-admin">Administrador</span></div>
     <p>Aquí se decide quién entra a la plataforma y con qué rol.</p>
     <ul>
-      <li><b>Dar acceso:</b> busca a la persona, pulsa <span class="ui">Editar</span> y asígnale un rol de plataforma (Administrador, Talento Humano, Contabilidad o Financiera). La tabla de <a href="#roles">Qué ve cada rol</a> resume qué abre cada uno.</li>
+      <li><b>Dar acceso:</b> busca a la persona, pulsa <span class="ui">Editar</span> y asígnale un rol de plataforma (Administrador, Talento Humano, Contabilidad, Financiera o Revisor Fiscal). La tabla de <a href="#roles">Qué ve cada rol</a> resume qué abre cada uno.</li>
+      <li><b>Revisor Fiscal:</b> al elegir este rol aparece <span class="ui">Empresas que puede ver</span>; marca al menos una. Solo verá el calendario y el informe tributario de esas empresas, sin poder modificar nada.</li>
       <li><b>Cargo en el equipo:</b> marca a los líderes de equipo; aparecen en <span class="ui">Líderes de equipo</span>.</li>
       <li><span class="ui">Reenviar correo de bienvenida</span> si la persona no recibió o perdió el primero.</li>
       <li><span class="ui">Quitar acceso</span> cuando alguien deja el cargo o se retira. Su expediente se conserva.</li>
@@ -541,7 +558,7 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
 
   <section class="mod" id="config-empresas" data-k="configuración empresas alias nit módulos catálogo logo regional">
     <h3>Configuración de empresas</h3>
-    <div class="meta"><span class="path">/configuraciones/empresas</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span></div>
+    <div class="meta"><span class="path">/configuraciones/empresas</span><span class="role r-admin">Administrador</span><span class="role r-th">Talento Humano</span><span class="role r-cont">Contabilidad</span></div>
     <p>Catálogo maestro de empresas. Aquí se configura cada empresa; la dotación y la nómina se consultan en <a href="#empresas">Empresas</a>.</p>
     <ol class="steps">
       <li>Pulsa <span class="ui">Nueva empresa</span> e ingresa razón social y NIT (obligatorios), correo, teléfono, dirección, ubicación principal, regional y URL del logo.</li>
@@ -575,13 +592,16 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
       <tbody>
         <tr><td>No me llega el código de ingreso</td><td>Revisa spam y correo no deseado. Espera un minuto y pide otro; cada código vence a los 10 minutos.</td></tr>
         <tr><td>Entro pero no veo módulos</td><td>No tienes rol asignado. Un administrador lo asigna en Roles y Accesos.</td></tr>
-        <tr><td>Una empresa muestra menos personas de las esperadas</td><td>Revisa los alias en Configuración de empresas y que las relaciones laborales tengan el nombre de empresa correcto.</td></tr>
-        <tr><td>Muchas alertas en una empresa</td><td>Abre la empresa → Calidad de datos, y completa cuenta analítica, cargo, correo y teléfono corporativo (a mano o con Actualización parcial).</td></tr>
+        <tr data-roles="admin talento_humano"><td>Una empresa muestra menos personas de las esperadas</td><td>Revisa los alias en Configuración de empresas y que las relaciones laborales tengan el nombre de empresa correcto.</td></tr>
+        <tr data-roles="admin talento_humano"><td>Muchas alertas en una empresa</td><td>Abre la empresa → Calidad de datos, y completa cuenta analítica, cargo, correo y teléfono corporativo (a mano o con Actualización parcial).</td></tr>
         <tr><td>Las cifras no cambiaron tras editar</td><td>Pulsa Actualizar o recarga la página.</td></tr>
-        <tr><td>Un WhatsApp aparece “Aceptado” pero no “Entregado”</td><td>El teléfono puede estar apagado o no tener WhatsApp. Revisa la pestaña Fallidos en las estadísticas.</td></tr>
-        <tr><td>No puedo editar un cuestionario o no se guardan los cambios</td><td>Talento Humano y Administrador pueden editar cualquier cuestionario. Recarga la página e intenta de nuevo; si al guardar aparece un mensaje de error, envíalo a un administrador de la plataforma.</td></tr>
-        <tr><td>Quiero cambiar el orden de las preguntas</td><td>Edita el cuestionario y, en el paso Preguntas, arrastra desde el ícono de puntos o usa las flechas ↑ ↓. Luego pulsa Guardar Cambios.</td></tr>
-        <tr><td>No puedo retroceder un paso tributario</td><td>Solo un administrador puede revertir el proceso.</td></tr>
+        <tr data-roles="admin talento_humano"><td>Un WhatsApp aparece “Aceptado” pero no “Entregado”</td><td>El teléfono puede estar apagado o no tener WhatsApp. Revisa la pestaña Fallidos en las estadísticas.</td></tr>
+        <tr data-roles="admin talento_humano"><td>No puedo editar un cuestionario o no se guardan los cambios</td><td>Talento Humano y Administrador pueden editar cualquier cuestionario. Recarga la página e intenta de nuevo; si al guardar aparece un mensaje de error, envíalo a un administrador de la plataforma.</td></tr>
+        <tr data-roles="admin talento_humano"><td>Quiero cambiar el orden de las preguntas</td><td>Edita el cuestionario y, en el paso Preguntas, arrastra desde el ícono de puntos o usa las flechas ↑ ↓. Luego pulsa Guardar Cambios.</td></tr>
+        <tr data-roles="admin contabilidad financiera"><td>No puedo retroceder un paso tributario</td><td>Solo un administrador puede revertir el proceso.</td></tr>
+        <tr data-roles="revisor_fiscal"><td>No veo una empresa que debería revisar</td><td>Pide a un administrador que la agregue a tus empresas en Roles y Accesos.</td></tr>
+        <tr data-roles="revisor_fiscal"><td>Un dato tributario está mal</td><td>Tu acceso es de solo lectura. Avísale a Contabilidad para que lo corrija.</td></tr>
+        <tr data-roles="revisor_fiscal"><td>Al cambiar la dirección aparece “No tienes acceso”</td><td>Esa sección no está incluida en tu rol. Usa <span class="ui">Volver a mi panel</span>.</td></tr>
       </tbody>
     </table></div>
   </section>
@@ -594,6 +614,40 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
 </div>
 
 <script>
+// Filtro por rol: la app abre /manual.html?rol=<rol>. Sin rol (o admin) se ve todo.
+// Cada sección toma sus roles de data-roles o, si no tiene, de sus etiquetas .role;
+// sin ninguna de las dos es general. Es solo presentación: el archivo es público.
+(function(){
+  var rol=new URLSearchParams(location.search).get('rol');
+  if(!rol||rol==='admin')return;
+  var LABELS={talento_humano:'Talento Humano',contabilidad:'Contabilidad',financiera:'Financiera',revisor_fiscal:'Revisor Fiscal'};
+  var CLASS_ROLE={'r-admin':'admin','r-th':'talento_humano','r-cont':'contabilidad','r-fin':'financiera','r-rf':'revisor_fiscal'};
+  var rolesOf=function(el){
+    if(el.dataset.roles)return el.dataset.roles.split(/\s+/);
+    if(!el.matches('section.mod'))return null;
+    var tags=[].slice.call(el.querySelectorAll('.meta .role'));
+    if(!tags.length)return null;
+    return tags.map(function(t){for(var c in CLASS_ROLE)if(t.classList.contains(c))return CLASS_ROLE[c];});
+  };
+  [].slice.call(document.querySelectorAll('section.mod,[data-roles]')).forEach(function(el){
+    var roles=rolesOf(el);
+    if(roles&&roles.indexOf(rol)===-1)el.remove();
+  });
+  // Índice, enlaces internos y partes que quedaron sin contenido.
+  [].slice.call(document.querySelectorAll('a[href^="#"]')).forEach(function(a){
+    if(document.querySelector(a.getAttribute('href')))return;
+    if(a.closest('.toc'))a.closest('li').remove();else a.replaceWith(document.createTextNode(a.textContent));
+  });
+  [].slice.call(document.querySelectorAll('.toc ol')).forEach(function(ol){
+    if(!ol.children.length){var h=ol.previousElementSibling;if(h&&h.tagName==='H4')h.remove();ol.remove();}
+  });
+  [].slice.call(document.querySelectorAll('.part')).forEach(function(p){
+    if(!p.querySelector('section.mod')&&!p.querySelector('#empty'))p.remove();
+  });
+  var line=document.getElementById('role-line');
+  line.textContent='Este manual muestra solo los módulos de tu rol: '+(LABELS[rol]||rol)+'.';
+  line.hidden=false;
+})();
 (function(){
   var q=document.getElementById('q'), mods=[].slice.call(document.querySelectorAll('section.mod')),
       links=[].slice.call(document.querySelectorAll('.toc a')), empty=document.getElementById('empty');
@@ -605,7 +659,7 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted)}
     links.forEach(function(a){var s=document.querySelector(a.getAttribute('href'));a.classList.toggle('dim',!!(s&&s.hidden));});
     document.querySelectorAll('.part').forEach(function(p){p.hidden=!p.querySelector('section.mod:not([hidden])');});
     empty.style.display=shown?'none':'block';
-    if(!shown)document.getElementById('p2').hidden=false;
+    if(!shown)empty.closest('.part').hidden=false;
   });
 })();
 </script>

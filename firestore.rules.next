@@ -29,15 +29,31 @@ service cloud.firestore {
       return hasRole(['admin', 'financiera']);
     }
 
+    // Revisor fiscal: solo lectura, y solo de las empresas en companyIds de su
+    // documento de rol (lo asigna un admin). Nunca escribe.
+    function isTaxReviewer() {
+      return hasRole(['revisor_fiscal']);
+    }
+
+    function reviewerCompanies() {
+      return roleDoc().data.get('companyIds', []);
+    }
+
+    function reviewerCanRead(companyId) {
+      return isTaxReviewer() && companyId in reviewerCompanies();
+    }
+
     // Estructura canónica del dominio contable. Las reglas legacy anteriores
     // permanecen temporalmente para permitir una reversión segura.
     match /accounting/data/tax_obligations/{obligationId} {
-      allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+      allow read: if hasRole(['admin', 'contabilidad', 'financiera'])
+        || reviewerCanRead(resource.data.get('companyId', ''));
       allow create, delete: if isAccounting();
       allow update: if isAccounting() || isFinance();
 
       match /history/{historyId} {
-        allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+        allow read: if hasRole(['admin', 'contabilidad', 'financiera'])
+          || reviewerCanRead(get(/databases/$(database)/documents/accounting/data/tax_obligations/$(obligationId)).data.get('companyId', ''));
         allow create: if isAccounting() || isFinance();
         allow update, delete: if false;
       }
@@ -60,7 +76,8 @@ service cloud.firestore {
     }
 
     match /accounting/data/company_tax_settings/{companyId} {
-      allow read: if hasRole(['admin', 'contabilidad', 'financiera']);
+      allow read: if hasRole(['admin', 'contabilidad', 'financiera'])
+        || reviewerCanRead(companyId);
       allow create, update: if isAccounting();
       allow delete: if isAdmin();
     }

@@ -139,9 +139,9 @@ export function HrEmployeeDetailDialog({ employeeId, open, onOpenChange, onUpdat
         {loading && <div className="py-20 text-center text-gray-400"><Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-[#008C3C]" />Cargando información protegida…</div>}
         {error && <div className="p-4 rounded-xl border border-red-200 bg-red-50 text-red-700 flex gap-2"><XCircle className="w-5 h-5" />{error}</div>}
         {detail && <div className="space-y-5">
-          <section className="rounded-xl bg-gradient-to-r from-[#006330] to-[#008C3C] text-white p-5 flex justify-between gap-4">
-            <div>
-            <p className="text-xl font-bold">{detail.fullName}</p>
+          <section className="rounded-xl bg-gradient-to-r from-[#006330] to-[#008C3C] text-white p-4 sm:p-5 flex flex-wrap justify-between gap-3 sm:gap-4">
+            <div className="min-w-0">
+            <p className="text-lg sm:text-xl font-bold break-words">{detail.fullName}</p>
             <p className="text-sm text-green-100 mt-1">Cédula {detail.documentNumber} · {detail.status === 'active' ? 'Vigente' : 'Retirado'}</p>
             <p className="text-xs text-green-200 mt-2">{detail.identityUserId ? 'Cuenta de plataforma vinculada' : 'Sin acceso a la plataforma'}</p>
             </div>
@@ -175,7 +175,7 @@ export function HrEmployeeDetailDialog({ employeeId, open, onOpenChange, onUpdat
           <section className="border rounded-xl p-4">
             <h3 className="font-semibold text-gray-700 flex items-center gap-2 mb-4"><BriefcaseBusiness className="w-4 h-4" />Relaciones laborales ({detail.relationships.length})</h3>
             <div className="space-y-3">{detail.relationships.map((relationship: any) => <div key={relationship.id} className={`rounded-xl border p-4 ${relationship.status === 'active' ? 'border-green-200 bg-green-50/40' : 'border-gray-200 bg-gray-50'}`}>
-              <div className="flex justify-between gap-3 mb-3"><div><p className="font-semibold text-gray-800">{value(relationship.companyName)}</p><p className="text-sm text-gray-500">{value(relationship.projectName)}</p></div><span className={`h-fit px-2 py-1 rounded-full text-xs font-semibold ${relationship.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>{relationship.status === 'active' ? 'Vigente' : 'Histórica'}</span></div>
+              <div className="flex justify-between gap-3 mb-3"><div className="min-w-0"><p className="font-semibold text-gray-800 break-words">{value(relationship.companyName)}</p><p className="text-sm text-gray-500">{value(relationship.projectName)}</p></div><span className={`h-fit px-2 py-1 rounded-full text-xs font-semibold ${relationship.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>{relationship.status === 'active' ? 'Vigente' : 'Histórica'}</span></div>
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3"><Field label="Cargo">{relationship.position}</Field><Field label="Contrato">{relationship.contractType}</Field><Field label="Ingreso">{dateValue(relationship.startDate)}</Field><Field label="Jefe inmediato">{relationship.supervisor}</Field><Field label="Modalidad">{relationship.modality}</Field><Field label="Jornada">{relationship.workday}</Field><Field label="Cuenta analítica">{relationship.analyticalAccount}</Field></div>
               {relationship.status === 'active' && <div className="mt-4 pt-3 border-t border-green-100 flex justify-end">
                 {terminationEditId === relationship.id ? (
@@ -201,9 +201,9 @@ export function HrEmployeeDetailDialog({ employeeId, open, onOpenChange, onUpdat
                     <div className="flex justify-end gap-2"><Button size="sm" variant="outline" disabled={savingTermination} onClick={() => setTerminationEditId(null)}>Cancelar</Button><Button size="sm" className="bg-[#008C3C] hover:bg-[#006C2F]" disabled={savingTermination} onClick={() => saveTermination(relationship.id)}>{savingTermination && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar</Button></div>
                   </div>
                 ) : (
-                  <div className="flex items-end justify-between gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 w-full">
                     <div className="grid sm:grid-cols-3 gap-3 flex-1"><Field label="Fecha de retiro">{dateValue(relationship.endDate)}</Field><Field label="Motivo de retiro">{relationship.terminationReason}</Field><Field label="Costo de retiro">{relationship.terminationCost != null ? money(relationship.terminationCost) : undefined}</Field></div>
-                    <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => beginTerminationEdit(relationship)}>Editar retiro</Button><Button size="sm" className="bg-[#008C3C] hover:bg-[#006C2F]" disabled={savingTermination} onClick={() => activateEmployment(relationship.id)}>Activar contrato</Button></div>
+                    <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => beginTerminationEdit(relationship)}>Editar retiro</Button><Button size="sm" className="bg-[#008C3C] hover:bg-[#006C2F]" disabled={savingTermination} onClick={() => activateEmployment(relationship.id)}>Activar contrato</Button></div>
                   </div>
                 )}
               </div>}

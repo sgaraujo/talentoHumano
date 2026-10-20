@@ -629,7 +629,6 @@ export const CommunicationsPage = () => {
     setCtaEnabled(false); setCtaText(''); setCtaUrl('');
     setSelectedQuestionnaireId('');
     setComposePreview(false);
-    setSenderKey('default');
   };
 
   const handleSend = () => {
@@ -669,7 +668,6 @@ export const CommunicationsPage = () => {
         questionnaireName: selectedQuestionnaireId
           ? questionnaires.find(q => q.id === selectedQuestionnaireId)?.title
           : undefined,
-        senderKey,
       });
       toast.success(`Comunicado enviado a ${resolved.length} personas`);
       closeCompose();
@@ -699,7 +697,6 @@ export const CommunicationsPage = () => {
       setCtaUrl('');
     }
     setSelectedQuestionnaireId(comm.questionnaireId ?? '');
-    setSenderKey(comm.senderKey ?? 'default');
     const dupeAttachments = (comm.attachments ?? []).map(att => ({
       file: new File([], att.name, { type: 'application/octet-stream' }),
       url: att.url,
@@ -729,7 +726,6 @@ export const CommunicationsPage = () => {
   const [previewHtml, setPreviewHtml] = useState('');
   const [composePreview, setComposePreview] = useState(false);
   const [previewTab, setPreviewTab] = useState<'form' | 'preview'>('form');
-  const [senderKey, setSenderKey] = useState<'default' | 'inteegra'>('default');
 
   // Debounced live preview HTML for split-screen compose mode
   const [debouncedPreviewHtml, setDebouncedPreviewHtml] = useState('');
@@ -769,7 +765,6 @@ export const CommunicationsPage = () => {
       attachments: comm.attachments ?? [],
       ctaButton: comm.ctaButton ?? null,
       questionnaireName: comm.questionnaireName ?? null,
-      senderKey: comm.senderKey || 'default',
     });
   };
 
@@ -1630,20 +1625,7 @@ export const CommunicationsPage = () => {
               <DialogTitle className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-[#008C3C]" /> Nuevo comunicado
               </DialogTitle>
-              <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg p-0.5 flex-shrink-0">
-                <button
-                  onClick={() => setSenderKey('default')}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
-                    ${senderKey === 'default' ? 'bg-white shadow-sm text-[#008C3C] border border-gray-200' : 'text-gray-400 hover:text-gray-600'}`}>
-                  Inteegrados
-                </button>
-                <button
-                  onClick={() => setSenderKey('inteegra')}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
-                    ${senderKey === 'inteegra' ? 'bg-white shadow-sm text-blue-600 border border-gray-200' : 'text-gray-400 hover:text-gray-600'}`}>
-                  Inteegra
-                </button>
-              </div>
+              <span className="text-[11px] text-gray-400 truncate">Remitente: inteegrados@inteegra.net.co</span>
             </div>
           </DialogHeader>
 

@@ -6,6 +6,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { PageLoader } from './components/layout/PageLoader';
 import { Toaster } from '@/components/ui/sonner';
 import { AssistantCompanion } from './components/ia/AssistantCompanion';
+import { ACCOUNTING_HOME_ROLES, type AppRole } from './models/types/AppRole';
 
 // Cada página se descarga solo cuando se visita. Antes toda la app (Excel, PDF,
 // gráficas y ~35 páginas) iba en un único archivo de 3.4 MB, muy lento en celular.
@@ -51,15 +52,19 @@ const OffboardingPage            = page(() => import('./views/Offboarding/Offboa
 function HomeRedirect() {
   const { role, loading: roleLoading } = useAppRole();
   if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
-  return <Navigate to={role === 'contabilidad' || role === 'financiera' ? '/contabilidad' : '/dashboard'} replace />;
+  return <Navigate to={isAccountingHome(role) ? '/contabilidad' : '/dashboard'} replace />;
 }
+
+const isAccountingHome = (role: AppRole | null) => !!role && ACCOUNTING_HOME_ROLES.includes(role);
 
 /** Renders children only if role can access; otherwise redirects to role home */
 function RoleRoute({ children, path }: { children: React.ReactNode; path: string }) {
   const { role, loading: roleLoading } = useAppRole();
   if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
-  const contabilidadRoutes = ['/contabilidad', '/contabilidad/informe', '/contabilidad/mensajes', '/manual'];
-  if ((role === 'contabilidad' || role === 'financiera') && !contabilidadRoutes.includes(path)) return <Navigate to="/contabilidad" replace />;
+  const contabilidadRoutes = role === 'revisor_fiscal'
+    ? ['/contabilidad', '/contabilidad/informe', '/manual']
+    : ['/contabilidad', '/contabilidad/informe', '/contabilidad/mensajes', '/manual'];
+  if (isAccountingHome(role) && !contabilidadRoutes.includes(path)) return <Navigate to="/contabilidad" replace />;
   return <>{children}</>;
 }
 
@@ -67,7 +72,7 @@ function RoleRoute({ children, path }: { children: React.ReactNode; path: string
 function BulletinsRoute({ children }: { children: React.ReactNode }) {
   const { role, loading: roleLoading } = useAppRole();
   if (roleLoading) return <div className="min-h-screen flex items-center justify-center"><p>Cargando...</p></div>;
-  if (role !== 'admin' && role !== 'talento_humano') return <Navigate to={role === 'contabilidad' || role === 'financiera' ? '/contabilidad' : '/dashboard'} replace />;
+  if (role !== 'admin' && role !== 'talento_humano') return <Navigate to={isAccountingHome(role) ? '/contabilidad' : '/dashboard'} replace />;
   return <>{children}</>;
 }
 
@@ -280,7 +285,7 @@ function App() {
           path="/contabilidad/mensajes"
           element={
             loading ? null
-            : isAuthenticated ? <MainLayout><AccountingMessagesPage /></MainLayout>
+            : isAuthenticated ? <RoleRoute path="/contabilidad/mensajes"><MainLayout><AccountingMessagesPage /></MainLayout></RoleRoute>
             : <Navigate to="/login" />
           }
         />

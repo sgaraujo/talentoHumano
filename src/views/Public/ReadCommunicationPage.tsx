@@ -209,7 +209,7 @@ export const ReadCommunicationPage = () => {
         </div>
 
         <p className="text-center text-xs text-gray-400 pb-4">
-          Este mensaje fue enviado por Inteegrados · Triangulum
+          Este mensaje fue enviado por Inteegrados
         </p>
       </div>
     </div>

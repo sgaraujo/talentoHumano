@@ -39,7 +39,7 @@ const IDENTITY_COLLECTIONS = {
   users: "identity/data/users",
 } as const;
 
-type PlatformRole = "admin" | "talento_humano" | "contabilidad" | "financiera";
+type PlatformRole = "admin" | "talento_humano" | "contabilidad" | "financiera" | "revisor_fiscal";
 
 /** Verifica autenticación y rol en callables administrativas. */
 async function requirePlatformRole(
@@ -108,40 +108,11 @@ export { generateQuestionnaire } from "./ai/questionnaireGenerator";
 export { onEmployeeOffboarded, resendOffboardingSurvey, sendOffboardingSurveys } from "./offboarding/offboarding";
 
 
-const TENANT_ID      = defineSecret("TENANT_ID");
-const CLIENT_ID      = defineSecret("CLIENT_ID");
-const CLIENT_SECRET  = defineSecret("CLIENT_SECRET");
-const SENDER_EMAIL   = defineSecret("SENDER_EMAIL");
-const SENDER_EMAIL_2 = defineSecret("SENDER_EMAIL_2"); // inteegrados@inteegra.net.co
-
-// Credenciales del tenant de inteegra.net.co
+// Único remitente de correo: inteegrados@inteegra.net.co (tenant de inteegra.net.co).
+const SENDER_EMAIL_2 = defineSecret("SENDER_EMAIL_2");
 const TENANT_ID_2     = defineSecret("TENANT_ID_2");
 const CLIENT_ID_2     = defineSecret("CLIENT_ID_2");
 const CLIENT_SECRET_2 = defineSecret("CLIENT_SECRET_2");
-
-async function getGraphToken(): Promise<string> {
-  const tenantId = TENANT_ID.value();
-  const clientId = CLIENT_ID.value();
-  const clientSecret = CLIENT_SECRET.value();
-
-  const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-  const body = new URLSearchParams({
-    client_id: clientId,
-    scope: "https://graph.microsoft.com/.default",
-    client_secret: clientSecret,
-    grant_type: "client_credentials",
-  });
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(JSON.stringify(data));
-  return data.access_token as string;
-}
 
 async function getGraphTokenInteegra(): Promise<string> {
   const url = `https://login.microsoftonline.com/${TENANT_ID_2.value()}/oauth2/v2.0/token`;
@@ -415,7 +386,7 @@ export const sendAssignmentEmail = onCall(
   {
     region: "us-central1",
     cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
     const to       = normalizeEmail(request.data?.to);
@@ -436,8 +407,9 @@ export const sendAssignmentEmail = onCall(
       throw new HttpsError("invalid-argument", "Faltan campos requeridos");
     }
 
-    const graphToken = await getGraphToken();
-    const sender     = SENDER_EMAIL.value().trim();
+    // Todos los correos salen de inteegrados@inteegra.net.co.
+    const graphToken = await getGraphTokenInteegra();
+    const sender     = SENDER_EMAIL_2.value().trim();
     const year       = new Date().getFullYear();
     const count      = items.length;
 
@@ -743,7 +715,7 @@ export const sendWelcomeEmail = onCall(
   {
     region: "us-central1",
     cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL],
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
     const to            = normalizeEmail(request.data?.to);
@@ -753,8 +725,8 @@ export const sendWelcomeEmail = onCall(
 
     if (!to) throw new HttpsError("invalid-argument", "Falta el correo de destino");
 
-    const token  = await getGraphToken();
-    const sender = SENDER_EMAIL.value().trim();
+    const token  = await getGraphTokenInteegra();
+    const sender = SENDER_EMAIL_2.value().trim();
     const year   = new Date().getFullYear();
 
     const subject = "Bienvenido/a a Inteegrados";
@@ -835,21 +807,19 @@ export const sendCommunicationEmail = onCall(
   {
     region: "us-central1",
     cors: true,
-    secrets: [TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL, SENDER_EMAIL_2, TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2],
+    secrets: [TENANT_ID_2, CLIENT_ID_2, CLIENT_SECRET_2, SENDER_EMAIL_2],
   },
   async (request) => {
-    const { communicationId, title, body, recipients, attachments = [], ctaButton = null, questionnaireName = null, senderKey = 'default' } = request.data || {};
+    const { communicationId, title, body, recipients, attachments = [], ctaButton = null, questionnaireName = null } = request.data || {};
 
     if (!title || !body || !Array.isArray(recipients) || recipients.length === 0) {
       throw new HttpsError("invalid-argument", "Faltan campos requeridos");
     }
 
-    const graphToken = senderKey === 'inteegra'
-      ? await getGraphTokenInteegra()
-      : await getGraphToken();
-    const sender = senderKey === 'inteegra'
-      ? SENDER_EMAIL_2.value().trim()
-      : SENDER_EMAIL.value().trim();
+    // Único remitente: inteegrados@inteegra.net.co. Se ignora el antiguo
+    // `senderKey` que aún pueda llegar de comunicados guardados.
+    const graphToken = await getGraphTokenInteegra();
+    const sender = SENDER_EMAIL_2.value().trim();
     const year       = new Date().getFullYear();
     const dateStr    = new Date().toLocaleDateString("es-CO", {
       day: "2-digit", month: "long", year: "numeric",

@@ -31,12 +31,29 @@ const normalize = (value: unknown) => String(value ?? '').trim().normalize('NFD'
  * incorrectos en WhatsApp, Boletines y Correos.
  */
 export async function getEmployeeDirectoryUsers(): Promise<User[]> {
-  const [companiesSnap, projectsSnap, employeesSnap, employmentsSnap, usersSnap] = await Promise.all([
+  return (await loadEmployeeDirectory()).users;
+}
+
+/**
+ * Igual que getEmployeeDirectoryUsers, pero devuelve también las colecciones
+ * que ya descargó (contratos, empresas, cuentas analíticas) para que pantallas
+ * como el dashboard no las vuelvan a pedir a Firestore.
+ */
+export async function loadEmployeeDirectory(): Promise<{
+  users: User[];
+  employments: any[];
+  companies: Company[];
+  projects: Project[];
+}> {
+  // Ya no se lee la colección legacy `users` (~4.6 MB): solo aportaba edad y
+  // rango de edad, y la fecha de nacimiento del expediente (que tiene prioridad
+  // en ageGroup) da el mismo resultado en todos los casos — verificado con
+  // scripts/measure-legacy-age-impact.mjs.
+  const [companiesSnap, projectsSnap, employeesSnap, employmentsSnap] = await Promise.all([
     getDocs(collection(db, FIRESTORE_COLLECTIONS.companies)),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.projects)),
     getDocs(collection(db, FIRESTORE_COLLECTIONS.employees)),
     getDocs(collectionGroup(db, FIRESTORE_SUBCOLLECTIONS.employeeEmployments)),
-    getDocs(collection(db, FIRESTORE_COLLECTIONS.users)),
   ]);
   const companies = companiesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company));
   const projects = projectsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
@@ -64,24 +81,8 @@ export async function getEmployeeDirectoryUsers(): Promise<User[]> {
     if (!employmentsByEmployee.has(employeeId)) employmentsByEmployee.set(employeeId, []);
     employmentsByEmployee.get(employeeId)!.push(relationship);
   });
-  const cleanDocument = (value: unknown) => String(value ?? '').replace(/\D/g, '');
-  const cleanEmail = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase('es');
-  const legacyUsers = usersSnap.docs.map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as any));
-  const legacyById = new Map(legacyUsers.map(user => [user.id, user]));
-  const legacyByDocument = new Map(legacyUsers
-    .map(user => [cleanDocument(user.personalData?.documentNumber), user] as const)
-    .filter(([key]) => key));
-  const legacyByEmail = new Map(legacyUsers
-    .flatMap(user => [user.email, user.location?.corporateEmail, user.location?.personalEmail]
-      .map(email => [cleanEmail(email), user] as const))
-    .filter(([key]) => key));
-
-  return employeesSnap.docs.map(snapshot => {
+  const users = employeesSnap.docs.map(snapshot => {
     const employee = snapshot.data() as any;
-    const legacyUser = legacyById.get(employee.identityUserId)
-      ?? legacyByDocument.get(cleanDocument(employee.documentNumber))
-      ?? legacyByEmail.get(cleanEmail(employee.corporateEmail))
-      ?? legacyByEmail.get(cleanEmail(employee.personalEmail));
     const allRelationships = employmentsByEmployee.get(snapshot.id) ?? [];
     const activeRelationships = allRelationships.filter(isActiveToday);
     const toAssignment = (relationship: any) => {
@@ -104,6 +105,7 @@ export async function getEmployeeDirectoryUsers(): Promise<User[]> {
     const primaryRelationship = activeRelationships[0];
     return {
       id: employee.identityUserId || `employee:${snapshot.id}`,
+      _employeeId: snapshot.id,
       fullName: employee.fullName,
       email: employee.corporateEmail || employee.personalEmail || '',
       role: activeRelationships.length ? 'colaborador' : 'excolaborador',
@@ -112,12 +114,10 @@ export async function getEmployeeDirectoryUsers(): Promise<User[]> {
       projectIds: [...new Set(assignments.map(item => item.projectId).filter(Boolean))],
       personalData: {
         documentNumber: employee.documentNumber, phone: employee.personalPhone,
-        birthDate: employee.birthDate ?? employee.fechaNacimiento
-          ?? legacyUser?.personalData?.birthDate ?? legacyUser?.personalData?.fechaNacimiento,
-        age: employee.age ?? employee.edad ?? legacyUser?.personalData?.age ?? legacyUser?.personalData?.edad,
-        ageRange: employee.ageRange ?? employee.rangoEdad
-          ?? legacyUser?.personalData?.ageRange ?? legacyUser?.personalData?.rangoEdad,
-        gender: employee.gender ?? legacyUser?.personalData?.gender,
+        birthDate: employee.birthDate ?? employee.fechaNacimiento,
+        age: employee.age ?? employee.edad,
+        ageRange: employee.ageRange ?? employee.rangoEdad,
+        gender: employee.gender,
       },
       location: {
         corporatePhone: employee.corporatePhone, city: employee.residence?.city,
@@ -132,4 +132,13 @@ export async function getEmployeeDirectoryUsers(): Promise<User[]> {
       _allAssignments: allAssignments,
     } as any as User;
   });
+
+  // Mismo formato que analyticsService.getEmploymentRecords / projectService.getAll.
+  const employments = employmentsSnap.docs.map(item => {
+    const data = item.data();
+    return { id: item.id, ...data, employeeId: data.employeeId || item.ref.parent.parent?.id };
+  });
+  const sortedProjects = [...projects].sort((a, b) => a.name.localeCompare(b.name));
+
+  return { users, employments, companies, projects: sortedProjects };
 }

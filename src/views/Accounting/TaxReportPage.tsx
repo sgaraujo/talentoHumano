@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { BarChart3, Calendar, Download, Loader2, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { taxCalendarService } from '@/services/taxCalendarService';
+import { rolesService } from '@/services/rolesService';
+import { useAuth } from '@/hooks/useAuth';
 import type { TaxObligation } from '@/models/types/TaxObligation';
 import { displayTax, cleanNit, normalizePeriod } from '@/domain/tax/taxIdentity';
 import { toast } from 'sonner';
@@ -124,6 +126,7 @@ const STATUS_OPTIONS: Array<[string, string]> = [
 // ── component ─────────────────────────────────────────────────────────────────
 export const TaxReportPage = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [obligations,    setObligations]    = useState<TaxObligation[]>([]);
   const [loading,        setLoading]        = useState(true);
   const [filterYear,     setFilterYear]     = useState(String(new Date().getFullYear()));
@@ -152,11 +155,17 @@ export const TaxReportPage = () => {
   };
 
   useEffect(() => {
-    taxCalendarService.getAll()
+    // Sin email no se sabe si el usuario está acotado a ciertas empresas.
+    if (!user?.email) return;
+    rolesService.getByEmail(user.email)
+      // Revisor fiscal: las reglas solo le dejan consultar sus empresas asignadas.
+      .then(me => me?.role === 'revisor_fiscal'
+        ? taxCalendarService.getByCompanyIds(me.companyIds ?? [])
+        : taxCalendarService.getAll())
       .then(data => setObligations(data))
       .catch(e => toast.error('Error al cargar', { description: e.message }))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.email]);
 
   const years = useMemo(() => {
     const s = new Set(obligations.map(o => o.year || o.dueDate?.slice(0, 4) || ''));

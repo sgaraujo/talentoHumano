@@ -9,7 +9,8 @@
       "Bash(node fix-advanced-sterilization-employments.mjs --apply)",
       "Bash(node find-multi-company-employees.mjs)",
       "Bash(node -e \"require.resolve\\('tsx'\\)\")",
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "Bash(node scripts/diagnose-offboarding-month.mjs 2026-10)"
     ]
   }
 }

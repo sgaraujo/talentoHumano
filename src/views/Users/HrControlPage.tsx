@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, BriefcaseBusiness, CheckCircle2, Download, FileClock, Loader2, RefreshCw, Search, Upload, UserPlus, UserRoundX, Users } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getHrControlData, type HrControlEmployee, type HrImportRunSummary, type HrRelationshipRow } from '@/services/hrControlService';
@@ -26,7 +25,25 @@ const exportDate = (value: unknown) => {
 };
 const dateLabel = (value: any) => value?.toDate?.().toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) ?? '—';
 
+// Ancho "sm" de Tailwind. Se usa para dibujar solo la vista que se ve
+// (tarjetas o tabla): renderizar ambas con miles de filas pone lento el celular.
+const useIsMobile = () => {
+  const query = '(max-width: 639px)';
+  const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMobile(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return mobile;
+};
+
+const MOBILE_LIMIT = 150;
+const DESKTOP_LIMIT = 1000;
+
 export function HrControlPage() {
+  const isMobile = useIsMobile();
   const [employees, setEmployees] = useState<HrControlEmployee[]>([]);
   const [runs, setRuns] = useState<HrImportRunSummary[]>([]);
   const [relationshipRows, setRelationshipRows] = useState<HrRelationshipRow[]>([]);
@@ -88,8 +105,9 @@ export function HrControlPage() {
     } finally { setApplying(false); }
   };
 
-  const handleDownloadDatabase = () => {
+  const handleDownloadDatabase = async () => {
     if (relationshipRows.length === 0) { toast.error('No hay relaciones para descargar'); return; }
+    const XLSX = await import('xlsx'); // ~430 KB: solo se descarga al exportar
     const rows = relationshipRows.map(r => ({
       Documento: r.documentNumber,
       Nombre: r.fullName,
@@ -147,18 +165,23 @@ export function HrControlPage() {
           <h1 className="text-2xl font-bold text-gray-800">Expedientes y control</h1>
           <p className="text-sm text-gray-500 mt-1">Validación de la base canónica de Talento Humano</p>
         </div>
-        <div className="flex gap-2">
+        {/* En celular: grilla de 2 columnas; desde sm, una fila que puede bajar de línea. */}
+        <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:flex-wrap">
           <Button variant="outline" onClick={load} disabled={loading}>
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Actualizar
           </Button>
           <Button className="bg-[#008C3C] hover:bg-[#006C2F]" onClick={() => setCreateOpen(true)}>
             <UserPlus className="w-4 h-4 mr-2" />Nueva persona
           </Button>
-          <label className="inline-flex items-center rounded-md bg-[#008C3C] hover:bg-[#006C2F] text-white px-4 py-2 text-sm font-medium cursor-pointer">
-            <Upload className="w-4 h-4 mr-2" />Actualizar desde Excel
+          <label className="inline-flex items-center justify-center rounded-md bg-[#008C3C] hover:bg-[#006C2F] text-white px-3 sm:px-4 py-2 text-sm font-medium cursor-pointer text-center">
+            <Upload className="w-4 h-4 mr-2 flex-shrink-0" />
+            <span className="sm:hidden">Desde Excel</span><span className="hidden sm:inline">Actualizar desde Excel</span>
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={selectExcel} />
           </label>
-          <Button variant="outline" onClick={() => setPartialUpdateOpen(true)}><FileClock className="w-4 h-4 mr-2" />Actualización parcial</Button>
+          <Button variant="outline" onClick={() => setPartialUpdateOpen(true)}>
+            <FileClock className="w-4 h-4 mr-2 flex-shrink-0" />
+            <span className="sm:hidden">Parcial</span><span className="hidden sm:inline">Actualización parcial</span>
+          </Button>
         </div>
       </div>
 
@@ -177,14 +200,14 @@ export function HrControlPage() {
         ))}
       </div>
 
-      <div className="bg-white border rounded-xl p-4 flex items-start gap-3">
-        <FileClock className="w-5 h-5 text-[#008C3C] mt-0.5" />
-        <div className="flex-1">
+      <div className="bg-white border rounded-xl p-4 flex flex-wrap items-start gap-3">
+        <FileClock className="w-5 h-5 text-[#008C3C] mt-0.5 flex-shrink-0" />
+        <div className="flex-1 min-w-[200px]">
           <p className="font-semibold text-gray-700">Última importación</p>
-          {latestRun ? <p className="text-sm text-gray-500 mt-1">{latestRun.fileName} · <b className={latestRun.status === 'completed' ? 'text-green-600' : 'text-amber-600'}>{latestRun.status}</b> · {dateLabel(latestRun.completedAt || latestRun.createdAt)} · {latestRun.relationshipCount ?? 0} relaciones</p>
+          {latestRun ? <p className="text-sm text-gray-500 mt-1 break-words">{latestRun.fileName} · <b className={latestRun.status === 'completed' ? 'text-green-600' : 'text-amber-600'}>{latestRun.status}</b> · {dateLabel(latestRun.completedAt || latestRun.createdAt)} · {latestRun.relationshipCount ?? 0} relaciones</p>
             : <p className="text-sm text-gray-400 mt-1">No hay ejecuciones registradas.</p>}
         </div>
-        <Button variant="outline" size="sm" onClick={handleDownloadDatabase} disabled={relationshipRows.length === 0} className="flex-shrink-0">
+        <Button variant="outline" size="sm" onClick={handleDownloadDatabase} disabled={relationshipRows.length === 0} className="w-full sm:w-auto flex-shrink-0">
           <Download className="w-4 h-4 mr-2" />Descargar base ({relationshipRows.length.toLocaleString('es-CO')})
         </Button>
       </div>
@@ -197,12 +220,39 @@ export function HrControlPage() {
           </div>
         </div>
         {loading ? <div className="py-16 text-center text-gray-400"><Loader2 className="w-7 h-7 animate-spin mx-auto mb-2" />Cargando expedientes…</div> : (
+          <>
+          {/* Celular: tarjetas en lugar de una tabla de 5 columnas. */}
+          {isMobile ? (
+          <div className="divide-y">
+            {filtered.slice(0, MOBILE_LIMIT).map(item => (
+              <button key={item.id} type="button" onClick={() => setSelectedEmployeeId(item.id)} className="w-full text-left px-4 py-3 active:bg-green-50/60">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium text-gray-700 leading-snug">{item.fullName}</p>
+                  {item.identityUserId
+                    ? <span className="flex-shrink-0 text-green-700 bg-green-50 px-2 py-0.5 rounded-full text-[11px]">Vinculado</span>
+                    : <span className="flex-shrink-0 text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full text-[11px]">Sin acceso</span>}
+                </div>
+                <p className="font-mono text-xs text-gray-400 mt-0.5">CC {item.documentNumber}</p>
+                <p className="text-xs text-gray-500 mt-1 break-words">{item.companies.join(', ') || '—'}</p>
+                <p className="text-xs text-gray-400 break-words">{item.projects.join(', ') || 'Sin cuenta analítica'}</p>
+                <p className="text-xs mt-1"><span className="text-green-700">{item.activeRelations} activas</span><span className="text-gray-400"> · {item.retiredRelations} históricas</span></p>
+              </button>
+            ))}
+          </div>
+          ) : (
           <div className="overflow-x-auto max-h-[55vh] overflow-y-auto">
             <table className="w-full text-sm"><thead className="sticky top-0 bg-gray-50 text-left text-xs text-gray-500"><tr><th className="px-4 py-3">Persona</th><th className="px-4 py-3">Cédula</th><th className="px-4 py-3">Empresa / cuenta analítica</th><th className="px-4 py-3">Relaciones</th><th className="px-4 py-3">Acceso</th></tr></thead>
-              <tbody className="divide-y">{filtered.slice(0, 1000).map(item => <tr key={item.id} onClick={() => setSelectedEmployeeId(item.id)} className="hover:bg-green-50/60 cursor-pointer transition-colors" title="Abrir expediente"><td className="px-4 py-3 font-medium text-gray-700">{item.fullName}</td><td className="px-4 py-3 font-mono text-xs text-gray-500">{item.documentNumber}</td><td className="px-4 py-3 text-gray-500"><p>{item.companies.join(', ') || '—'}</p><p className="text-xs text-gray-400">{item.projects.join(', ') || 'Sin cuenta analítica'}</p></td><td className="px-4 py-3"><span className="text-green-700">{item.activeRelations} activas</span><span className="text-gray-400"> · {item.retiredRelations} históricas</span></td><td className="px-4 py-3">{item.identityUserId ? <span className="text-green-700 bg-green-50 px-2 py-1 rounded-full text-xs">Vinculado</span> : <span className="text-purple-700 bg-purple-50 px-2 py-1 rounded-full text-xs">Sin acceso</span>}</td></tr>)}</tbody>
+              <tbody className="divide-y">{filtered.slice(0, DESKTOP_LIMIT).map(item => <tr key={item.id} onClick={() => setSelectedEmployeeId(item.id)} className="hover:bg-green-50/60 cursor-pointer transition-colors" title="Abrir expediente"><td className="px-4 py-3 font-medium text-gray-700">{item.fullName}</td><td className="px-4 py-3 font-mono text-xs text-gray-500">{item.documentNumber}</td><td className="px-4 py-3 text-gray-500"><p>{item.companies.join(', ') || '—'}</p><p className="text-xs text-gray-400">{item.projects.join(', ') || 'Sin cuenta analítica'}</p></td><td className="px-4 py-3"><span className="text-green-700">{item.activeRelations} activas</span><span className="text-gray-400"> · {item.retiredRelations} históricas</span></td><td className="px-4 py-3">{item.identityUserId ? <span className="text-green-700 bg-green-50 px-2 py-1 rounded-full text-xs">Vinculado</span> : <span className="text-purple-700 bg-purple-50 px-2 py-1 rounded-full text-xs">Sin acceso</span>}</td></tr>)}</tbody>
             </table>
-            {filtered.length === 0 && <p className="text-center py-12 text-gray-400">No hay resultados con estos filtros.</p>}
           </div>
+          )}
+          {filtered.length === 0 && <p className="text-center py-12 text-gray-400">No hay resultados con estos filtros.</p>}
+          {filtered.length > (isMobile ? MOBILE_LIMIT : DESKTOP_LIMIT) && (
+            <p className="text-center py-3 px-4 text-xs text-gray-400 border-t">
+              Mostrando {(isMobile ? MOBILE_LIMIT : DESKTOP_LIMIT).toLocaleString('es-CO')} de {filtered.length.toLocaleString('es-CO')}. Usa la búsqueda para encontrar a alguien.
+            </p>
+          )}
+          </>
         )}
       </div>
       <HrImportPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} preview={preview} loading={previewLoading} loadingLabel={previewLabel} error={previewError} applying={applying} applyProgress={applyProgress} onApply={applyImport} staleActives={staleActives} retireStale={retireStale} onRetireStaleChange={setRetireStale} />

@@ -103,10 +103,10 @@ export function HrImportPreviewDialog({
                 </div>
                 <div className="max-h-44 overflow-y-auto divide-y">
                   {staleActives.slice(0, 300).map(person => (
-                    <div key={person.id} className="px-4 py-1.5 text-xs flex gap-3">
+                    <div key={person.id} className="px-4 py-1.5 text-xs flex flex-wrap sm:flex-nowrap gap-x-3 gap-y-0.5">
                       <span className="font-mono text-gray-500 w-24 shrink-0">{person.documentNumber}</span>
-                      <span className="text-gray-700 flex-1">{person.fullName}</span>
-                      <span className="text-gray-400 truncate max-w-[40%]">{person.companies.join(', ')}</span>
+                      <span className="text-gray-700 flex-1 min-w-0">{person.fullName}</span>
+                      <span className="text-gray-400 truncate w-full sm:w-auto sm:max-w-[40%]">{person.companies.join(', ')}</span>
                     </div>
                   ))}
                 </div>
@@ -146,11 +146,11 @@ export function HrImportPreviewDialog({
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-3 pt-2 border-t">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t">
               <p className="text-xs text-gray-400 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> La importación es repetible y no crea cuentas de acceso automáticamente.
+                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" /> La importación es repetible y no crea cuentas de acceso automáticamente.
               </p>
-              <div className="flex gap-2">
+              <div className="flex gap-2 justify-end">
                 <Button variant="outline" disabled={applying} onClick={() => onOpenChange(false)}>Cerrar</Button>
                 <Button
                   className="bg-[#008C3C] hover:bg-[#006C2F] text-white"

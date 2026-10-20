@@ -42,14 +42,15 @@ class RolesService {
     })) as PlatformUser[];
   }
 
-  async upsert(email: string, name: string, role: AppRole): Promise<void> {
+  /** companyIds solo aplica a roles acotados por empresa; para el resto se limpia. */
+  async upsert(email: string, name: string, role: AppRole, companyIds: string[] = []): Promise<void> {
     const id = normalize(email);
     const existing = await getDoc(doc(db, this.col, id));
     if (existing.exists()) {
-      await updateDoc(doc(db, this.col, id), { name, role, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, this.col, id), { name, role, companyIds, updatedAt: serverTimestamp() });
     } else {
       await setDoc(doc(db, this.col, id), {
-        email: id, name, role,
+        email: id, name, role, companyIds,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });

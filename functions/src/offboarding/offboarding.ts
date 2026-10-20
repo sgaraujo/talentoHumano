@@ -171,7 +171,7 @@ async function deliver(surveyRef: FirebaseFirestore.DocumentReference, to: strin
 
 type CreateResult =
   | { outcome: "created"; surveyId: string; sent: boolean }
-  | { outcome: "exists" | "excluded" | "old" | "no_retirement" | "still_active" | "not_found"; surveyId?: string; detail?: string };
+  | { outcome: "exists" | "excluded" | "old" | "no_date" | "no_retirement" | "still_active" | "not_found"; surveyId?: string; detail?: string };
 
 /**
  * Crea la encuesta de salida del retiro más reciente de un excolaborador y
@@ -206,6 +206,10 @@ async function createSurveyForEmployee(
 
   const endDate = toDate(retired.endDate);
   const maxAge = settings.maxRetirementAgeDays ?? DEFAULT_MAX_AGE_DAYS;
+  // Sin fecha no se puede saber si el retiro es reciente: cargas de Excel sin
+  // FECHA RETIRO o "retirar activos que no figuran" no deben disparar correos.
+  // TH puede enviarla a mano desde Offboarding si corresponde.
+  if (options.enforceAgeLimit && !endDate) return { outcome: "no_date" };
   if (options.enforceAgeLimit && endDate && Date.now() - endDate.getTime() > maxAge * 86_400_000) {
     return { outcome: "old", detail: isoDate(endDate) ?? undefined };
   }

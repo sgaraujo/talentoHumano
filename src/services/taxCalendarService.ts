@@ -1,6 +1,7 @@
 import {
-  collection, addDoc, getDocs, doc, updateDoc, setDoc,
-  query, orderBy, writeBatch, serverTimestamp, arrayUnion,
+  collection, addDoc, getDoc, getDocs, doc, updateDoc, setDoc,
+  query, orderBy, where, writeBatch, serverTimestamp, arrayUnion,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { FIRESTORE_COLLECTIONS } from '../config/firestoreCollections';
@@ -31,18 +32,36 @@ function normalizeDueDate(v: any): string | undefined {
 class TaxCalendarService {
   private col = FIRESTORE_COLLECTIONS.taxObligations;
 
+  private fromDoc(d: QueryDocumentSnapshot): TaxObligation {
+    const data = d.data();
+    return {
+      id: d.id,
+      ...data,
+      dueDate:   normalizeDueDate(data.dueDate) ?? data.dueDate,
+      updatedAt: toDate(data.updatedAt),
+      createdAt: toDate(data.createdAt),
+    } as TaxObligation;
+  }
+
   async getAll(): Promise<TaxObligation[]> {
     const snap = await getDocs(query(collection(db, this.col), orderBy('dueDate', 'asc')));
-    return snap.docs.map(d => {
-      const data = d.data();
-      return {
-        id: d.id,
-        ...data,
-        dueDate:   normalizeDueDate(data.dueDate) ?? data.dueDate,
-        updatedAt: toDate(data.updatedAt),
-        createdAt: toDate(data.createdAt),
-      };
-    }) as TaxObligation[];
+    return snap.docs.map(d => this.fromDoc(d));
+  }
+
+  /**
+   * Solo las obligaciones de ciertas empresas. Lo usa el revisor fiscal: las
+   * reglas rechazan una consulta que pueda devolver otras empresas. Sin orderBy
+   * para no requerir índice compuesto; se ordena en el cliente.
+   */
+  async getByCompanyIds(companyIds: string[]): Promise<TaxObligation[]> {
+    const chunks: string[][] = [];
+    for (let i = 0; i < companyIds.length; i += 30) chunks.push(companyIds.slice(i, i + 30));
+    const snaps = await Promise.all(chunks.map(ids =>
+      getDocs(query(collection(db, this.col), where('companyId', 'in', ids)))
+    ));
+    return snaps
+      .flatMap(snap => snap.docs.map(d => this.fromDoc(d)))
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
   }
 
   async updateStatus(id: string, status: TaxStatus, observation?: string): Promise<void> {
@@ -68,11 +87,15 @@ class TaxCalendarService {
     });
   }
 
-  async getCompanyTaxSettings(): Promise<Record<string, string[]>> {
-    const snap = await getDocs(collection(db, FIRESTORE_COLLECTIONS.companyTaxSettings));
-    return Object.fromEntries(snap.docs.map(d => [
+  /** Con companyIds lee solo esos documentos (revisor fiscal); sin él, toda la colección. */
+  async getCompanyTaxSettings(companyIds?: string[]): Promise<Record<string, string[]>> {
+    const docs = companyIds
+      ? (await Promise.all(companyIds.map(id => getDoc(doc(db, FIRESTORE_COLLECTIONS.companyTaxSettings, id)))))
+          .filter(d => d.exists())
+      : (await getDocs(collection(db, FIRESTORE_COLLECTIONS.companyTaxSettings))).docs;
+    return Object.fromEntries(docs.map(d => [
       d.id,
-      Array.isArray(d.data().excludedTaxTypes) ? d.data().excludedTaxTypes : [],
+      Array.isArray(d.data()?.excludedTaxTypes) ? d.data()!.excludedTaxTypes : [],
     ]));
   }
 

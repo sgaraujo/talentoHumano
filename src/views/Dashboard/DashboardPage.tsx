@@ -9,10 +9,8 @@ import {
   AlertTriangle, Sparkles,
   Filter, X, MapPin, VenusAndMars, UsersRound, BarChart3,
 } from 'lucide-react';
-import { getEmployeeDirectoryUsers } from '@/services/employeeDirectoryService';
-import { analyticsService, isApprenticeRelation, matchesCompany, toDate as toDateEmployment } from '@/services/analyticsService';
-import { companyService } from '@/services/companyService';
-import { projectService } from '@/services/projectService';
+import { loadEmployeeDirectory } from '@/services/employeeDirectoryService';
+import { isApprenticeRelation, matchesCompany, toDate as toDateEmployment } from '@/services/analyticsService';
 import { SenaApprenticesPanel } from '@/components/analytics/SenaApprenticesPanel';
 import { AGE_ORDER, ageGroup, normalizeGender, normalizeWorkModality } from '@/domain/humanResources/demographics';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -122,16 +120,12 @@ export const DashboardPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const [users, emps, comps, projs] = await Promise.all([
-          getEmployeeDirectoryUsers(),
-          analyticsService.getEmploymentRecords(),
-          companyService.getAll(),
-          projectService.getAll(),
-        ]);
-        setAllUsers(users);
-        setEmployments(emps);
-        setCompanies(comps);
-        setProjects(projs);
+        // Una sola descarga: antes contratos, empresas y cuentas se pedían dos veces.
+        const directory = await loadEmployeeDirectory();
+        setAllUsers(directory.users);
+        setEmployments(directory.employments);
+        setCompanies(directory.companies);
+        setProjects(directory.projects);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();
@@ -144,6 +138,12 @@ export const DashboardPage = () => {
     const raw = now.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
     return raw.charAt(0).toUpperCase() + raw.slice(1);
   })();
+
+  // Nombres por id de expediente, para que el panel de aprendices no consulte uno por uno.
+  const employeeNames = useMemo(() => new Map(allUsers.map(u => [
+    u._employeeId as string,
+    { fullName: u.fullName || 'Sin nombre', documentNumber: u.personalData?.documentNumber || u._employeeId },
+  ])), [allUsers]);
 
   // ── TH companies (activeTH or active) ──────────────────────────────────────
   const thCompanies = useMemo(() =>
@@ -591,7 +591,7 @@ export const DashboardPage = () => {
             </div>
           )}
 
-          <SenaApprenticesPanel employments={employments} thCompanies={thCompanies} filterCompany={filterCompany} />
+          <SenaApprenticesPanel employments={employments} thCompanies={thCompanies} filterCompany={filterCompany} knownNames={employeeNames} />
 
           {/* Rotación general */}
           <h2 className="mt-7 mb-4 text-lg font-bold text-[#14171C] tracking-tight">

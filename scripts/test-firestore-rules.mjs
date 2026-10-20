@@ -6,7 +6,10 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   doc,
+  collection,
   collectionGroup,
+  query,
+  where,
   getDocs,
   getDoc,
   setDoc,
@@ -28,6 +31,7 @@ const users = {
   accounting: ['accounting@test.local', 'contabilidad'],
   finance: ['finance@test.local', 'financiera'],
   hr: ['hr@test.local', 'talento_humano'],
+  reviewer: ['reviewer@test.local', 'revisor_fiscal'],
 };
 
 try {
@@ -44,6 +48,17 @@ try {
       status: 'No iniciado',
     });
     await setDoc(doc(db, 'bulletins', 'public'), { title: 'Público' });
+    // Revisor fiscal acotado a una sola empresa.
+    await setDoc(doc(db, 'identity', 'data', 'platform_roles', users.reviewer[0]), {
+      email: users.reviewer[0], role: 'revisor_fiscal', companyIds: ['company-own'],
+    });
+    for (const companyId of ['company-own', 'company-other']) {
+      await setDoc(doc(db, 'accounting', 'data', 'tax_obligations', `obl-${companyId}`), {
+        companyId, company: companyId, taxType: 'IVA', dueDate: '2026-07-20', status: 'No iniciado',
+      });
+      await setDoc(doc(db, 'accounting', 'data', 'tax_obligations', `obl-${companyId}`, 'history', 'h1'), { status: 'No iniciado' });
+      await setDoc(doc(db, 'accounting', 'data', 'company_tax_settings', companyId), { companyId, excludedTaxTypes: [] });
+    }
   });
 
   const context = (key) => {
@@ -239,7 +254,31 @@ try {
   await assertFails(getDoc(doc(anonymousDb, 'users', 'someone')));
   await assertFails(setDoc(doc(adminDb, 'unknown_collection', 'doc'), { value: true }));
 
-  console.log('OK: reglas verificadas para admin, contabilidad, financiera, TH y anónimo.');
+  // ── Revisor fiscal: solo lectura y solo de sus empresas ──────────────────
+  const reviewerDb = context('reviewer');
+  const reviewerObligations = collection(reviewerDb, 'accounting', 'data', 'tax_obligations');
+  await assertSucceeds(getDoc(doc(reviewerDb, 'accounting', 'data', 'tax_obligations', 'obl-company-own')));
+  await assertFails(getDoc(doc(reviewerDb, 'accounting', 'data', 'tax_obligations', 'obl-company-other')));
+  await assertSucceeds(getDocs(query(reviewerObligations, where('companyId', 'in', ['company-own']))));
+  await assertFails(getDocs(query(reviewerObligations, where('companyId', 'in', ['company-own', 'company-other']))));
+  await assertFails(getDocs(reviewerObligations));
+  await assertFails(updateDoc(doc(reviewerDb, 'accounting', 'data', 'tax_obligations', 'obl-company-own'), { status: 'Revisado' }));
+  await assertFails(setDoc(doc(reviewerDb, 'accounting', 'data', 'tax_obligations', 'reviewer-created'), {
+    companyId: 'company-own', taxType: 'IVA', dueDate: '2026-07-20',
+  }));
+  await assertSucceeds(getDoc(doc(reviewerDb, 'accounting', 'data', 'tax_obligations', 'obl-company-own', 'history', 'h1')));
+  await assertFails(getDoc(doc(reviewerDb, 'accounting', 'data', 'tax_obligations', 'obl-company-other', 'history', 'h1')));
+  await assertSucceeds(getDoc(doc(reviewerDb, 'accounting', 'data', 'company_tax_settings', 'company-own')));
+  await assertFails(getDoc(doc(reviewerDb, 'accounting', 'data', 'company_tax_settings', 'company-other')));
+  await assertFails(setDoc(doc(reviewerDb, 'accounting', 'data', 'company_tax_settings', 'company-own'), { excludedTaxTypes: ['IVA'] }));
+  await assertFails(updateDoc(doc(reviewerDb, 'identity', 'data', 'platform_roles', users.reviewer[0]), {
+    companyIds: ['company-own', 'company-other'],
+  }));
+  await assertFails(getDoc(doc(reviewerDb, 'human_resources', 'data', 'employees', 'employee-1')));
+  await assertFails(getDoc(doc(reviewerDb, 'communications', 'data', 'accounting_messages', 'any')));
+  await assertFails(updateDoc(doc(reviewerDb, 'organization', 'data', 'companies', 'company-acc'), { name: 'No permitido' }));
+
+  console.log('OK: reglas verificadas para admin, contabilidad, financiera, TH, revisor fiscal y anónimo.');
 } finally {
   await testEnv.cleanup();
 }

@@ -29,7 +29,6 @@ const MODULES: ModuleHelp[] = [
   { prefix: '/contabilidad/informe', label: 'Informe Tributario', suggestions: ['¿Qué muestra el informe tributario?'] },
   { prefix: '/contabilidad/mensajes', label: 'Mensajes de Contabilidad', suggestions: ['¿Cómo envío un mensaje a una empresa?'] },
   { prefix: '/contabilidad', label: 'Calendario Tributario', suggestions: ['¿Cuáles son los pasos del proceso tributario?', '¿Cómo creo un vencimiento?', '¿Quién puede revertir un paso?'] },
-  { prefix: '/usuarios', label: 'Usuarios y accesos', suggestions: ['¿Cómo creo un usuario?'] },
   { prefix: '/roles', label: 'Roles y Accesos', suggestions: ['¿Cómo le doy acceso a alguien?', '¿Qué ve cada rol?'] },
   { prefix: '/dashboard', label: 'Analítica de Talento Humano', suggestions: ['¿Cómo se calcula la rotación?', '¿Dónde veo los aprendices SENA activos?', '¿Por qué no cuentan los aprendices SENA?'] },
 ];

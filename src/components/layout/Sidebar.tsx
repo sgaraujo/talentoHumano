@@ -23,7 +23,6 @@ const GROUPS: MenuGroup[] = [
     label: 'Personas y organización',
     icon: Users,
     items: [
-      { icon: Shield,        label: 'Usuarios y accesos', path: '/usuarios' },
       { icon: ClipboardCheck,label: 'Expedientes y control', path: '/talento-humano/control' },
       { icon: DoorOpen,      label: 'Offboarding',        path: '/offboarding' },
       { icon: Building2,     label: 'Empresas',           path: '/empresas' },
