@@ -19,8 +19,11 @@ import {
   Loader2, Plus, Mail, Users, CheckCircle2, Clock, Search,
   ChevronLeft, ChevronRight, Trash2, Building2, FolderKanban,
   Send, Eye, Paperclip, X, FileText, Image, FileDown,
-  Link, MousePointerClick, ClipboardList, UserPlus, BarChart2, Copy, Pencil,
+  Link, MousePointerClick, ClipboardList, UserPlus, BarChart2, Copy, Pencil, CalendarClock,
 } from 'lucide-react';
+import { SchedulePicker, type SendMode } from '@/components/scheduling/SchedulePicker';
+import { ScheduledSendsPanel } from '@/components/scheduling/ScheduledSendsPanel';
+import { bogotaInputToDate, fmtBogota, scheduleSend, scheduleValidationError } from '@/services/scheduledSendService';
 import { toast } from 'sonner';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from '@/config/firebase';
@@ -313,6 +316,8 @@ export const CommunicationsPage = () => {
   const [form, setForm] = useState({ title: '', body: '', targetType: 'all', targetIds: [] as string[], requiresAck: false });
   const [sending, setSending] = useState(false);
   const [sendConfirmOpen, setSendConfirmOpen] = useState(false);
+  const [sendMode, setSendMode] = useState<SendMode>('now');
+  const [scheduleAt, setScheduleAt] = useState('');
   const [attachments, setAttachments] = useState<{ file: File; url?: string; progress: number; uploading: boolean; link?: string }[]>([]);
 
   // CTA button
@@ -640,6 +645,7 @@ export const CommunicationsPage = () => {
   };
 
   const executeSend = async () => {
+    if (sendMode === 'schedule' && scheduleValidationError(scheduleAt)) return;
     setSendConfirmOpen(false);
     const resolved = resolveRecipients();
     setSending(true);
@@ -655,9 +661,9 @@ export const CommunicationsPage = () => {
         name: a.file.name, url: a.url!,
         ...(a.link?.trim() ? { link: a.link.trim() } : {}),
       }));
-      await communicationService.create({
+      const content = {
         title: form.title.trim(), body: form.body.trim(),
-        sentBy: 'admin', targetType: form.targetType as any,
+        targetType: form.targetType as any,
         targetId: form.targetIds[0] || undefined, targetName,
         requiresAck: form.requiresAck, recipients: resolved,
         attachments: attachmentData,
@@ -668,7 +674,18 @@ export const CommunicationsPage = () => {
         questionnaireName: selectedQuestionnaireId
           ? questionnaires.find(q => q.id === selectedQuestionnaireId)?.title
           : undefined,
-      });
+      };
+      if (sendMode === 'schedule') {
+        // El servidor arma el comunicado y sus enlaces cuando llega la hora.
+        await scheduleSend('email', scheduleAt, content.title, JSON.parse(JSON.stringify(content)));
+        toast.success('Comunicado programado', {
+          description: `${resolved.length} personas · ${fmtBogota(bogotaInputToDate(scheduleAt))}`,
+        });
+        setSendMode('now');
+        closeCompose();
+        return;
+      }
+      await communicationService.create({ ...content, sentBy: 'admin' });
       toast.success(`Comunicado enviado a ${resolved.length} personas`);
       closeCompose();
       load();
@@ -995,6 +1012,11 @@ export const CommunicationsPage = () => {
             <Plus className="w-4 h-4 mr-2" /> Nuevo comunicado
           </Button>
         </div>
+      </div>
+
+      {/* Comunicados programados que aún no salen (no se muestra si no hay) */}
+      <div className="mb-5 empty:hidden">
+        <ScheduledSendsPanel kind="email" compact />
       </div>
 
       {/* Global stats — reflect current month filter */}
@@ -2060,21 +2082,27 @@ export const CommunicationsPage = () => {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-gray-600 mt-2">
-            Se enviará el comunicado{' '}
+            {sendMode === 'schedule' ? 'Se programará' : 'Se enviará'} el comunicado{' '}
             <span className="font-semibold">"{form.title}"</span>
             {' '}a{' '}
             <span className="font-semibold text-[#008C3C]">
               {recipientCount} persona{recipientCount !== 1 ? 's' : ''}
             </span>.
-            {' '}Esta acción no se puede deshacer.
+            {sendMode === 'schedule'
+              ? ' Podrás cambiar la fecha o cancelarlo en Envíos programados antes de que salga.'
+              : ' Esta acción no se puede deshacer.'}
           </p>
+          <div className="mt-4">
+            <SchedulePicker mode={sendMode} onModeChange={setSendMode} value={scheduleAt} onChange={setScheduleAt} />
+          </div>
           <div className="flex gap-2 mt-5">
             <Button variant="outline" className="flex-1" onClick={() => setSendConfirmOpen(false)}>
               Cancelar
             </Button>
-            <Button className="flex-1 bg-[#008C3C] hover:bg-[#006C2F] text-white" onClick={executeSend}>
-              <Send className="w-4 h-4 mr-1.5" />
-              Enviar
+            <Button className="flex-1 bg-[#008C3C] hover:bg-[#006C2F] text-white" onClick={executeSend}
+              disabled={sendMode === 'schedule' && !!scheduleValidationError(scheduleAt)}>
+              {sendMode === 'schedule' ? <CalendarClock className="w-4 h-4 mr-1.5" /> : <Send className="w-4 h-4 mr-1.5" />}
+              {sendMode === 'schedule' ? 'Programar' : 'Enviar'}
             </Button>
           </div>
         </DialogContent>

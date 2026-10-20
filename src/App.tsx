@@ -29,6 +29,7 @@ const ProjectsPage               = page(() => import('./views/Projects/ProjectsP
 const AnalyticalAccountStatsPage = page(() => import('./views/Projects/AnalyticalAccountStatsPage'), 'AnalyticalAccountStatsPage');
 const CommunicationsPage         = page(() => import('./views/Communications/CommunicationsPage'), 'CommunicationsPage');
 const CommunicationsStatsPage    = page(() => import('./views/Communications/CommunicationsStatsPage'), 'CommunicationsStatsPage');
+const ScheduledSendsPage         = page(() => import('./views/Communications/ScheduledSendsPage'), 'ScheduledSendsPage');
 const ReadCommunicationPage      = page(() => import('./views/Public/ReadCommunicationPage'), 'ReadCommunicationPage');
 const CtaTrackingPage            = page(() => import('./views/Public/CtaTrackingPage'), 'CtaTrackingPage');
 const TaxCalendarPage            = page(() => import('./views/Accounting/TaxCalendarPage'), 'TaxCalendarPage');
@@ -244,6 +245,15 @@ function App() {
             loading ? null
             : isAuthenticated ? <MainLayout><CommunicationsPage /></MainLayout>
             : <Navigate to="/login" />
+          }
+        />
+
+        <Route
+          path="/envios-programados"
+          element={
+            loading ? null
+            : !isAuthenticated ? <Navigate to="/login" />
+            : <BulletinsRoute><MainLayout><ScheduledSendsPage /></MainLayout></BulletinsRoute>
           }
         />
 

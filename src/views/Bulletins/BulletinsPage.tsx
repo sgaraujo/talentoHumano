@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { bulletinService } from '@/services/bulletinService';
 import { useAuth } from '@/hooks/useAuth';
 import type { Bulletin } from '@/models/types/Bulletin';
+import { ScheduledSendsPanel } from '@/components/scheduling/ScheduledSendsPanel';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -103,6 +104,11 @@ export function BulletinsPage() {
           <PlusCircle className="w-4 h-4" />
           Nuevo boletín
         </button>
+      </div>
+
+      {/* Boletines programados que aún no salen (no se muestra si no hay) */}
+      <div className="mb-5 empty:hidden">
+        <ScheduledSendsPanel kind="bulletin" compact />
       </div>
 
       {/* Filters */}

@@ -278,6 +278,17 @@ try {
   await assertFails(getDoc(doc(reviewerDb, 'communications', 'data', 'accounting_messages', 'any')));
   await assertFails(updateDoc(doc(reviewerDb, 'organization', 'data', 'companies', 'company-acc'), { name: 'No permitido' }));
 
+  // ── Envíos programados: TH y admin leen, nadie escribe desde el cliente ──
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'communications', 'data', 'scheduled_sends', 'job-1'), { kind: 'email', status: 'scheduled' });
+  });
+  await assertSucceeds(getDoc(doc(hrDb, 'communications', 'data', 'scheduled_sends', 'job-1')));
+  await assertSucceeds(getDocs(collection(adminDb, 'communications', 'data', 'scheduled_sends')));
+  await assertFails(getDoc(doc(accountingDb, 'communications', 'data', 'scheduled_sends', 'job-1')));
+  await assertFails(getDoc(doc(reviewerDb, 'communications', 'data', 'scheduled_sends', 'job-1')));
+  await assertFails(updateDoc(doc(hrDb, 'communications', 'data', 'scheduled_sends', 'job-1'), { status: 'cancelled' }));
+  await assertFails(setDoc(doc(adminDb, 'communications', 'data', 'scheduled_sends', 'job-2'), { kind: 'email' }));
+
   console.log('OK: reglas verificadas para admin, contabilidad, financiera, TH, revisor fiscal y anónimo.');
 } finally {
   await testEnv.cleanup();

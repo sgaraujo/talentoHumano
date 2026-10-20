@@ -21,6 +21,7 @@ export const FIRESTORE_COLLECTIONS = {
   communications: 'communications/data/messages',
   communicationRecipients: 'communications/data/recipients',
   bulletins: 'communications/data/bulletins',
+  scheduledSends: 'communications/data/scheduled_sends',
 
   movements: 'human_resources/data/movements',
   employees: 'human_resources/data/employees',

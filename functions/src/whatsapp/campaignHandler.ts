@@ -74,14 +74,26 @@ function parseMetaError(rawBody: string): { metaError: MetaError | null; friendl
   return { metaError, friendly };
 }
 
+export type WaCampaignInput = {
+  name?: string; numberId?: string; companyId?: string; projectId?: string;
+  templateId?: string; parameterValues?: Record<string, string>; recipients?: Recipient[];
+};
+
 export const sendWaCampaign = onCall(
   { region: "us-central1", cors: true, timeoutSeconds: 540, memory: "512MiB" },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Debes iniciar sesión.");
-    const { name, numberId, companyId, projectId, templateId, parameterValues, recipients } = (request.data ?? {}) as {
-      name?: string; numberId?: string; companyId?: string; projectId?: string;
-      templateId?: string; parameterValues?: Record<string, string>; recipients?: Recipient[];
-    };
+    return runWaCampaign((request.data ?? {}) as WaCampaignInput, request.auth.uid);
+  }
+);
+
+/**
+ * Crea la campaña y envía la plantilla a cada destinatario. La usan el envío
+ * inmediato (sendWaCampaign) y los envíos programados. Lanza HttpsError si los
+ * datos no son válidos.
+ */
+export async function runWaCampaign(input: WaCampaignInput, createdBy: string) {
+    const { name, numberId, companyId, projectId, templateId, parameterValues, recipients } = input;
     if (!name?.trim() || !numberId || !templateId || !Array.isArray(recipients) || recipients.length === 0) {
       throw new HttpsError("invalid-argument", "Faltan datos de la campaña.");
     }
@@ -144,7 +156,7 @@ export const sendWaCampaign = onCall(
     await campaignRef.set({
       name: name.trim(), numberId, companyId: companyId ?? null, projectId: projectId ?? null,
       templateId, templateName: tpl.providerTemplateName, status: "sending",
-      total: unique.size, sent: 0, failed: 0, createdBy: request.auth.uid,
+      total: unique.size, sent: 0, failed: 0, createdBy,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
 
@@ -274,5 +286,4 @@ export const sendWaCampaign = onCall(
       completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
     return { campaignId: campaignRef.id, queued: unique.size, sent, failed };
-  }
-);
+}

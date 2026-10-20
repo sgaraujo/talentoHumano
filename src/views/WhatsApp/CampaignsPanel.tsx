@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronUp, Download, Eye, FileSpreadsheet, Info, Loader2, Megaphone, RefreshCw, Search, Send, Upload, Users, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Building2, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, Download, Eye, FileSpreadsheet, Info, Loader2, Megaphone, RefreshCw, Search, Send, Upload, Users, X } from "lucide-react";
+import { SchedulePicker, type SendMode } from "@/components/scheduling/SchedulePicker";
+import { ScheduledSendsPanel } from "@/components/scheduling/ScheduledSendsPanel";
+import { bogotaInputToDate, fmtBogota, scheduleSend, scheduleValidationError } from "@/services/scheduledSendService";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { getTemplates, headerMediaAccept, saveTemplateDefaultHeader, syncTemplates, uploadTemplateHeaderMedia } from "@/services/whatsappService";
@@ -108,6 +111,8 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [sendMode, setSendMode] = useState<SendMode>("now");
+  const [scheduleAt, setScheduleAt] = useState("");
   const [campaigns, setCampaigns] = useState<WaCampaignResult[]>([]);
   const [expandedCampaignId, setExpandedCampaignId] = useState("");
   const [campaignRecipients, setCampaignRecipients] = useState<WaCampaignRecipientResult[]>([]);
@@ -249,12 +254,24 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
       toast.error("Esta primera versión admite hasta 500 destinatarios por campaña.");
       return;
     }
+    if (sendMode === "schedule" && scheduleValidationError(scheduleAt)) {
+      toast.error(scheduleValidationError(scheduleAt)!);
+      return;
+    }
     setSending(true);
     try {
-      const result = await sendCampaign({
+      const draft = {
         name: campaignName.trim(), numberId, companyId: companyId || undefined,
         projectId: projectId || undefined, templateId, parameterValues, recipients,
-      });
+      };
+      if (sendMode === "schedule") {
+        // Se valida la plantilla y se envía en el servidor cuando llega la hora.
+        await scheduleSend("whatsapp", scheduleAt, draft.name, JSON.parse(JSON.stringify(draft)));
+        toast.success("Campaña programada", { description: `${recipients.length} destinatarios · ${fmtBogota(bogotaInputToDate(scheduleAt))}` });
+        setCampaignName(""); setExternal([]); setConsentConfirmed(false); setSendMode("now");
+        return;
+      }
+      const result = await sendCampaign(draft);
       if (result.error) {
         toast.error("La campaña se detuvo", { description: result.error, duration: 12000 });
       } else if (result.failed > 0) {
@@ -318,6 +335,9 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2"><Megaphone className="w-5 h-5 text-[#00a884]" /> Nueva campaña</h1>
           <p className="text-sm text-gray-500 mt-1">Combina usuarios de Inteegrados y contactos externos en una sola lista sin duplicados.</p>
         </div>
+
+        {/* Campañas programadas que aún no salen (no se muestra si no hay) */}
+        <ScheduledSendsPanel kind="whatsapp" compact />
 
         <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
           <h2 className="font-semibold text-gray-800">1. Configuración</h2>
@@ -581,9 +601,12 @@ export function CampaignsPanel({ numberId }: { numberId: string }) {
           <div><p className="text-2xl font-bold text-gray-900">{recipients.length}</p><p className="text-sm text-gray-500">destinatarios únicos ({internal.length} internos + {external.length} externos)</p></div>
           <div className="space-y-3 md:max-w-md">
             <label className="flex gap-2 text-xs text-gray-600"><input type="checkbox" checked={consentConfirmed} onChange={e => setConsentConfirmed(e.target.checked)} className="mt-0.5" /><span>Confirmo que los destinatarios autorizaron comunicaciones por WhatsApp y que respetaré las solicitudes de exclusión.</span></label>
-            <button onClick={handleSend} disabled={sending || recipients.length === 0 || !templates.length}
+            <SchedulePicker mode={sendMode} onModeChange={setSendMode} value={scheduleAt} onChange={setScheduleAt} />
+            <button onClick={handleSend}
+              disabled={sending || recipients.length === 0 || !templates.length || (sendMode === "schedule" && !!scheduleValidationError(scheduleAt))}
               className="w-full md:w-auto px-5 py-2.5 rounded-lg bg-[#00a884] text-white font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-40">
-              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Crear y enviar campaña
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : sendMode === "schedule" ? <CalendarClock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+              {sendMode === "schedule" ? " Programar campaña" : " Crear y enviar campaña"}
             </button>
           </div>
         </section>

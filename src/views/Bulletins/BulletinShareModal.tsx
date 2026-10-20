@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Send, Search, Check, User, Building2, X } from 'lucide-react';
+import { Send, Search, Check, User, Building2, X, CalendarClock } from 'lucide-react';
+import { SchedulePicker, type SendMode } from '@/components/scheduling/SchedulePicker';
+import { bogotaInputToDate, fmtBogota, scheduleSend, scheduleValidationError } from '@/services/scheduledSendService';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/config/firebase';
@@ -62,6 +64,8 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
   const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
   const [thCompanies,   setThCompanies]   = useState<Set<string>>(new Set());
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
+  const [sendMode,      setSendMode]      = useState<SendMode>('now');
+  const [scheduleAt,    setScheduleAt]    = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -132,6 +136,7 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
 
   const handleSend = async () => {
     if (selected.size === 0) { toast.error('Selecciona al menos un destinatario'); return; }
+    if (sendMode === 'schedule' && scheduleValidationError(scheduleAt)) { toast.error(scheduleValidationError(scheduleAt)!); return; }
     setSending(true);
     const bulletinUrl = `${window.location.origin}/boletin/${bulletin.id}`;
     const recipients = users
@@ -146,11 +151,23 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
       ? bulletin.introText.slice(0, 200) + (bulletin.introText.length > 200 ? '...' : '')
       : 'Tienes un nuevo boletín disponible.';
 
+    const body = `${bulletin.subtitle ? bulletin.subtitle + '\n\n' : ''}${intro}`;
     try {
+      if (sendMode === 'schedule') {
+        await scheduleSend('bulletin', scheduleAt, bulletin.title, {
+          bulletinId: bulletin.id, title: bulletin.title, body, recipients,
+        });
+        toast.success('Boletín programado', {
+          description: `${recipients.length} destinatario${recipients.length !== 1 ? 's' : ''} · ${fmtBogota(bogotaInputToDate(scheduleAt))}`,
+        });
+        setSendMode('now');
+        onClose();
+        return;
+      }
       const result = await sendCommunicationEmail({
         communicationId: `bulletin_${bulletin.id}`,
         title: bulletin.title,
-        body: `${bulletin.subtitle ? bulletin.subtitle + '\n\n' : ''}${intro}`,
+        body,
         recipients,
         senderKey: 'inteegra',
       });
@@ -285,21 +302,26 @@ export function BulletinShareModal({ bulletin, open, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between pt-3 border-t">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleSend}
-            disabled={sending || selected.size === 0}
-            className="flex items-center gap-2 px-5 py-2 bg-[#008C3C] hover:bg-[#006C2F] text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
-          >
-            <Send className="w-4 h-4" />
-            {sending ? 'Enviando...' : `Enviar a ${selected.size || ''} ${selected.size === 1 ? 'persona' : 'personas'}`}
-          </button>
+        <div className="pt-3 border-t space-y-3">
+          <SchedulePicker mode={sendMode} onModeChange={setSendMode} value={scheduleAt} onChange={setScheduleAt} />
+          <div className="flex items-center justify-between">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleSend}
+              disabled={sending || selected.size === 0 || (sendMode === 'schedule' && !!scheduleValidationError(scheduleAt))}
+              className="flex items-center gap-2 px-5 py-2 bg-[#008C3C] hover:bg-[#006C2F] text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
+            >
+              {sendMode === 'schedule' ? <CalendarClock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+              {sending
+                ? (sendMode === 'schedule' ? 'Programando...' : 'Enviando...')
+                : `${sendMode === 'schedule' ? 'Programar para' : 'Enviar a'} ${selected.size || ''} ${selected.size === 1 ? 'persona' : 'personas'}`}
+            </button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

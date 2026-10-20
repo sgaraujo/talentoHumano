@@ -249,6 +249,12 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+    // Cola de envíos programados (Correos, Boletines, WhatsApp). La crean, cambian
+    // y procesan solo las Cloud Functions; TH la consulta.
+    match /communications/data/scheduled_sends/{sendId} {
+      allow read: if hasRole(['admin', 'talento_humano']);
+      allow write: if false;
+    }
     match /communications/{documentId} {
       allow read: if signedIn();
       allow write: if false;
