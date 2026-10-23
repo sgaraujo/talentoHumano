@@ -62,6 +62,7 @@ identity/data
   platform_roles/{email}
   allowed_emails/{email}
   email_verifications/{email}
+  ticket_board_codes/{employeeId}
 
 whatsapp/data
   numbers/{numberId}/templates/{templateId}
@@ -179,6 +180,10 @@ whatsapp/data
 - `identity/data/allowed_emails` controla qué correos pueden solicitar acceso.
 - `identity/data/email_verifications` almacena códigos temporales y no admite
   acceso directo desde clientes.
+- `identity/data/ticket_board_codes` guarda la huella del código de ingreso por
+  cédula a la Mesa de Ayuda (ticket-board), su vencimiento, intentos y envíos
+  de la última hora. Solo la usa la función `ticketBoardIdentity`; las reglas
+  la deniegan a clientes por no estar inventariada.
 - El 16 de julio de 2026 se copiaron 10 roles, 19 correos autorizados y 14
   verificaciones; los tres conteos terminaron sin faltantes.
 - `identity/data/users` es la ruta canónica de perfiles. El 16 de julio de 2026

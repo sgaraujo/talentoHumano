@@ -113,6 +113,10 @@ export {
   sendOffboardingReminders, scheduledOffboardingReminders,
 } from "./offboarding/offboarding";
 export { scheduleSend, updateScheduledSend, processScheduledSends } from "./scheduling/scheduledSends";
+export {
+  onEmployeeWrittenTicketBoard, onEmploymentWrittenTicketBoard, scheduledTicketBoardSync,
+} from "./ticketBoard/ticketBoardSync";
+export { ticketBoardIdentity } from "./ticketBoard/ticketBoardIdentity";
 
 
 // Único remitente de correo: inteegrados@inteegra.net.co (tenant de inteegra.net.co).
